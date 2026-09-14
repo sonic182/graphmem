@@ -4,7 +4,11 @@ use std::{
 };
 
 use graphmem::{
-    application::{MemoryDetails, MemoryService, RememberRequest},
+    Edge, Entity, GraphDirection, GraphHop, GraphPath,
+    application::{
+        EntityReference, GraphDetails, GraphRequest, MemoryDetails, MemoryService, RelateRequest,
+        RelationDetails, RememberRequest,
+    },
     infrastructure::repository::git_repository_root,
 };
 use rmcp::schemars::JsonSchema;
@@ -71,6 +75,41 @@ struct RecallInput {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct EntityInput {
+    kind: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct RelateInput {
+    source: EntityInput,
+    relation: String,
+    target: EntityInput,
+    #[serde(default)]
+    metadata: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum GraphDirectionInput {
+    Incoming,
+    Outgoing,
+    Both,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GraphInput {
+    kind: String,
+    name: String,
+    #[serde(default)]
+    direction: Option<GraphDirectionInput>,
+    #[serde(default)]
+    max_depth: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct IdInput {
     id: i64,
@@ -100,6 +139,52 @@ struct RecallOutput {
 struct ForgetOutput {
     id: i64,
     forgotten: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct EntityRecord {
+    id: i64,
+    kind: String,
+    name: String,
+    canonical_name: String,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct EdgeRecord {
+    id: i64,
+    source_id: i64,
+    relation: String,
+    target_id: i64,
+    created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct RelationOutput {
+    source: EntityRecord,
+    edge: EdgeRecord,
+    target: EntityRecord,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct GraphHopOutput {
+    entity: EntityRecord,
+    edge: EdgeRecord,
+    direction: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct GraphPathOutput {
+    hops: Vec<GraphHopOutput>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct GraphOutput {
+    entity: EntityRecord,
+    paths: Vec<GraphPathOutput>,
 }
 
 #[tool_router]
@@ -158,6 +243,42 @@ impl MemoryServer {
     }
 
     #[tool(
+        name = "relate",
+        description = "Store a durable directed relationship between named entities. Use source -> relation -> target with a concise snake_case relation such as depends_on, uses, or solved_by. Use this only for verified, reusable facts; it creates missing entities from kind and name, and repeating the same relationship reuses the existing edge."
+    )]
+    fn relate(
+        &self,
+        Parameters(input): Parameters<RelateInput>,
+    ) -> Result<Json<RelationOutput>, CallToolResult> {
+        let details = self
+            .lock()?
+            .relate(RelateRequest {
+                source: entity_reference(input.source),
+                relation: input.relation,
+                target: entity_reference(input.target),
+                metadata: input.metadata,
+            })
+            .map_err(|error| tool_error(error.to_string()))?;
+        Ok(Json(relation_output(details)))
+    }
+
+    #[tool(
+        name = "graph",
+        description = "Inspect verified relationships from a named entity before adding uncertain or duplicate relations. By default, traverse one hop in both directions. Set direction to incoming or outgoing when needed; max_depth is 1 through 3 and limit is 1 through 100. Each result path starts at the requested entity; an incoming hop means the related entity points to the preceding entity."
+    )]
+    fn graph(
+        &self,
+        Parameters(input): Parameters<GraphInput>,
+    ) -> Result<Json<GraphOutput>, CallToolResult> {
+        let request = graph_request(input)?;
+        let details = self
+            .lock()?
+            .graph(request)
+            .map_err(|error| tool_error(error.to_string()))?;
+        Ok(Json(graph_output(details)))
+    }
+
+    #[tool(
         name = "forget",
         description = "Permanently delete one memory by id. Use inspect first when the id or contents are uncertain."
     )]
@@ -197,7 +318,7 @@ impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("gmem", "0.1.0"))
-            .with_instructions("Graphmem is durable, local memory for coding agents. Recall before starting work when prior decisions, repository conventions, or preferences may matter; use the recall tool's FTS5 query guidance. Remember only verified facts, decisions, constraints, preferences, and reusable project rules that will help a future session. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
+            .with_instructions("Graphmem is durable, local memory for coding agents. Recall before starting work when prior decisions, repository conventions, or preferences may matter; use the recall tool's FTS5 query guidance. Remember only verified facts, decisions, constraints, preferences, and reusable project rules that will help a future session. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Use relate for verified entity relationships and graph to inspect their bounded paths. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
     }
 }
 
@@ -213,6 +334,94 @@ fn record(details: MemoryDetails, score: Option<f64>) -> MemoryRecord {
         access_count: details.memory.access_count,
         scopes: details.scopes.into_iter().map(|scope| scope.name).collect(),
         score,
+    }
+}
+
+fn entity_reference(input: EntityInput) -> EntityReference {
+    EntityReference {
+        kind: input.kind,
+        name: input.name,
+    }
+}
+
+fn graph_request(input: GraphInput) -> Result<GraphRequest, CallToolResult> {
+    let max_depth = input.max_depth.unwrap_or(1);
+    if !(1..=3).contains(&max_depth) {
+        return Err(tool_error("max_depth must be between 1 and 3"));
+    }
+    let limit = input.limit.unwrap_or(25);
+    if !(1..=100).contains(&limit) {
+        return Err(tool_error("limit must be between 1 and 100"));
+    }
+    let direction = match input.direction.unwrap_or(GraphDirectionInput::Both) {
+        GraphDirectionInput::Incoming => GraphDirection::Incoming,
+        GraphDirectionInput::Outgoing => GraphDirection::Outgoing,
+        GraphDirectionInput::Both => GraphDirection::Both,
+    };
+    Ok(GraphRequest {
+        entity: EntityReference {
+            kind: input.kind,
+            name: input.name,
+        },
+        direction,
+        max_depth,
+        limit,
+    })
+}
+
+fn entity_record(entity: Entity) -> EntityRecord {
+    EntityRecord {
+        id: entity.id,
+        kind: entity.kind,
+        name: entity.name,
+        canonical_name: entity.canonical_name,
+        created_at: entity.created_at,
+        updated_at: entity.updated_at,
+    }
+}
+
+fn edge_record(edge: Edge) -> EdgeRecord {
+    EdgeRecord {
+        id: edge.id,
+        source_id: edge.source_id,
+        relation: edge.relation,
+        target_id: edge.target_id,
+        created_at: edge.created_at,
+        metadata: edge.metadata,
+    }
+}
+
+fn relation_output(details: RelationDetails) -> RelationOutput {
+    RelationOutput {
+        source: entity_record(details.source),
+        edge: edge_record(details.edge),
+        target: entity_record(details.target),
+    }
+}
+
+fn graph_output(details: GraphDetails) -> GraphOutput {
+    GraphOutput {
+        entity: entity_record(details.entity),
+        paths: details.paths.into_iter().map(graph_path_output).collect(),
+    }
+}
+
+fn graph_path_output(path: GraphPath) -> GraphPathOutput {
+    GraphPathOutput {
+        hops: path.hops.into_iter().map(graph_hop_output).collect(),
+    }
+}
+
+fn graph_hop_output(hop: GraphHop) -> GraphHopOutput {
+    GraphHopOutput {
+        entity: entity_record(hop.entity),
+        edge: edge_record(hop.edge),
+        direction: match hop.direction {
+            GraphDirection::Incoming => "incoming",
+            GraphDirection::Outgoing => "outgoing",
+            GraphDirection::Both => unreachable!(),
+        }
+        .to_owned(),
     }
 }
 

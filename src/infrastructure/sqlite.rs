@@ -8,7 +8,9 @@ use directories::BaseDirs;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 
-use crate::domain::{Edge, Entity, Memory, Scope, SearchResult};
+use crate::domain::{
+    Edge, Entity, GraphDirection, GraphHop, GraphPath, Memory, Scope, SearchResult,
+};
 
 pub type Result<T> = std::result::Result<T, StorageError>;
 
@@ -463,6 +465,26 @@ impl Database {
             .map_err(StorageError::from)
     }
 
+    pub fn get_edge_by_endpoints(
+        &self,
+        source_id: i64,
+        relation: &str,
+        target_id: i64,
+    ) -> Result<Option<Edge>> {
+        validate_text("relation", relation)?;
+        self.connection
+            .query_row(
+                "SELECT id, source_id, relation, target_id, created_at, metadata
+                 FROM edges
+                 WHERE source_id = ?1 AND relation = ?2 AND target_id = ?3
+                 ORDER BY id LIMIT 1",
+                params![source_id, relation.trim(), target_id],
+                edge_from_row,
+            )
+            .optional()
+            .map_err(StorageError::from)
+    }
+
     pub fn update_edge(&self, id: i64, relation: &str, metadata: Option<&str>) -> Result<bool> {
         validate_text("relation", relation)?;
         Ok(self.connection.execute(
@@ -494,12 +516,117 @@ impl Database {
         )
     }
 
+    pub fn graph_paths(
+        &self,
+        entity_id: i64,
+        direction: GraphDirection,
+        max_depth: usize,
+        limit: usize,
+    ) -> Result<Vec<GraphPath>> {
+        let max_depth = i64::try_from(max_depth).map_err(|_| StorageError::Invalid {
+            field: "max_depth",
+            message: "is too large",
+        })?;
+        let limit = limit_value(limit)?;
+        let steps = match direction {
+            GraphDirection::Outgoing => {
+                "SELECT source_id AS from_id, target_id AS node_id, id AS edge_id, 'outgoing' AS direction FROM edges"
+            }
+            GraphDirection::Incoming => {
+                "SELECT target_id AS from_id, source_id AS node_id, id AS edge_id, 'incoming' AS direction FROM edges"
+            }
+            GraphDirection::Both => {
+                "SELECT source_id AS from_id, target_id AS node_id, id AS edge_id, 'outgoing' AS direction FROM edges
+                 UNION ALL
+                 SELECT target_id AS from_id, source_id AS node_id, id AS edge_id, 'incoming' AS direction FROM edges"
+            }
+        };
+        let sql = format!(
+            "WITH RECURSIVE paths(node_id, depth, nodes, edge_ids, directions) AS (
+                 VALUES (?1, 0, printf(',%d,', ?1), '', '')
+                 UNION ALL
+                 SELECT step.node_id,
+                        paths.depth + 1,
+                        paths.nodes || step.node_id || ',',
+                        paths.edge_ids || step.edge_id || ',',
+                        paths.directions || step.direction || ','
+                 FROM paths
+                 JOIN ({steps}) AS step ON step.from_id = paths.node_id
+                 WHERE paths.depth < ?2
+                   AND instr(paths.nodes, printf(',%d,', step.node_id)) = 0
+             )
+             SELECT edge_ids, directions
+             FROM paths
+             WHERE depth > 0
+             ORDER BY depth, edge_ids
+             LIMIT ?3"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement
+            .query_map(params![entity_id, max_depth, limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(edge_ids, directions)| self.graph_path(&edge_ids, &directions))
+            .collect()
+    }
+
     fn list_edges(&self, sql: &str, id: i64) -> Result<Vec<Edge>> {
         let mut statement = self.connection.prepare(sql)?;
         let edges = statement
             .query_map([id], edge_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(edges)
+    }
+
+    fn graph_path(&self, edge_ids: &str, directions: &str) -> Result<GraphPath> {
+        let edge_ids = edge_ids
+            .split(',')
+            .filter(|id| !id.is_empty())
+            .map(|id| {
+                id.parse::<i64>().map_err(|_| StorageError::Invalid {
+                    field: "graph path",
+                    message: "contains an invalid edge id",
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let directions = directions
+            .split(',')
+            .filter(|direction| !direction.is_empty())
+            .map(graph_direction)
+            .collect::<Result<Vec<_>>>()?;
+        if edge_ids.len() != directions.len() {
+            return Err(StorageError::Invalid {
+                field: "graph path",
+                message: "has mismatched edges and directions",
+            });
+        }
+        let hops = edge_ids
+            .into_iter()
+            .zip(directions)
+            .map(|(edge_id, direction)| {
+                let edge = self.get_edge(edge_id)?.ok_or(StorageError::Invalid {
+                    field: "graph path",
+                    message: "references a missing edge",
+                })?;
+                let entity_id = match direction {
+                    GraphDirection::Outgoing => edge.target_id,
+                    GraphDirection::Incoming => edge.source_id,
+                    GraphDirection::Both => unreachable!(),
+                };
+                let entity = self.get_entity(entity_id)?.ok_or(StorageError::Invalid {
+                    field: "graph path",
+                    message: "references a missing entity",
+                })?;
+                Ok(GraphHop {
+                    entity,
+                    edge,
+                    direction,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(GraphPath { hops })
     }
 
     fn with_transaction<F, T>(&mut self, operation: F) -> Result<T>
@@ -651,6 +778,17 @@ fn edge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Edge> {
         created_at: row.get(4)?,
         metadata: row.get(5)?,
     })
+}
+
+fn graph_direction(value: &str) -> Result<GraphDirection> {
+    match value {
+        "incoming" => Ok(GraphDirection::Incoming),
+        "outgoing" => Ok(GraphDirection::Outgoing),
+        _ => Err(StorageError::Invalid {
+            field: "graph path",
+            message: "contains an invalid direction",
+        }),
+    }
 }
 
 fn validate_text(field: &'static str, value: &str) -> Result<()> {

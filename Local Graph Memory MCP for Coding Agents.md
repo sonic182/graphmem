@@ -1282,11 +1282,11 @@ recall the memory
 # 35. Phase 6: Graph relationships
 
 - [x] Implement entity creation
-- [ ] Implement entity normalization
+- [x] Implement entity normalization
 - [x] Implement edge creation
 - [x] Implement incoming relationship lookup
 - [x] Implement outgoing relationship lookup
-- [ ] Implement recursive traversal
+- [x] Implement recursive traversal
 - [ ] Apply graph proximity to retrieval
 - [ ] Add `gmem graph` CLI inspection
 - [x] Add graph tests
@@ -1424,8 +1424,8 @@ Tests should focus on behavior rather than implementation details.
 
 - [x] incoming relationships work
 - [x] outgoing relationships work
-- [ ] bounded recursive traversal works
-- [ ] cycles do not cause infinite traversal
+- [x] bounded recursive traversal works
+- [x] cycles do not cause infinite traversal
 
 ## MCP
 
@@ -1501,8 +1501,8 @@ The MVP is complete when:
 - [x] memories persist under the user's local data directory
 - [x] memories support scopes
 - [x] SQLite FTS search works
-- [ ] Claude Code can use it over MCP stdio
-- [ ] Codex can use it over MCP stdio
+- [x] Claude Code can use it over MCP stdio
+- [x] Codex can use it over MCP stdio
 - [x] memories survive client/process restarts
 - [ ] repository memories can override global/user memories
 - [x] the user can inspect memories from the CLI

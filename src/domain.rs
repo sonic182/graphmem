@@ -42,3 +42,22 @@ pub struct Edge {
     pub created_at: i64,
     pub metadata: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphDirection {
+    Incoming,
+    Outgoing,
+    Both,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphHop {
+    pub entity: Entity,
+    pub edge: Edge,
+    pub direction: GraphDirection,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphPath {
+    pub hops: Vec<GraphHop>,
+}

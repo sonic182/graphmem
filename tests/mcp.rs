@@ -83,7 +83,7 @@ fn serves_memory_lifecycle_over_stdio() {
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
-    assert_eq!(listed_tools.len(), 4);
+    assert_eq!(listed_tools.len(), 6);
     assert!(
         listed_tools
             .iter()
@@ -93,7 +93,10 @@ fn serves_memory_lifecycle_over_stdio() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(names, ["forget", "inspect", "recall", "remember"]);
+    assert_eq!(
+        names,
+        ["forget", "graph", "inspect", "recall", "relate", "remember"]
+    );
     let recall = listed_tools
         .iter()
         .find(|tool| tool["name"] == "recall")
@@ -267,4 +270,111 @@ fn omitted_scopes_default_to_the_server_repository() {
     assert_eq!(memories[1]["scopes"], json!(["global"]));
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP test data is removed");
+}
+
+#[test]
+fn relates_normalized_entities_and_traverses_bounded_paths() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-graph-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let api_to_sqlite = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"relate","arguments":{"source":{"kind":" Component ","name":" API "},"relation":"depends_on","target":{"kind":"database","name":"SQLite"},"metadata":"first metadata"}}),
+    );
+    let api_id = api_to_sqlite["result"]["structuredContent"]["source"]["id"]
+        .as_i64()
+        .expect("API id");
+    let edge_id = api_to_sqlite["result"]["structuredContent"]["edge"]["id"]
+        .as_i64()
+        .expect("edge id");
+    assert_eq!(
+        api_to_sqlite["result"]["structuredContent"]["source"]["canonical_name"],
+        "api"
+    );
+    let repeated = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"relate","arguments":{"source":{"kind":"component","name":"api"},"relation":"depends_on","target":{"kind":"database","name":"sqlite"},"metadata":"ignored metadata"}}),
+    );
+    assert_eq!(
+        repeated["result"]["structuredContent"]["source"]["id"],
+        api_id
+    );
+    assert_eq!(
+        repeated["result"]["structuredContent"]["edge"]["id"],
+        edge_id
+    );
+    assert_eq!(
+        repeated["result"]["structuredContent"]["edge"]["metadata"],
+        "first metadata"
+    );
+    mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"relate","arguments":{"source":{"kind":"database","name":"SQLite"},"relation":"uses","target":{"kind":"language","name":"Rust"}}}),
+    );
+    mcp.request(
+        5,
+        "tools/call",
+        json!({"name":"relate","arguments":{"source":{"kind":"language","name":"Rust"},"relation":"supports","target":{"kind":"component","name":"API"}}}),
+    );
+
+    let outgoing = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"graph","arguments":{"kind":"component","name":"api","direction":"outgoing","max_depth":3,"limit":25}}),
+    );
+    let paths = outgoing["result"]["structuredContent"]["paths"]
+        .as_array()
+        .expect("outgoing paths");
+    assert!(paths.iter().any(|path| {
+        path["hops"].as_array().is_some_and(|hops| {
+            hops.len() == 2
+                && hops[1]["entity"]["name"] == "Rust"
+                && hops.iter().all(|hop| hop["direction"] == "outgoing")
+        })
+    }));
+    assert!(paths.iter().all(|path| {
+        path["hops"]
+            .as_array()
+            .is_none_or(|hops| hops.iter().all(|hop| hop["entity"]["id"] != api_id))
+    }));
+
+    let incoming = mcp.request(
+        7,
+        "tools/call",
+        json!({"name":"graph","arguments":{"kind":"language","name":"rust","direction":"incoming","max_depth":2}}),
+    );
+    let paths = incoming["result"]["structuredContent"]["paths"]
+        .as_array()
+        .expect("incoming paths");
+    assert!(paths.iter().any(|path| {
+        path["hops"].as_array().is_some_and(|hops| {
+            hops.len() == 2
+                && hops[1]["entity"]["name"] == "API"
+                && hops.iter().all(|hop| hop["direction"] == "incoming")
+        })
+    }));
+    assert_eq!(
+        mcp.request(
+            8,
+            "tools/call",
+            json!({"name":"graph","arguments":{"kind":"component","name":"api","max_depth":4}}),
+        )["result"]["isError"],
+        true
+    );
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
 }

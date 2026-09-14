@@ -2,7 +2,9 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::{Database, Memory, Scope, SearchResult, StorageError};
+use crate::{
+    Database, Edge, Entity, GraphDirection, GraphPath, Memory, Scope, SearchResult, StorageError,
+};
 
 pub type Result<T> = std::result::Result<T, ApplicationError>;
 
@@ -24,6 +26,36 @@ pub struct RememberRequest {
 pub struct MemoryDetails {
     pub memory: Memory,
     pub scopes: Vec<Scope>,
+}
+
+pub struct EntityReference {
+    pub kind: String,
+    pub name: String,
+}
+
+pub struct RelateRequest {
+    pub source: EntityReference,
+    pub relation: String,
+    pub target: EntityReference,
+    pub metadata: Option<String>,
+}
+
+pub struct RelationDetails {
+    pub source: Entity,
+    pub edge: Edge,
+    pub target: Entity,
+}
+
+pub struct GraphRequest {
+    pub entity: EntityReference,
+    pub direction: GraphDirection,
+    pub max_depth: usize,
+    pub limit: usize,
+}
+
+pub struct GraphDetails {
+    pub entity: Entity,
+    pub paths: Vec<GraphPath>,
 }
 
 pub struct MemoryService {
@@ -126,5 +158,62 @@ impl MemoryService {
 
     pub fn scopes(&self) -> Result<Vec<Scope>> {
         Ok(self.database.list_scopes()?)
+    }
+
+    pub fn relate(&self, request: RelateRequest) -> Result<RelationDetails> {
+        let source = self.find_or_create_entity(request.source)?;
+        let target = self.find_or_create_entity(request.target)?;
+        let edge =
+            match self
+                .database
+                .get_edge_by_endpoints(source.id, &request.relation, target.id)?
+            {
+                Some(edge) => edge,
+                None => self.database.create_edge(
+                    source.id,
+                    &request.relation,
+                    target.id,
+                    request.metadata.as_deref(),
+                )?,
+            };
+        Ok(RelationDetails {
+            source,
+            edge,
+            target,
+        })
+    }
+
+    pub fn graph(&self, request: GraphRequest) -> Result<GraphDetails> {
+        let entity = self.find_entity(request.entity)?;
+        Ok(GraphDetails {
+            paths: self.database.graph_paths(
+                entity.id,
+                request.direction,
+                request.max_depth,
+                request.limit,
+            )?,
+            entity,
+        })
+    }
+
+    fn find_entity(&self, entity: EntityReference) -> Result<Entity> {
+        let kind = entity.kind.trim().to_lowercase();
+        let canonical_name = entity.name.trim().to_lowercase();
+        self.database
+            .get_entity_by_canonical(&kind, &canonical_name)?
+            .ok_or(ApplicationError::NotFound("entity"))
+    }
+
+    fn find_or_create_entity(&self, entity: EntityReference) -> Result<Entity> {
+        let kind = entity.kind.trim().to_lowercase();
+        let name = entity.name.trim();
+        let canonical_name = name.to_lowercase();
+        match self
+            .database
+            .get_entity_by_canonical(&kind, &canonical_name)?
+        {
+            Some(entity) => Ok(entity),
+            None => Ok(self.database.create_entity(&kind, name, &canonical_name)?),
+        }
     }
 }
