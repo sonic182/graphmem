@@ -12,7 +12,7 @@ Graphmem has two separate stores:
 - Narrative memory is scoped, searchable text. Use `recall`, `remember`, `inspect`, and `forget`.
 - The entity graph is unscoped structured relationships. Use `graph` and `relate`.
 
-Neither store updates the other. Use both only when a verified relationship also needs explanatory context.
+The stores remain separate, but `recall` boosts narrative memories that mention a query-matched entity or its one-hop graph neighbors. When a verified relationship gives useful retrieval context, record it with `relate` and use the entities' canonical names in related narrative memories.
 
 ## During development
 
