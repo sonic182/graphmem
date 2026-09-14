@@ -147,3 +147,34 @@ fn rejects_invalid_values_and_duplicate_entities() {
     drop(database);
     remove_database(&path);
 }
+
+#[test]
+fn flush_clears_memory_scopes_and_graph() {
+    let (mut database, path) = test_database();
+    let memory = database
+        .create_memory("temporary memory", "fact", 0.0)
+        .expect("memory is created");
+    let scope = database.create_scope("global").expect("scope is created");
+    database
+        .attach_scopes(memory.id, &[scope.id])
+        .expect("scope is attached");
+    let source = database
+        .create_entity("component", "API", "api")
+        .expect("source is created");
+    let target = database
+        .create_entity("database", "SQLite", "sqlite")
+        .expect("target is created");
+    let edge = database
+        .create_edge(source.id, "depends_on", target.id, None)
+        .expect("edge is created");
+
+    database.flush().expect("database is flushed");
+
+    assert!(database.list_memories(10).unwrap().is_empty());
+    assert!(database.list_scopes().unwrap().is_empty());
+    assert!(database.get_entity(source.id).unwrap().is_none());
+    assert!(database.get_entity(target.id).unwrap().is_none());
+    assert!(database.get_edge(edge.id).unwrap().is_none());
+    drop(database);
+    remove_database(&path);
+}

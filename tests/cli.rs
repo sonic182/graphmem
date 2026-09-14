@@ -90,5 +90,19 @@ fn memory_lifecycle_works_across_cli_processes() {
     let invalid = run(&data_dir, &["show", "invalid"]);
     assert!(!invalid.status.success());
 
+    let flush_without_confirmation = run(&data_dir, &["flush"]);
+    assert!(!flush_without_confirmation.status.success());
+    assert!(
+        String::from_utf8_lossy(&flush_without_confirmation.stderr).contains("rerun with --yes")
+    );
+    stdout(run(
+        &data_dir,
+        &["remember", "temporary memory before flush"],
+    ));
+    let flushed = stdout(run(&data_dir, &["flush", "--yes"]));
+    assert_eq!(flushed, "flushed all memories and graph data\n");
+    assert!(stdout(run(&data_dir, &["list"])).is_empty());
+    assert!(stdout(run(&data_dir, &["scopes"])).is_empty());
+
     fs::remove_dir_all(data_dir).expect("test data directory is removed");
 }

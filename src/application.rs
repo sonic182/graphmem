@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::{
     Database, Edge, Entity, GraphDirection, GraphPath, Memory, Scope, SearchResult, StorageError,
+    StoreStats,
 };
 
 pub type Result<T> = std::result::Result<T, ApplicationError>;
@@ -71,6 +72,10 @@ impl MemoryService {
 
     pub fn database_path(&self) -> &Path {
         self.database.path()
+    }
+
+    pub fn stats(&self) -> Result<StoreStats> {
+        Ok(self.database.stats()?)
     }
 
     pub fn remember(&mut self, request: RememberRequest) -> Result<Memory> {
@@ -154,6 +159,10 @@ impl MemoryService {
         } else {
             Err(ApplicationError::NotFound("memory"))
         }
+    }
+
+    pub fn flush(&mut self) -> Result<()> {
+        Ok(self.database.flush()?)
     }
 
     pub fn scopes(&self) -> Result<Vec<Scope>> {

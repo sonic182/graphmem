@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 
 use crate::domain::{
-    Edge, Entity, GraphDirection, GraphHop, GraphPath, Memory, Scope, SearchResult,
+    Edge, Entity, GraphDirection, GraphHop, GraphPath, Memory, Scope, SearchResult, StoreStats,
 };
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -68,6 +68,27 @@ impl Database {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn stats(&self) -> Result<StoreStats> {
+        self.connection
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM memories),
+                    (SELECT COUNT(*) FROM scopes),
+                    (SELECT COUNT(*) FROM entities),
+                    (SELECT COUNT(*) FROM edges)",
+                [],
+                |row| {
+                    Ok(StoreStats {
+                        memories: row.get(0)?,
+                        scopes: row.get(1)?,
+                        entities: row.get(2)?,
+                        edges: row.get(3)?,
+                    })
+                },
+            )
+            .map_err(StorageError::from)
     }
 
     pub fn create_memory(
@@ -132,6 +153,16 @@ impl Database {
             .connection
             .execute("DELETE FROM memories WHERE id = ?1", [id])?
             == 1)
+    }
+
+    pub fn flush(&mut self) -> Result<()> {
+        self.with_transaction(|transaction| {
+            transaction.execute("DELETE FROM memories", [])?;
+            transaction.execute("DELETE FROM scopes", [])?;
+            transaction.execute("DELETE FROM edges", [])?;
+            transaction.execute("DELETE FROM entities", [])?;
+            Ok(())
+        })
     }
 
     pub fn list_memories(&self, limit: usize) -> Result<Vec<Memory>> {

@@ -61,3 +61,11 @@ pub struct GraphHop {
 pub struct GraphPath {
     pub hops: Vec<GraphHop>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreStats {
+    pub memories: i64,
+    pub scopes: i64,
+    pub entities: i64,
+    pub edges: i64,
+}

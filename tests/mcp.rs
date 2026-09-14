@@ -85,7 +85,7 @@ fn serves_memory_lifecycle_over_stdio() {
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
-    assert_eq!(listed_tools.len(), 6);
+    assert_eq!(listed_tools.len(), 7);
     assert!(
         listed_tools
             .iter()
@@ -97,7 +97,9 @@ fn serves_memory_lifecycle_over_stdio() {
         .collect::<Vec<_>>();
     assert_eq!(
         names,
-        ["forget", "graph", "inspect", "recall", "relate", "remember"]
+        [
+            "forget", "graph", "inspect", "recall", "relate", "remember", "stats"
+        ]
     );
     let recall = listed_tools
         .iter()
@@ -108,6 +110,16 @@ fn serves_memory_lifecycle_over_stdio() {
     assert!(description.contains("https://sqlite.org/fts5.html"));
     assert!(description.contains("server's working directory"));
     assert!(description.contains("not the entity graph"));
+    let stats = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "stats")
+        .expect("stats tool is listed");
+    assert!(
+        stats["description"]
+            .as_str()
+            .unwrap()
+            .contains("counts only")
+    );
 
     let invalid = mcp.request(
         8,
@@ -377,6 +389,51 @@ fn relates_normalized_entities_and_traverses_bounded_paths() {
             json!({"name":"graph","arguments":{"kind":"component","name":"api","max_depth":4}}),
         )["result"]["isError"],
         true
+    );
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn stats_reports_both_stores_without_mutating_them() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-stats-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let empty = mcp.request(2, "tools/call", json!({"name":"stats","arguments":{}}));
+    assert_eq!(
+        empty["result"]["structuredContent"],
+        json!({"memories":0,"scopes":0,"entities":0,"edges":0})
+    );
+    mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"stats test memory","scopes":["global"]}}),
+    );
+    mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"relate","arguments":{"source":{"kind":"component","name":"API"},"relation":"uses","target":{"kind":"database","name":"SQLite"}}}),
+    );
+    let populated = mcp.request(5, "tools/call", json!({"name":"stats","arguments":{}}));
+    assert_eq!(
+        populated["result"]["structuredContent"],
+        json!({"memories":1,"scopes":1,"entities":2,"edges":1})
+    );
+    let repeated = mcp.request(6, "tools/call", json!({"name":"stats","arguments":{}}));
+    assert_eq!(
+        repeated["result"]["structuredContent"],
+        populated["result"]["structuredContent"]
     );
     drop(mcp);
     fs::remove_dir_all(home).expect("MCP test data is removed");

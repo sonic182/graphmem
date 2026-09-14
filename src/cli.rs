@@ -20,6 +20,7 @@ enum Command {
     Show { id: i64 },
     Search(SearchArgs),
     Forget { id: i64 },
+    Flush(FlushArgs),
     Scopes,
     Doctor,
     Mcp,
@@ -51,6 +52,12 @@ struct SearchArgs {
     scopes: Vec<String>,
     #[arg(long, default_value_t = 10)]
     limit: usize,
+}
+
+#[derive(Args)]
+struct FlushArgs {
+    #[arg(long)]
+    yes: bool,
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
@@ -86,6 +93,14 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             let service = MemoryService::open_default()?;
             service.forget(id)?;
             println!("forgot: {id}");
+        }
+        Command::Flush(args) => {
+            if !args.yes {
+                return Err(std::io::Error::other("refusing to flush; rerun with --yes").into());
+            }
+            let mut service = MemoryService::open_default()?;
+            service.flush()?;
+            println!("flushed all memories and graph data");
         }
         Command::Scopes => {
             let service = MemoryService::open_default()?;

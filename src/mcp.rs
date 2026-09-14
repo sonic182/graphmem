@@ -4,7 +4,7 @@ use std::{
 };
 
 use graphmem::{
-    Edge, Entity, GraphDirection, GraphHop, GraphPath,
+    Edge, Entity, GraphDirection, GraphHop, GraphPath, StoreStats,
     application::{
         EntityReference, GraphDetails, GraphRequest, MemoryDetails, MemoryService, RelateRequest,
         RelationDetails, RememberRequest,
@@ -142,6 +142,14 @@ struct ForgetOutput {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+struct StatsOutput {
+    memories: i64,
+    scopes: i64,
+    entities: i64,
+    edges: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 struct EntityRecord {
     id: i64,
     kind: String,
@@ -243,6 +251,18 @@ impl MemoryServer {
     }
 
     #[tool(
+        name = "stats",
+        description = "Report read-only totals for both separate local stores: all scoped narrative memories and scopes, plus all unscoped graph entities and edges. This returns counts only; use recall for memory content and graph for relationship paths."
+    )]
+    fn stats(&self) -> Result<Json<StatsOutput>, CallToolResult> {
+        let stats = self
+            .lock()?
+            .stats()
+            .map_err(|error| tool_error(error.to_string()))?;
+        Ok(Json(stats_output(stats)))
+    }
+
+    #[tool(
         name = "relate",
         description = "Store a graph-only, durable directed relationship between named entities; it does not create or link a narrative memory. Use source -> relation -> target with a concise snake_case relation such as depends_on, uses, or solved_by. Use this only for verified, reusable facts; it creates missing entities from kind and name, and repeating the same relationship reuses the existing edge. Graph entities and edges are currently unscoped, so every graph query sees the same local graph."
     )]
@@ -318,7 +338,7 @@ impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("gmem", "0.1.0"))
-            .with_instructions("Graphmem has two separate local stores. Narrative memory is scoped, searchable text: use remember for verified facts, decisions, rationale, constraints, preferences, and reusable project rules; use recall before work when that context may matter. The entity graph is unscoped structured data: use relate for verified source -> relation -> target facts and graph to inspect their bounded paths. A memory never creates or links an entity or edge, and an edge never creates or links a memory; store both when a relationship needs an explanation. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted memory scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
+            .with_instructions("Graphmem has two separate local stores. Narrative memory is scoped, searchable text: use remember for verified facts, decisions, rationale, constraints, preferences, and reusable project rules; use recall before work when that context may matter. The entity graph is unscoped structured data: use relate for verified source -> relation -> target facts and graph to inspect their bounded paths. Use stats for read-only counts of both stores. A memory never creates or links an entity or edge, and an edge never creates or links a memory; store both when a relationship needs an explanation. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted memory scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
     }
 }
 
@@ -334,6 +354,15 @@ fn record(details: MemoryDetails, score: Option<f64>) -> MemoryRecord {
         access_count: details.memory.access_count,
         scopes: details.scopes.into_iter().map(|scope| scope.name).collect(),
         score,
+    }
+}
+
+fn stats_output(stats: StoreStats) -> StatsOutput {
+    StatsOutput {
+        memories: stats.memories,
+        scopes: stats.scopes,
+        entities: stats.entities,
+        edges: stats.edges,
     }
 }
 
