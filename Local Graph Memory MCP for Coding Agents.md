@@ -773,19 +773,9 @@ serde_json
 
 ## IDs
 
-Prefer:
-
-```text
-UUIDv7
-```
-
-using:
-
-```text
-uuid
-```
-
-UUIDv7 provides roughly time-ordered identifiers while remaining globally unique.
+Use SQLite `INTEGER PRIMARY KEY AUTOINCREMENT` IDs throughout the domain and
+storage layers. Expose them as positive JSON numbers; existing UUID databases
+are outside the supported alpha compatibility surface and must be reset.
 
 ---
 
@@ -1140,7 +1130,7 @@ without changing the deployment architecture.
 - [x] Add `clap`
 - [x] Add `serde`
 - [x] Add `serde_json`
-- [x] Add `uuid` with UUIDv7 support
+- [x] Use SQLite autoincrementing integer IDs
 - [x] Add `directories`
 - [x] Add `tracing`
 - [x] Add `thiserror`
@@ -1547,11 +1537,6 @@ clap = { version = "4", features = ["derive"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-uuid = { version = "1", features = [
-    "v7",
-    "serde"
-] }
 
 directories = "*"
 

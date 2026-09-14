@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "gmem-dev": {
+      "type": "stdio",
+      "command": "/home/johanderson/sandbox/graphmem/target/debug/gmem",
+      "args": [
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}

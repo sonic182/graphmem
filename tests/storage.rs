@@ -1,14 +1,18 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use graphmem::Database;
-use uuid::Uuid;
 
 fn test_database() -> (Database, PathBuf) {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
     let path = std::env::temp_dir()
-        .join(format!("graphmem-test-{}", Uuid::now_v7()))
+        .join(format!("graphmem-test-{}-{nonce}", std::process::id()))
         .join("memory.sqlite");
     let database = Database::open(&path).expect("database opens");
     (database, path)
@@ -26,12 +30,15 @@ fn reopens_and_supports_memory_scope_crud() {
     let memory = database
         .create_memory("  use nextest  ", "convention", 0.8)
         .expect("memory is created");
+    assert!(memory.id > 0);
     let repository = database
         .create_scope(" repo:/workspace/project ")
         .expect("scope is created");
     let user = database
         .create_scope("user:test")
         .expect("scope is created");
+    assert!(repository.id > 0);
+    assert!(user.id > repository.id);
 
     database
         .attach_scopes(memory.id, &[repository.id, user.id])
@@ -66,6 +73,8 @@ fn supports_entity_and_edge_crud_with_directional_lookup() {
     let target = database
         .create_entity("library", "SQLite", "sqlite")
         .expect("target is created");
+    assert!(source.id > 0);
+    assert!(target.id > source.id);
     let edge = database
         .create_edge(
             source.id,
@@ -74,6 +83,7 @@ fn supports_entity_and_edge_crud_with_directional_lookup() {
             Some("runtime dependency"),
         )
         .expect("edge is created");
+    assert!(edge.id > 0);
 
     assert_eq!(
         database.list_outgoing_edges(source.id).unwrap(),
@@ -102,7 +112,7 @@ fn failed_scope_batch_rolls_back_all_associations() {
         .expect("memory is created");
     let scope = database.create_scope("global").expect("scope is created");
 
-    let result = database.attach_scopes(memory.id, &[scope.id, Uuid::now_v7()]);
+    let result = database.attach_scopes(memory.id, &[scope.id, i64::MAX]);
     assert!(result.is_err());
     assert!(database.list_memory_scopes(memory.id).unwrap().is_empty());
 
@@ -112,7 +122,11 @@ fn failed_scope_batch_rolls_back_all_associations() {
 
 #[test]
 fn default_database_uses_graphmem_home_override() {
-    let root = std::env::temp_dir().join(format!("graphmem-home-{}", Uuid::now_v7()));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("graphmem-home-{}-{nonce}", std::process::id()));
     unsafe { std::env::set_var("GRAPHMEM_HOME", &root) };
     let database = Database::open_default().expect("default database opens");
     drop(database);

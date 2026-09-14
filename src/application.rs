@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::{Database, Memory, Scope, SearchResult, StorageError};
 
@@ -83,7 +82,7 @@ impl MemoryService {
         }
     }
 
-    pub fn show(&self, id: Uuid) -> Result<MemoryDetails> {
+    pub fn show(&self, id: i64) -> Result<MemoryDetails> {
         let memory = self
             .database
             .get_memory(id)?
@@ -117,7 +116,7 @@ impl MemoryService {
             .search_memories_in_scopes(query, &scopes, limit)?)
     }
 
-    pub fn forget(&self, id: Uuid) -> Result<()> {
+    pub fn forget(&self, id: i64) -> Result<()> {
         if self.database.delete_memory(id)? {
             Ok(())
         } else {

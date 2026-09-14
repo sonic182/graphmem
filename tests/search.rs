@@ -2,16 +2,21 @@ use std::{
     fs,
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use graphmem::Database;
-use rusqlite::Connection;
-use uuid::Uuid;
 
 fn test_database() -> (Database, PathBuf) {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
     let path = std::env::temp_dir()
-        .join(format!("graphmem-search-test-{}", Uuid::now_v7()))
+        .join(format!(
+            "graphmem-search-test-{}-{nonce}",
+            std::process::id()
+        ))
         .join("memory.sqlite");
     let database = Database::open(&path).expect("database opens");
     (database, path)
@@ -24,60 +29,12 @@ fn remove_database(path: &Path) {
 }
 
 #[test]
-fn initializes_current_schema_and_backfills_existing_memories() {
-    let path = std::env::temp_dir()
-        .join(format!("graphmem-search-schema-{}", Uuid::now_v7()))
-        .join("memory.sqlite");
-    fs::create_dir_all(path.parent().unwrap()).expect("test database directory is created");
-    let memory_id = Uuid::now_v7();
-    let connection = Connection::open(&path).expect("database opens");
-    connection
-        .execute_batch(&format!(
-            "CREATE TABLE memories (
-                 id TEXT PRIMARY KEY NOT NULL,
-                 content TEXT NOT NULL,
-                 memory_type TEXT NOT NULL,
-                 importance REAL NOT NULL DEFAULT 0.0,
-                 created_at INTEGER NOT NULL,
-                 updated_at INTEGER NOT NULL,
-                 last_accessed_at INTEGER,
-                 access_count INTEGER NOT NULL DEFAULT 0 CHECK (access_count >= 0)
-             );
-             CREATE TABLE scopes (
-                 id TEXT PRIMARY KEY NOT NULL,
-                 name TEXT NOT NULL UNIQUE,
-                 created_at INTEGER NOT NULL
-             );
-             CREATE TABLE memory_scopes (
-                 memory_id TEXT NOT NULL,
-                 scope_id TEXT NOT NULL,
-                 PRIMARY KEY (memory_id, scope_id)
-             );
-             INSERT INTO memories
-                 (id, content, memory_type, importance, created_at, updated_at)
-                 VALUES ('{memory_id}', 'legacy retry convention', 'fact', 0.5, 1, 1);
-             "
-        ))
-        .expect("existing schema is created");
-    drop(connection);
-
-    let database = Database::open(&path).expect("database opens with current schema");
-    let results = database
-        .search_memories("legacy", None, 10)
-        .expect("existing memory is searchable");
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].memory.id, memory_id);
-    assert!(results[0].score.is_finite());
-    drop(database);
-    remove_database(&path);
-}
-
-#[test]
 fn fts_tracks_memory_insert_update_and_delete() {
     let (database, path) = test_database();
     let memory = database
         .create_memory("retry queue convention", "fact", 0.0)
         .expect("memory is created");
+    assert!(memory.id > 0);
     assert_eq!(
         database.search_memories("retry", None, 10).unwrap().len(),
         1
@@ -104,6 +61,10 @@ fn fts_tracks_memory_insert_update_and_delete() {
             .unwrap()
             .is_empty()
     );
+    let replacement = database
+        .create_memory("replacement", "fact", 0.0)
+        .expect("replacement memory is created");
+    assert!(replacement.id > memory.id);
     drop(database);
     remove_database(&path);
 }
@@ -139,6 +100,20 @@ fn supports_literal_fts_operators() {
             .len(),
         1
     );
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
+fn hyphenated_query_terms_do_not_error() {
+    let (database, path) = test_database();
+    database
+        .create_memory("smoke test entry", "fact", 0.0)
+        .expect("memory is created");
+    let results = database
+        .search_memories("smoke-test", None, 10)
+        .expect("hyphenated query does not error");
+    assert_eq!(results.len(), 1);
     drop(database);
     remove_database(&path);
 }

@@ -1,8 +1,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 struct Mcp {
     child: Child,
@@ -54,8 +54,12 @@ impl Drop for Mcp {
 
 #[test]
 fn serves_memory_lifecycle_over_stdio() {
-    let id = Uuid::now_v7();
-    let home = std::env::temp_dir().join(format!("graphmem-mcp-test-{id}"));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home =
+        std::env::temp_dir().join(format!("graphmem-mcp-test-{}-{nonce}", std::process::id()));
     let mut mcp = Mcp::start(&home);
     let initialized = mcp.request(
         1,
@@ -65,13 +69,25 @@ fn serves_memory_lifecycle_over_stdio() {
     assert_eq!(initialized["result"]["serverInfo"]["name"], "gmem");
 
     let tools = mcp.request(2, "tools/list", json!({}));
-    let names = tools["result"]["tools"]
-        .as_array()
-        .expect("tool list")
+    let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
+    assert_eq!(listed_tools.len(), 4);
+    assert!(
+        listed_tools
+            .iter()
+            .all(|tool| { tool["inputSchema"].is_object() && tool["outputSchema"].is_object() })
+    );
+    let names = listed_tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(names, ["forget", "inspect", "recall", "remember"]);
+
+    let invalid = mcp.request(
+        8,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":"not-a-number"}}),
+    );
+    assert_eq!(invalid["result"]["isError"], true);
 
     let remembered = mcp.request(
         3,
@@ -79,9 +95,8 @@ fn serves_memory_lifecycle_over_stdio() {
         json!({"name":"remember","arguments":{"content":"stdio memory"}}),
     );
     let id = remembered["result"]["structuredContent"]["id"]
-        .as_str()
-        .expect("remembered id")
-        .to_owned();
+        .as_i64()
+        .expect("remembered id");
     assert_eq!(
         remembered["result"]["structuredContent"]["scopes"],
         json!(["global"])
@@ -126,8 +141,14 @@ fn serves_memory_lifecycle_over_stdio() {
 
 #[test]
 fn repository_scopes_are_prioritized_and_isolated() {
-    let id = Uuid::now_v7();
-    let home = std::env::temp_dir().join(format!("graphmem-mcp-scope-test-{id}"));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-scope-test-{}-{nonce}",
+        std::process::id()
+    ));
     let mut mcp = Mcp::start(&home);
     mcp.request(
         1,

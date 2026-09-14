@@ -2,12 +2,15 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use uuid::Uuid;
-
 fn data_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("graphmem-cli-test-{}", Uuid::now_v7()))
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("graphmem-cli-test-{}-{nonce}", std::process::id()))
 }
 
 fn run(data_dir: &Path, args: &[&str]) -> Output {

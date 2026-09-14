@@ -12,7 +12,6 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let server = MemoryServer::new()?;
@@ -61,12 +60,12 @@ struct RecallInput {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct IdInput {
-    id: String,
+    id: i64,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct MemoryRecord {
-    id: String,
+    id: i64,
     content: String,
     memory_type: String,
     importance: f64,
@@ -86,7 +85,7 @@ struct RecallOutput {
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct ForgetOutput {
-    id: String,
+    id: i64,
     forgotten: bool,
 }
 
@@ -148,12 +147,12 @@ impl MemoryServer {
         &self,
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
-        let id = parse_id(&input.id)?;
+        let id = input.id;
         self.lock()?
             .forget(id)
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(ForgetOutput {
-            id: input.id,
+            id,
             forgotten: true,
         }))
     }
@@ -166,7 +165,7 @@ impl MemoryServer {
         &self,
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
-        let id = parse_id(&input.id)?;
+        let id = input.id;
         let details = self
             .lock()?
             .show(id)
@@ -186,7 +185,7 @@ impl ServerHandler for MemoryServer {
 
 fn record(details: MemoryDetails, score: Option<f64>) -> MemoryRecord {
     MemoryRecord {
-        id: details.memory.id.to_string(),
+        id: details.memory.id,
         content: details.memory.content,
         memory_type: details.memory.memory_type,
         importance: details.memory.importance,
@@ -197,10 +196,6 @@ fn record(details: MemoryDetails, score: Option<f64>) -> MemoryRecord {
         scopes: details.scopes.into_iter().map(|scope| scope.name).collect(),
         score,
     }
-}
-
-fn parse_id(value: &str) -> Result<Uuid, CallToolResult> {
-    Uuid::parse_str(value).map_err(|error| tool_error(format!("invalid id: {error}")))
 }
 
 fn tool_error(message: impl Into<String>) -> CallToolResult {

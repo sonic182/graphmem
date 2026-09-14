@@ -5,7 +5,6 @@ use graphmem::{
     Memory, Scope, SearchResult,
     application::{MemoryDetails, MemoryService, RememberRequest},
 };
-use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "gmem")]
@@ -18,9 +17,9 @@ struct Cli {
 enum Command {
     Remember(RememberArgs),
     List(ListArgs),
-    Show { id: Uuid },
+    Show { id: i64 },
     Search(SearchArgs),
-    Forget { id: Uuid },
+    Forget { id: i64 },
     Scopes,
     Doctor,
     Mcp,
