@@ -191,7 +191,7 @@ struct GraphOutput {
 impl MemoryServer {
     #[tool(
         name = "remember",
-        description = "Store a durable fact, decision, preference, or project rule. When scopes are omitted, store it in the Git repository containing the server's working directory; outside a Git repository, store it in global. Pass global for generally reusable knowledge or repo:/absolute/path to override the default."
+        description = "Store a durable narrative memory: a fact, decision, rationale, preference, or project rule. Memories are separate from the entity graph: this does not create entities or relationships. When scopes are omitted, store it in the Git repository containing the server's working directory; outside a Git repository, store it in global. Pass global for generally reusable knowledge or repo:/absolute/path to override the default."
     )]
     fn remember(
         &self,
@@ -218,7 +218,7 @@ impl MemoryServer {
 
     #[tool(
         name = "recall",
-        description = "Search memory content using SQLite FTS5, not semantic or vector search. Prefer concise keywords over a question. The query uses FTS5 MATCH grammar: whitespace is implicit AND (deploy retry); double quotes make a phrase (\"integration test\"); a trailing * makes a prefix (migrat*); uppercase AND, OR, and NOT combine expressions; parentheses group expressions; and NEAR(term1 term2, N) finds terms close together. Quote text containing punctuation or operators when it should be literal. If FTS5 rejects the expression, the server retries it as one quoted literal phrase. Results are ranked by FTS5 BM25, then importance and recency. Full grammar: https://sqlite.org/fts5.html. When scopes are omitted, search the Git repository containing the server's working directory plus global memory, with repository memories first; outside a Git repository, search global memory. Pass repo:/absolute/path to override the default."
+        description = "Search scoped narrative memory content using SQLite FTS5, not the entity graph, semantic search, or vector search. Prefer concise keywords over a question. The query uses FTS5 MATCH grammar: whitespace is implicit AND (deploy retry); double quotes make a phrase (\"integration test\"); a trailing * makes a prefix (migrat*); uppercase AND, OR, and NOT combine expressions; parentheses group expressions; and NEAR(term1 term2, N) finds terms close together. Quote text containing punctuation or operators when it should be literal. If FTS5 rejects the expression, the server retries it as one quoted literal phrase. Results are ranked by FTS5 BM25, then importance and recency. Full grammar: https://sqlite.org/fts5.html. When scopes are omitted, search the Git repository containing the server's working directory plus global memory, with repository memories first; outside a Git repository, search global memory. Pass repo:/absolute/path to override the default."
     )]
     fn recall(
         &self,
@@ -244,7 +244,7 @@ impl MemoryServer {
 
     #[tool(
         name = "relate",
-        description = "Store a durable directed relationship between named entities. Use source -> relation -> target with a concise snake_case relation such as depends_on, uses, or solved_by. Use this only for verified, reusable facts; it creates missing entities from kind and name, and repeating the same relationship reuses the existing edge."
+        description = "Store a graph-only, durable directed relationship between named entities; it does not create or link a narrative memory. Use source -> relation -> target with a concise snake_case relation such as depends_on, uses, or solved_by. Use this only for verified, reusable facts; it creates missing entities from kind and name, and repeating the same relationship reuses the existing edge. Graph entities and edges are currently unscoped, so every graph query sees the same local graph."
     )]
     fn relate(
         &self,
@@ -264,7 +264,7 @@ impl MemoryServer {
 
     #[tool(
         name = "graph",
-        description = "Inspect verified relationships from a named entity before adding uncertain or duplicate relations. By default, traverse one hop in both directions. Set direction to incoming or outgoing when needed; max_depth is 1 through 3 and limit is 1 through 100. Each result path starts at the requested entity; an incoming hop means the related entity points to the preceding entity."
+        description = "Inspect the unscoped entity graph only; this does not search narrative memories. Use it before adding uncertain or duplicate relations. By default, traverse one hop in both directions. Set direction to incoming or outgoing when needed; max_depth is 1 through 3 and limit is 1 through 100. Each result path starts at the requested entity; an incoming hop means the related entity points to the preceding entity."
     )]
     fn graph(
         &self,
@@ -318,7 +318,7 @@ impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("gmem", "0.1.0"))
-            .with_instructions("Graphmem is durable, local memory for coding agents. Recall before starting work when prior decisions, repository conventions, or preferences may matter; use the recall tool's FTS5 query guidance. Remember only verified facts, decisions, constraints, preferences, and reusable project rules that will help a future session. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Use relate for verified entity relationships and graph to inspect their bounded paths. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
+            .with_instructions("Graphmem has two separate local stores. Narrative memory is scoped, searchable text: use remember for verified facts, decisions, rationale, constraints, preferences, and reusable project rules; use recall before work when that context may matter. The entity graph is unscoped structured data: use relate for verified source -> relation -> target facts and graph to inspect their bounded paths. A memory never creates or links an entity or edge, and an edge never creates or links a memory; store both when a relationship needs an explanation. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted memory scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
     }
 }
 

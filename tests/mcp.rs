@@ -80,6 +80,8 @@ fn serves_memory_lifecycle_over_stdio() {
         .expect("server instructions");
     assert!(instructions.contains("Do not store secrets"));
     assert!(instructions.contains("startup working directory"));
+    assert!(instructions.contains("two separate local stores"));
+    assert!(instructions.contains("entity graph is unscoped"));
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
@@ -105,6 +107,7 @@ fn serves_memory_lifecycle_over_stdio() {
     assert!(description.contains("SQLite FTS5"));
     assert!(description.contains("https://sqlite.org/fts5.html"));
     assert!(description.contains("server's working directory"));
+    assert!(description.contains("not the entity graph"));
 
     let invalid = mcp.request(
         8,
