@@ -119,6 +119,24 @@ fn hyphenated_query_terms_do_not_error() {
 }
 
 #[test]
+fn hyphenated_terms_keep_surrounding_operator_semantics() {
+    let (database, path) = test_database();
+    let matching = database
+        .create_memory("checkout flow incident happened", "fact", 0.0)
+        .expect("memory is created");
+    database
+        .create_memory("unrelated deployment note", "fact", 0.0)
+        .expect("memory is created");
+    let results = database
+        .search_memories("incident OR checkout-latency", None, 10)
+        .expect("hyphenated operand does not error");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].memory.id, matching.id);
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
 fn filters_search_results_by_exact_scope() {
     let (mut database, path) = test_database();
     let first_scope = database.create_scope("repo:first").unwrap();

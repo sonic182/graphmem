@@ -14,6 +14,8 @@ use crate::domain::{
 
 pub type Result<T> = std::result::Result<T, StorageError>;
 
+const FTS_SYNTAX_CHARACTERS: [char; 10] = ['(', ')', '{', '}', ':', ',', '"', '^', '*', '+'];
+
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("SQLite error: {0}")]
@@ -894,7 +896,7 @@ fn run_fts_query<T>(
     query: &str,
     mut execute: impl FnMut(&str) -> rusqlite::Result<T>,
 ) -> rusqlite::Result<T> {
-    match execute(query) {
+    match execute(&quote_bareword_terms(query)) {
         Err(rusqlite::Error::SqliteFailure(error, _))
             if error.code == rusqlite::ErrorCode::Unknown =>
         {
@@ -903,6 +905,31 @@ fn run_fts_query<T>(
         }
         result => result,
     }
+}
+
+fn quote_bareword_terms(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|term| {
+            if needs_quoting(term) {
+                format!("\"{term}\"")
+            } else {
+                term.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn needs_quoting(term: &str) -> bool {
+    !term
+        .chars()
+        .any(|character| FTS_SYNTAX_CHARACTERS.contains(&character))
+        && term.chars().any(|character| !is_bareword(character))
+}
+
+fn is_bareword(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_' || !character.is_ascii()
 }
 
 fn now_millis() -> Result<i64> {
