@@ -21,7 +21,7 @@ fn remove_database(path: &Path) {
 }
 
 #[test]
-fn migrates_reopens_and_supports_memory_scope_crud() {
+fn reopens_and_supports_memory_scope_crud() {
     let (mut database, path) = test_database();
     let memory = database
         .create_memory("  use nextest  ", "convention", 0.8)

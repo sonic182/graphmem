@@ -24,13 +24,13 @@ fn remove_database(path: &Path) {
 }
 
 #[test]
-fn migrates_v1_memories_and_backfills_fts() {
+fn initializes_current_schema_and_backfills_existing_memories() {
     let path = std::env::temp_dir()
-        .join(format!("graphmem-search-migration-{}", Uuid::now_v7()))
+        .join(format!("graphmem-search-schema-{}", Uuid::now_v7()))
         .join("memory.sqlite");
-    fs::create_dir_all(path.parent().unwrap()).expect("migration test directory is created");
+    fs::create_dir_all(path.parent().unwrap()).expect("test database directory is created");
     let memory_id = Uuid::now_v7();
-    let connection = Connection::open(&path).expect("v1 database opens");
+    let connection = Connection::open(&path).expect("database opens");
     connection
         .execute_batch(&format!(
             "CREATE TABLE memories (
@@ -56,15 +56,15 @@ fn migrates_v1_memories_and_backfills_fts() {
              INSERT INTO memories
                  (id, content, memory_type, importance, created_at, updated_at)
                  VALUES ('{memory_id}', 'legacy retry convention', 'fact', 0.5, 1, 1);
-             PRAGMA user_version = 1;"
+             "
         ))
-        .expect("v1 schema is created");
+        .expect("existing schema is created");
     drop(connection);
 
-    let database = Database::open(&path).expect("v1 database migrates");
+    let database = Database::open(&path).expect("database opens with current schema");
     let results = database
         .search_memories("legacy", None, 10)
-        .expect("legacy memory is searchable");
+        .expect("existing memory is searchable");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].memory.id, memory_id);
     assert!(results[0].score.is_finite());

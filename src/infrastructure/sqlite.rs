@@ -11,8 +11,6 @@ use uuid::Uuid;
 
 use crate::domain::{Edge, Entity, Memory, Scope, SearchResult};
 
-const SCHEMA_VERSION: i64 = 2;
-
 pub type Result<T> = std::result::Result<T, StorageError>;
 
 #[derive(Debug, Error)]
@@ -23,8 +21,6 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
     #[error("home directory is unavailable")]
     HomeDirectoryUnavailable,
-    #[error("database schema version {0} is newer than supported version {SCHEMA_VERSION}")]
-    UnsupportedSchema(i64),
     #[error("invalid {field}: {message}")]
     Invalid {
         field: &'static str,
@@ -65,7 +61,7 @@ impl Database {
         let path = path.to_path_buf();
         let mut connection = Connection::open(&path)?;
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
-        migrate(&mut connection)?;
+        ensure_schema(&mut connection)?;
         Ok(Self { connection, path })
     }
 
@@ -494,15 +490,9 @@ fn create_data_dir(path: &Path, restrict_permissions: bool) -> Result<()> {
     Ok(())
 }
 
-fn migrate(connection: &mut Connection) -> Result<()> {
-    let version = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > SCHEMA_VERSION {
-        return Err(StorageError::UnsupportedSchema(version));
-    }
-    if version < 1 {
-        let transaction = connection.transaction()?;
-        transaction.execute_batch(
-            "CREATE TABLE memories (
+fn ensure_schema(connection: &mut Connection) -> Result<()> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memories (
                  id TEXT PRIMARY KEY NOT NULL,
                  content TEXT NOT NULL,
                  memory_type TEXT NOT NULL,
@@ -512,18 +502,18 @@ fn migrate(connection: &mut Connection) -> Result<()> {
                  last_accessed_at INTEGER,
                  access_count INTEGER NOT NULL DEFAULT 0 CHECK (access_count >= 0)
              );
-             CREATE TABLE scopes (
+             CREATE TABLE IF NOT EXISTS scopes (
                  id TEXT PRIMARY KEY NOT NULL,
                  name TEXT NOT NULL UNIQUE,
                  created_at INTEGER NOT NULL
              );
-             CREATE TABLE memory_scopes (
+             CREATE TABLE IF NOT EXISTS memory_scopes (
                  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
                  scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
                  PRIMARY KEY (memory_id, scope_id)
              );
-             CREATE INDEX idx_memory_scopes_scope_id ON memory_scopes(scope_id);
-             CREATE TABLE entities (
+             CREATE INDEX IF NOT EXISTS idx_memory_scopes_scope_id ON memory_scopes(scope_id);
+             CREATE TABLE IF NOT EXISTS entities (
                  id TEXT PRIMARY KEY NOT NULL,
                  kind TEXT NOT NULL,
                  name TEXT NOT NULL,
@@ -532,7 +522,7 @@ fn migrate(connection: &mut Connection) -> Result<()> {
                  updated_at INTEGER NOT NULL,
                  UNIQUE (kind, canonical_name)
              );
-             CREATE TABLE edges (
+             CREATE TABLE IF NOT EXISTS edges (
                  id TEXT PRIMARY KEY NOT NULL,
                  source_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
                  relation TEXT NOT NULL,
@@ -540,39 +530,28 @@ fn migrate(connection: &mut Connection) -> Result<()> {
                  created_at INTEGER NOT NULL,
                  metadata TEXT
              );
-             CREATE INDEX idx_edges_source_id ON edges(source_id);
-             CREATE INDEX idx_edges_target_id ON edges(target_id);
-             CREATE INDEX idx_edges_relation ON edges(relation);
-             PRAGMA user_version = 1;",
-        )?;
-        transaction.commit()?;
-    }
-    if version < 2 {
-        let transaction = connection.transaction()?;
-        transaction.execute_batch(
-            "CREATE VIRTUAL TABLE memories_fts USING fts5(
+             CREATE INDEX IF NOT EXISTS idx_edges_source_id ON edges(source_id);
+             CREATE INDEX IF NOT EXISTS idx_edges_target_id ON edges(target_id);
+             CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
+             CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                  content,
                  content='memories',
                  content_rowid='rowid'
              );
-             INSERT INTO memories_fts(rowid, content)
-                 SELECT rowid, content FROM memories;
-             CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+             INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');
+             CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
                  INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
              END;
-             CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+             CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
                  INSERT INTO memories_fts(memories_fts, rowid, content)
                  VALUES ('delete', old.rowid, old.content);
              END;
-             CREATE TRIGGER memories_au AFTER UPDATE OF content ON memories BEGIN
+             CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content ON memories BEGIN
                  INSERT INTO memories_fts(memories_fts, rowid, content)
                  VALUES ('delete', old.rowid, old.content);
                  INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
-             END;
-             PRAGMA user_version = 2;",
-        )?;
-        transaction.commit()?;
-    }
+             END;",
+    )?;
     Ok(())
 }
 

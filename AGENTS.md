@@ -16,7 +16,7 @@ Use the CLI feedback loop instead of an editor or LSP integration.
 Use a small layered architecture with a hexagonal boundary where it pays for itself:
 
 - `src/domain.rs` contains domain data and invariants; it must not depend on Clap, rusqlite, or transport code.
-- `src/infrastructure/` contains external adapters such as SQLite, migrations, and filesystem access.
+- `src/infrastructure/` contains external adapters such as SQLite schema setup and filesystem access.
 - `src/application.rs` is introduced when a use case coordinates multiple domain or infrastructure operations.
 - `src/cli.rs` is introduced with the human CLI; it parses arguments, formats output, and delegates behavior to application code.
 - `src/main.rs` is the composition root for concrete adapters and process exit behavior.

@@ -1168,7 +1168,8 @@ all succeed.
 
 - [x] Resolve application data directory
 - [x] Create database automatically
-- [x] Implement schema migrations
+- [x] Initialize the current schema on open
+- [ ] Add schema migrations after the schema stabilizes
 - [x] Create memories table
 - [x] Create scopes table
 - [x] Create memory/scopes relation
@@ -1417,7 +1418,7 @@ Tests should focus on behavior rather than implementation details.
 
 ## Storage
 
-- [x] migrations work from empty DB
+- [x] current schema initializes from an empty DB
 - [x] foreign keys work
 - [ ] duplicate handling works
 - [x] transactions roll back correctly
