@@ -1,4 +1,6 @@
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -11,10 +13,16 @@ struct Mcp {
 }
 
 impl Mcp {
-    fn start(home: &std::path::Path) -> Self {
+    fn start(home: &Path) -> Self {
+        fs::create_dir_all(home).expect("MCP test home is created");
+        Self::start_in(home, home)
+    }
+
+    fn start_in(home: &Path, directory: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
             .env("GRAPHMEM_HOME", home)
+            .current_dir(directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -71,6 +79,7 @@ fn serves_memory_lifecycle_over_stdio() {
         .as_str()
         .expect("server instructions");
     assert!(instructions.contains("Do not store secrets"));
+    assert!(instructions.contains("startup working directory"));
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
@@ -92,6 +101,7 @@ fn serves_memory_lifecycle_over_stdio() {
     let description = recall["description"].as_str().expect("recall description");
     assert!(description.contains("SQLite FTS5"));
     assert!(description.contains("https://sqlite.org/fts5.html"));
+    assert!(description.contains("server's working directory"));
 
     let invalid = mcp.request(
         8,
@@ -190,4 +200,71 @@ fn repository_scopes_are_prioritized_and_isolated() {
     assert_eq!(memories[1]["scopes"], json!(["global"]));
     drop(mcp);
     std::fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn omitted_scopes_default_to_the_server_repository() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-default-scope-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let repository = root.join("repository");
+    let home = root.join("home");
+    fs::create_dir_all(&repository).expect("test repository is created");
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&repository)
+            .status()
+            .expect("git is available")
+            .success()
+    );
+    let scope = format!(
+        "repo:{}",
+        repository
+            .canonicalize()
+            .expect("repository path is canonical")
+            .display()
+    );
+    let mut mcp = Mcp::start_in(&home, &repository);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let global = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"scope default","scopes":["global"]}}),
+    );
+    assert_eq!(
+        global["result"]["structuredContent"]["scopes"],
+        json!(["global"])
+    );
+    let repository_memory = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"scope default"}}),
+    );
+    assert_eq!(
+        repository_memory["result"]["structuredContent"]["scopes"],
+        json!([scope])
+    );
+    let recalled = mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"scope default"}}),
+    );
+    let memories = recalled["result"]["structuredContent"]["memories"]
+        .as_array()
+        .expect("scoped memories");
+    assert_eq!(memories.len(), 2);
+    assert_eq!(memories[0]["scopes"], json!([scope]));
+    assert_eq!(memories[1]["scopes"], json!(["global"]));
+    drop(mcp);
+    fs::remove_dir_all(root).expect("MCP test data is removed");
 }

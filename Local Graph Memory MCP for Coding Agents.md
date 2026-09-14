@@ -1299,13 +1299,13 @@ Initially relationships may be explicit or derived from structured `remember` ca
 
 # 36. Phase 7: Scope intelligence
 
-- [ ] Detect current working directory
-- [ ] Detect Git repository root
-- [ ] Derive repository scope automatically
+- [x] Detect current working directory
+- [x] Detect Git repository root
+- [x] Derive repository scope automatically
 - [ ] Support user scope
 - [x] Support global scope
 - [x] Define scope precedence
-- [ ] Include current scope automatically in MCP calls where appropriate
+- [x] Include current scope automatically in MCP calls where appropriate
 - [x] Test same memory query across multiple repositories
 
 Example:
