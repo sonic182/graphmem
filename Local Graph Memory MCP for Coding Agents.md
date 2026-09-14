@@ -1166,18 +1166,18 @@ all succeed.
 
 # 30. Phase 1: SQLite storage
 
-- [ ] Resolve application data directory
-- [ ] Create database automatically
-- [ ] Implement schema migrations
-- [ ] Create memories table
-- [ ] Create scopes table
-- [ ] Create memory/scopes relation
-- [ ] Create entities table
-- [ ] Create graph edges table
-- [ ] Create relevant indexes
-- [ ] Enable foreign keys
-- [ ] Add transaction helpers
-- [ ] Add database integration tests
+- [x] Resolve application data directory
+- [x] Create database automatically
+- [x] Implement schema migrations
+- [x] Create memories table
+- [x] Create scopes table
+- [x] Create memory/scopes relation
+- [x] Create entities table
+- [x] Create graph edges table
+- [x] Create relevant indexes
+- [x] Enable foreign keys
+- [x] Add transaction helpers
+- [x] Add database integration tests
 
 ### Done when
 
@@ -1294,11 +1294,11 @@ recall the memory
 
 # 35. Phase 6: Graph relationships
 
-- [ ] Implement entity creation
+- [x] Implement entity creation
 - [ ] Implement entity normalization
-- [ ] Implement edge creation
-- [ ] Implement incoming relationship lookup
-- [ ] Implement outgoing relationship lookup
+- [x] Implement edge creation
+- [x] Implement incoming relationship lookup
+- [x] Implement outgoing relationship lookup
 - [ ] Implement recursive traversal
 - [ ] Apply graph proximity to retrieval
 - [ ] Add CLI graph inspection
@@ -1421,10 +1421,10 @@ Tests should focus on behavior rather than implementation details.
 
 ## Storage
 
-- [ ] migrations work from empty DB
-- [ ] foreign keys work
+- [x] migrations work from empty DB
+- [x] foreign keys work
 - [ ] duplicate handling works
-- [ ] transactions roll back correctly
+- [x] transactions roll back correctly
 
 ## Search
 
@@ -1435,8 +1435,8 @@ Tests should focus on behavior rather than implementation details.
 
 ## Graph
 
-- [ ] incoming relationships work
-- [ ] outgoing relationships work
+- [x] incoming relationships work
+- [x] outgoing relationships work
 - [ ] bounded recursive traversal works
 - [ ] cycles do not cause infinite traversal
 

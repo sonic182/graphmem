@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+run() {
+    printf '\n\033[1;34m▶ %s\033[0m\n' "$*"
+    if "$@"; then
+        printf '\033[1;32m✔ %s\033[0m\n' "$*"
+    else
+        printf '\033[1;31m✖ %s failed — commit aborted\033[0m\n' "$*"
+        exit 1
+    fi
+}
+
+run just fmt-check
+run just check
+run just lint
+run just test
+
+printf '\n\033[1;32mAll pre-commit checks passed\033[0m\n'
