@@ -232,6 +232,7 @@ impl Database {
         query: &str,
         scopes: &[String],
         limit: usize,
+        proximate_names: &[String],
     ) -> Result<Vec<SearchResult>> {
         validate_text("query", query)?;
         let mut scopes = scopes
@@ -253,7 +254,17 @@ impl Database {
             .map(|index| format!("?{}", rank_start + index))
             .collect::<Vec<_>>()
             .join(", ");
-        let limit_placeholder = format!("?{}", rank_start + scopes.len());
+        let graph_start = rank_start + scopes.len();
+        let graph_clause = if proximate_names.is_empty() {
+            String::new()
+        } else {
+            let likes = (0..proximate_names.len())
+                .map(|index| format!("m.content LIKE '%' || ?{} || '%'", graph_start + index))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            format!("CASE WHEN {likes} THEN 0 ELSE 1 END,")
+        };
+        let limit_placeholder = format!("?{}", graph_start + proximate_names.len());
         let sql = format!(
             "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
                     m.last_accessed_at, m.access_count, -bm25(memories_fts) AS score
@@ -272,13 +283,20 @@ impl Database {
                    JOIN scopes s ON s.id = ms.scope_id
                    WHERE ms.memory_id = m.id AND s.name IN ({rank_placeholders})
                ) THEN 0 ELSE 1 END,
+               {graph_clause}
                bm25(memories_fts) ASC, m.importance DESC, m.updated_at DESC, m.id DESC
              LIMIT {limit_placeholder}"
         );
-        let mut values = Vec::with_capacity(1 + scopes.len() * 2 + 1);
+        let mut values = Vec::with_capacity(1 + scopes.len() * 2 + proximate_names.len() + 1);
         values.push(rusqlite::types::Value::Text(query.to_owned()));
         values.extend(scopes.iter().cloned().map(rusqlite::types::Value::Text));
         values.extend(scopes.iter().cloned().map(rusqlite::types::Value::Text));
+        values.extend(
+            proximate_names
+                .iter()
+                .cloned()
+                .map(rusqlite::types::Value::Text),
+        );
         values.push(rusqlite::types::Value::Integer(limit));
         let mut statement = self.connection.prepare(&sql)?;
         let memories = run_fts_query(query, |match_query| {
@@ -395,6 +413,17 @@ impl Database {
             field: "entity",
             message: "entity was not created",
         })
+    }
+
+    pub fn list_entities(&self) -> Result<Vec<Entity>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, kind, name, canonical_name, created_at, updated_at
+             FROM entities ORDER BY id",
+        )?;
+        let entities = statement
+            .query_map([], entity_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(entities)
     }
 
     pub fn get_entity(&self, id: i64) -> Result<Option<Entity>> {

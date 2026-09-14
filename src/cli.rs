@@ -2,8 +2,10 @@ use std::error::Error;
 
 use clap::{Args, Parser, Subcommand};
 use graphmem::{
-    Memory, Scope, SearchResult,
-    application::{MemoryDetails, MemoryService, RememberRequest},
+    GraphDirection, Memory, Scope, SearchResult,
+    application::{
+        EntityReference, GraphDetails, GraphRequest, MemoryDetails, MemoryService, RememberRequest,
+    },
 };
 
 #[derive(Parser)]
@@ -19,6 +21,7 @@ enum Command {
     List(ListArgs),
     Show { id: i64 },
     Search(SearchArgs),
+    Graph(GraphArgs),
     Forget { id: i64 },
     Flush(FlushArgs),
     Scopes,
@@ -51,6 +54,18 @@ struct SearchArgs {
     #[arg(long = "scope")]
     scopes: Vec<String>,
     #[arg(long, default_value_t = 10)]
+    limit: usize,
+}
+
+#[derive(Args)]
+struct GraphArgs {
+    kind: String,
+    name: String,
+    #[arg(long, default_value = "both")]
+    direction: String,
+    #[arg(long, default_value_t = 1)]
+    max_depth: usize,
+    #[arg(long, default_value_t = 25)]
     limit: usize,
 }
 
@@ -88,6 +103,36 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 service.search_scopes(&args.query, &args.scopes, args.limit)?
             };
             print_search_results(results);
+        }
+        Command::Graph(args) => {
+            if !(1..=3).contains(&args.max_depth) {
+                return Err(std::io::Error::other("max_depth must be between 1 and 3").into());
+            }
+            if !(1..=100).contains(&args.limit) {
+                return Err(std::io::Error::other("limit must be between 1 and 100").into());
+            }
+            let direction = match args.direction.as_str() {
+                "incoming" => GraphDirection::Incoming,
+                "outgoing" => GraphDirection::Outgoing,
+                "both" => GraphDirection::Both,
+                _ => {
+                    return Err(std::io::Error::other(
+                        "direction must be incoming, outgoing, or both",
+                    )
+                    .into());
+                }
+            };
+            let service = MemoryService::open_default()?;
+            let details = service.graph(GraphRequest {
+                entity: EntityReference {
+                    kind: args.kind,
+                    name: args.name,
+                },
+                direction,
+                max_depth: args.max_depth,
+                limit: args.limit,
+            })?;
+            print_graph_details(details);
         }
         Command::Forget { id } => {
             let service = MemoryService::open_default()?;
@@ -145,6 +190,31 @@ fn print_memory_details(details: MemoryDetails) {
     println!("updated_at: {}", details.memory.updated_at);
     println!("scopes: {scopes}");
     println!("content:\n{}", details.memory.content);
+}
+
+fn print_graph_details(details: GraphDetails) {
+    println!(
+        "{}\t{}\t{}",
+        details.entity.kind, details.entity.name, details.entity.canonical_name
+    );
+    for path in details.paths {
+        for (depth, hop) in path.hops.iter().enumerate() {
+            let direction = match hop.direction {
+                GraphDirection::Incoming => "incoming",
+                GraphDirection::Outgoing => "outgoing",
+                GraphDirection::Both => unreachable!(),
+            };
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                depth + 1,
+                direction,
+                hop.edge.relation,
+                hop.entity.kind,
+                hop.entity.name
+            );
+        }
+        println!();
+    }
 }
 
 fn print_scopes(scopes: Vec<Scope>) {

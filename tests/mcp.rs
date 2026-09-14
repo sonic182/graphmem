@@ -395,6 +395,58 @@ fn relates_normalized_entities_and_traverses_bounded_paths() {
 }
 
 #[test]
+fn recall_boosts_memories_adjacent_to_a_graph_matched_entity() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-graph-proximity-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"relate","arguments":{"source":{"kind":"problem","name":"storm"},"relation":"solved_by","target":{"kind":"solution","name":"circuit-breaker"}}}),
+    );
+    let high_importance_no_neighbor = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"incident happened last night","importance":0.9,"scopes":["global"]}}),
+    );
+    let neighbor_id = high_importance_no_neighbor["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("first memory id");
+    let low_importance_neighbor = mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"incident resolved via circuit-breaker automatically","importance":0.1,"scopes":["global"]}}),
+    );
+    let boosted_id = low_importance_neighbor["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("second memory id");
+    let recalled = mcp.request(
+        5,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"incident OR storm","scopes":["global"]}}),
+    );
+    let memories = recalled["result"]["structuredContent"]["memories"]
+        .as_array()
+        .expect("recalled memories");
+    assert_eq!(memories.len(), 2);
+    assert_eq!(memories[0]["id"], boosted_id);
+    assert_eq!(memories[1]["id"], neighbor_id);
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
 fn stats_reports_both_stores_without_mutating_them() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)

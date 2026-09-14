@@ -1287,8 +1287,8 @@ recall the memory
 - [x] Implement incoming relationship lookup
 - [x] Implement outgoing relationship lookup
 - [x] Implement recursive traversal
-- [ ] Apply graph proximity to retrieval
-- [ ] Add `gmem graph` CLI inspection
+- [x] Apply graph proximity to retrieval
+- [x] Add `gmem graph` CLI inspection
 - [x] Add graph tests
 
 Do not introduce automatic entity extraction yet unless clearly needed.

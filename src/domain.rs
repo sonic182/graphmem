@@ -69,3 +69,33 @@ pub struct StoreStats {
     pub entities: i64,
     pub edges: i64,
 }
+
+pub fn text_mentions(haystack: &str, needle: &str) -> bool {
+    let needle = needle.trim();
+    !needle.is_empty() && haystack.to_lowercase().contains(&needle.to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::text_mentions;
+
+    #[test]
+    fn matches_case_insensitively() {
+        assert!(text_mentions("Retry the SQLite connection", "sqlite"));
+    }
+
+    #[test]
+    fn matches_substring() {
+        assert!(text_mentions("circuit breaker tripped", "circuit breaker"));
+    }
+
+    #[test]
+    fn rejects_non_match() {
+        assert!(!text_mentions("retry the connection", "sqlite"));
+    }
+
+    #[test]
+    fn rejects_empty_needle() {
+        assert!(!text_mentions("retry the connection", "   "));
+    }
+}

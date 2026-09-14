@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     Database, Edge, Entity, GraphDirection, GraphPath, Memory, Scope, SearchResult, StorageError,
-    StoreStats,
+    StoreStats, domain::text_mentions,
 };
 
 pub type Result<T> = std::result::Result<T, ApplicationError>;
@@ -148,9 +148,32 @@ impl MemoryService {
         } else {
             scopes.to_vec()
         };
+        let proximate_names = self.graph_proximate_names(query)?;
         Ok(self
             .database
-            .search_memories_in_scopes(query, &scopes, limit)?)
+            .search_memories_in_scopes(query, &scopes, limit, &proximate_names)?)
+    }
+
+    fn graph_proximate_names(&self, query: &str) -> Result<Vec<String>> {
+        let entities = self.database.list_entities()?;
+        let matched = entities
+            .iter()
+            .filter(|entity| text_mentions(query, &entity.canonical_name));
+        let mut names = Vec::new();
+        for entity in matched {
+            names.push(entity.canonical_name.clone());
+            let paths = self
+                .database
+                .graph_paths(entity.id, GraphDirection::Both, 1, 25)?;
+            for path in paths {
+                for hop in path.hops {
+                    names.push(hop.entity.canonical_name);
+                }
+            }
+        }
+        names.sort();
+        names.dedup();
+        Ok(names)
     }
 
     pub fn forget(&self, id: i64) -> Result<()> {
