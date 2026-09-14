@@ -1135,22 +1135,22 @@ without changing the deployment architecture.
 
 ## Phase 0: Repository and foundation
 
-- [ ] Create Rust project
-- [ ] Define package/binary name
-- [ ] Add `clap`
-- [ ] Add `serde`
-- [ ] Add `serde_json`
-- [ ] Add `uuid` with UUIDv7 support
-- [ ] Add `directories`
-- [ ] Add `tracing`
-- [ ] Add `thiserror`
-- [ ] Add `rusqlite` with bundled SQLite
-- [ ] Add `rmcp`
-- [ ] Add `tokio`
-- [ ] Set up formatting
-- [ ] Set up Clippy
-- [ ] Set up tests
-- [ ] Add CI
+- [x] Create Rust project
+- [x] Define package/binary name
+- [x] Add `clap`
+- [x] Add `serde`
+- [x] Add `serde_json`
+- [x] Add `uuid` with UUIDv7 support
+- [x] Add `directories`
+- [x] Add `tracing`
+- [x] Add `thiserror`
+- [x] Add `rusqlite` with bundled SQLite
+- [x] Add `rmcp`
+- [x] Add `tokio`
+- [x] Set up formatting
+- [x] Set up Clippy
+- [x] Set up tests
+- [x] Add CI
 
 ### Done when
 
