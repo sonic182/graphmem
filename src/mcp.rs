@@ -175,11 +175,11 @@ impl MemoryServer {
     }
 }
 
-#[tool_handler(name = "graphmem", version = "0.1.0")]
+#[tool_handler(name = "gmem", version = "0.1.0")]
 impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("graphmem", "0.1.0"))
+            .with_server_info(Implementation::new("gmem", "0.1.0"))
             .with_instructions("Use global for reusable knowledge and repo:/absolute/path for project-specific knowledge.")
     }
 }

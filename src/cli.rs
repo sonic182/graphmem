@@ -8,7 +8,7 @@ use graphmem::{
 use uuid::Uuid;
 
 #[derive(Parser)]
-#[command(name = "graphmem")]
+#[command(name = "gmem")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

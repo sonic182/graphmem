@@ -1,6 +1,6 @@
 # MCP stdio
 
-Run `graphmem mcp` as an MCP server over newline-delimited JSON-RPC. The
+Run `gmem mcp` as an MCP server over newline-delimited JSON-RPC. The
 database is the same SQLite database used by the CLI and is selected with
 `GRAPHMEM_HOME`.
 
@@ -24,7 +24,7 @@ Example configuration:
 {
   "mcpServers": {
     "graphmem": {
-      "command": "graphmem",
+      "command": "gmem",
       "args": ["mcp"]
     }
   }

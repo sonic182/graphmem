@@ -11,11 +11,11 @@ fn data_dir() -> PathBuf {
 }
 
 fn run(data_dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_graphmem"))
+    Command::new(env!("CARGO_BIN_EXE_gmem"))
         .args(args)
         .env("GRAPHMEM_HOME", data_dir)
         .output()
-        .expect("graphmem runs")
+        .expect("gmem runs")
 }
 
 fn stdout(output: Output) -> String {

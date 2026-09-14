@@ -1199,13 +1199,13 @@ memories and relations.
 
 Implement:
 
-- [x] `graphmem remember`
-- [x] `graphmem list`
-- [x] `graphmem show`
-- [x] `graphmem search`
-- [x] `graphmem forget`
-- [x] `graphmem scopes`
-- [x] `graphmem doctor`
+- [x] `gmem remember`
+- [x] `gmem list`
+- [x] `gmem show`
+- [x] `gmem search`
+- [x] `gmem forget`
+- [x] `gmem scopes`
+- [x] `gmem doctor`
 
 ### Done when
 
@@ -1298,7 +1298,7 @@ recall the memory
 - [x] Implement outgoing relationship lookup
 - [ ] Implement recursive traversal
 - [ ] Apply graph proximity to retrieval
-- [ ] Add `graphmem graph` CLI inspection
+- [ ] Add `gmem graph` CLI inspection
 - [ ] Add graph tests
 
 Do not introduce automatic entity extraction yet unless clearly needed.

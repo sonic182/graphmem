@@ -12,7 +12,7 @@ struct Mcp {
 
 impl Mcp {
     fn start(home: &std::path::Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_graphmem"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
             .env("GRAPHMEM_HOME", home)
             .stdin(Stdio::piped())
@@ -62,7 +62,7 @@ fn serves_memory_lifecycle_over_stdio() {
         "initialize",
         json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
     );
-    assert_eq!(initialized["result"]["serverInfo"]["name"], "graphmem");
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "gmem");
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let names = tools["result"]["tools"]
