@@ -1261,12 +1261,12 @@ recall the memory
 
 ## Claude Code
 
-- [ ] Verify current MCP configuration
+- [x] Verify current MCP configuration
 - [ ] Add documented setup
-- [ ] Test `remember`
-- [ ] Test `recall`
+- [x] Test `remember`
+- [x] Test `recall`
 - [ ] Test multiple sessions
-- [ ] Test repository-scoped memory
+- [x] Test repository-scoped memory
 
 ## Codex
 
@@ -1289,7 +1289,7 @@ recall the memory
 - [ ] Implement recursive traversal
 - [ ] Apply graph proximity to retrieval
 - [ ] Add `gmem graph` CLI inspection
-- [ ] Add graph tests
+- [x] Add graph tests
 
 Do not introduce automatic entity extraction yet unless clearly needed.
 
