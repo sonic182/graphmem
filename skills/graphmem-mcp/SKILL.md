@@ -1,6 +1,6 @@
 ---
 name: graphmem-mcp
-description: Use the connected Graphmem (gmem) MCP server efficiently during software development. Recall durable project context before work when it may matter; store verified decisions, conventions, constraints, and dependency relationships without recording transient or sensitive data.
+description: Use the connected Graphmem (gmem) MCP server during software development. At the start of each substantive task, make one bounded memory recall before investigating or changing code; store verified decisions, conventions, constraints, and dependency relationships without recording transient or sensitive data.
 ---
 
 # Graphmem MCP for software development
@@ -16,7 +16,7 @@ The stores remain separate, but `recall` boosts narrative memories that mention 
 
 ## During development
 
-At the beginning of a meaningful task, use `recall` only when prior decisions, conventions, constraints, known failures, or implementation rationale may change the work. Search with a few concrete keywords, not a natural-language question. FTS5 whitespace means AND; use quoted phrases, a trailing `*` for a prefix, and uppercase `OR` or `NOT` only when useful.
+Before investigating or changing code for every substantive task, call `recall` once with a short FTS query built from concrete task identifiers such as a component, symbol, error, or decision. Use `limit: 3` to `5`. Skip this only for direct no-code or logistical requests, or when Graphmem is unavailable. Search with keywords rather than a natural-language question. FTS5 whitespace means AND; use quoted phrases, a trailing `*` for a prefix, and uppercase `OR` or `NOT` when alternatives should match.
 
 Do not repeatedly recall the same context within a task. Use `stats` only to diagnose the local store, not as a routine step.
 
