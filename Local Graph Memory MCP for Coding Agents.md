@@ -1214,15 +1214,15 @@ The entire memory lifecycle can be exercised manually without MCP.
 
 # 32. Phase 3: Full-text search
 
-- [ ] Enable FTS5
-- [ ] Create FTS index
-- [ ] Synchronize memory writes with FTS
-- [ ] Implement BM25 retrieval
-- [ ] Add scope filtering
-- [ ] Add ranking abstraction
-- [ ] Add recency signal
-- [ ] Add importance signal
-- [ ] Add retrieval tests
+- [x] Enable FTS5
+- [x] Create FTS index
+- [x] Synchronize memory writes with FTS
+- [x] Implement BM25 retrieval
+- [x] Add scope filtering
+- [x] Add BM25 ranking with deterministic tie-breakers
+- [x] Add recency signal
+- [x] Add importance signal
+- [x] Add retrieval tests
 
 Create a small retrieval benchmark dataset.
 
@@ -1424,10 +1424,10 @@ Tests should focus on behavior rather than implementation details.
 
 ## Search
 
-- [ ] obvious memory ranks first
+- [x] obvious memory ranks first
 - [ ] repo scope beats global scope
-- [ ] irrelevant memory ranks lower
-- [ ] forgotten memory is not returned
+- [x] irrelevant memory ranks lower
+- [x] forgotten memory is not returned
 
 ## Graph
 

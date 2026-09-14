@@ -9,9 +9,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::domain::{Edge, Entity, Memory, Scope};
+use crate::domain::{Edge, Entity, Memory, Scope, SearchResult};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub type Result<T> = std::result::Result<T, StorageError>;
 
@@ -180,41 +180,31 @@ impl Database {
         Ok(memories)
     }
 
-    // ponytail: LIKE scan; replace with FTS5 ranking when Phase 3 needs scale.
     pub fn search_memories(
         &self,
         query: &str,
         scope: Option<&str>,
         limit: usize,
-    ) -> Result<Vec<Memory>> {
-        let pattern = like_pattern(query)?;
+    ) -> Result<Vec<SearchResult>> {
+        validate_text("query", query)?;
+        let scope = scope.map(normalize_scope).transpose()?;
         let limit = limit_value(limit)?;
-        if let Some(scope) = scope {
-            let scope = normalize_scope(scope)?;
-            let mut statement = self.connection.prepare(
-                "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
-                        m.last_accessed_at, m.access_count
-                 FROM memories m
-                 JOIN memory_scopes ms ON ms.memory_id = m.id
-                 JOIN scopes s ON s.id = ms.scope_id
-                 WHERE m.content LIKE ?1 ESCAPE '\\' AND s.name = ?2
-                 ORDER BY m.created_at DESC, m.id DESC LIMIT ?3",
-            )?;
-            let memories = statement
-                .query_map(params![pattern, scope, limit], memory_from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            return Ok(memories);
-        }
-
         let mut statement = self.connection.prepare(
-            "SELECT id, content, memory_type, importance, created_at, updated_at,
-                    last_accessed_at, access_count
-             FROM memories
-             WHERE content LIKE ?1 ESCAPE '\\'
-             ORDER BY created_at DESC, id DESC LIMIT ?2",
+            "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
+                    m.last_accessed_at, m.access_count, -bm25(memories_fts) AS score
+             FROM memories_fts
+             JOIN memories m ON m.rowid = memories_fts.rowid
+             WHERE memories_fts MATCH ?1
+               AND (?2 IS NULL OR EXISTS (
+                   SELECT 1 FROM memory_scopes ms
+                   JOIN scopes s ON s.id = ms.scope_id
+                   WHERE ms.memory_id = m.id AND s.name = ?2
+               ))
+             ORDER BY bm25(memories_fts) ASC, m.importance DESC, m.updated_at DESC, m.id DESC
+             LIMIT ?3",
         )?;
         let memories = statement
-            .query_map(params![pattern, limit], memory_from_row)?
+            .query_map(params![query, scope, limit], search_result_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(memories)
     }
@@ -509,7 +499,7 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     if version > SCHEMA_VERSION {
         return Err(StorageError::UnsupportedSchema(version));
     }
-    if version == 0 {
+    if version < 1 {
         let transaction = connection.transaction()?;
         transaction.execute_batch(
             "CREATE TABLE memories (
@@ -557,7 +547,40 @@ fn migrate(connection: &mut Connection) -> Result<()> {
         )?;
         transaction.commit()?;
     }
+    if version < 2 {
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(
+            "CREATE VIRTUAL TABLE memories_fts USING fts5(
+                 content,
+                 content='memories',
+                 content_rowid='rowid'
+             );
+             INSERT INTO memories_fts(rowid, content)
+                 SELECT rowid, content FROM memories;
+             CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+                 INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+             END;
+             CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+                 INSERT INTO memories_fts(memories_fts, rowid, content)
+                 VALUES ('delete', old.rowid, old.content);
+             END;
+             CREATE TRIGGER memories_au AFTER UPDATE OF content ON memories BEGIN
+                 INSERT INTO memories_fts(memories_fts, rowid, content)
+                 VALUES ('delete', old.rowid, old.content);
+                 INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+             END;
+             PRAGMA user_version = 2;",
+        )?;
+        transaction.commit()?;
+    }
     Ok(())
+}
+
+fn search_result_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
+    Ok(SearchResult {
+        memory: memory_from_row(row)?,
+        score: row.get(8)?,
+    })
 }
 
 fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
@@ -641,15 +664,6 @@ fn limit_value(value: usize) -> Result<i64> {
         field: "limit",
         message: "is too large",
     })
-}
-
-fn like_pattern(value: &str) -> Result<String> {
-    validate_text("query", value)?;
-    let escaped = value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    Ok(format!("%{escaped}%"))
 }
 
 fn normalize_scope(value: &str) -> Result<String> {

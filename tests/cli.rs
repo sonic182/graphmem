@@ -62,6 +62,14 @@ fn memory_lifecycle_works_across_cli_processes() {
 
     let searched = stdout(run(&data_dir, &["search", "nextest"]));
     assert!(searched.contains(&id));
+    assert!(
+        searched
+            .split('\n')
+            .next()
+            .and_then(|line| line.split('\t').next())
+            .and_then(|score| score.parse::<f64>().ok())
+            .is_some()
+    );
 
     let scopes = stdout(run(&data_dir, &["scopes"]));
     assert!(scopes.contains("repo:/workspace/graphmem"));

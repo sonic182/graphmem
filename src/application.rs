@@ -3,7 +3,7 @@ use std::path::Path;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{Database, Memory, Scope, StorageError};
+use crate::{Database, Memory, Scope, SearchResult, StorageError};
 
 pub type Result<T> = std::result::Result<T, ApplicationError>;
 
@@ -87,7 +87,12 @@ impl MemoryService {
         Ok(MemoryDetails { memory, scopes })
     }
 
-    pub fn search(&self, query: &str, scope: Option<&str>, limit: usize) -> Result<Vec<Memory>> {
+    pub fn search(
+        &self,
+        query: &str,
+        scope: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
         Ok(self.database.search_memories(query, scope, limit)?)
     }
 

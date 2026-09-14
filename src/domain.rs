@@ -13,6 +13,12 @@ pub struct Memory {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SearchResult {
+    pub memory: Memory,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
     pub id: Uuid,
     pub name: String,

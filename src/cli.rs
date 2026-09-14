@@ -2,7 +2,7 @@ use std::error::Error;
 
 use clap::{Args, Parser, Subcommand};
 use graphmem::{
-    Memory, Scope,
+    Memory, Scope, SearchResult,
     application::{MemoryDetails, MemoryService, RememberRequest},
 };
 use uuid::Uuid;
@@ -75,7 +75,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::Search(args) => {
             let service = MemoryService::open_default()?;
-            print_memories(service.search(&args.query, args.scope.as_deref(), args.limit)?);
+            print_search_results(service.search(&args.query, args.scope.as_deref(), args.limit)?);
         }
         Command::Forget { id } => {
             let service = MemoryService::open_default()?;
@@ -98,6 +98,15 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 fn print_memories(memories: Vec<Memory>) {
     for memory in memories {
         println!("{}\t{}\t{}", memory.id, memory.memory_type, memory.content);
+    }
+}
+
+fn print_search_results(results: Vec<SearchResult>) {
+    for result in results {
+        println!(
+            "{}\t{}\t{}\t{}",
+            result.score, result.memory.id, result.memory.memory_type, result.memory.content
+        );
     }
 }
 
