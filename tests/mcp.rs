@@ -67,6 +67,10 @@ fn serves_memory_lifecycle_over_stdio() {
         json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
     );
     assert_eq!(initialized["result"]["serverInfo"]["name"], "gmem");
+    let instructions = initialized["result"]["instructions"]
+        .as_str()
+        .expect("server instructions");
+    assert!(instructions.contains("Do not store secrets"));
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");

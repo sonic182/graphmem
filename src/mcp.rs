@@ -182,7 +182,7 @@ impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("gmem", "0.1.0"))
-            .with_instructions("Use global for reusable knowledge and repo:/absolute/path for project-specific knowledge.")
+            .with_instructions("Graphmem is durable, local memory for coding agents. Recall before starting work when prior decisions, repository conventions, or preferences may matter; use the recall tool's FTS5 query guidance. Remember only verified facts, decisions, constraints, preferences, and reusable project rules that will help a future session. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Use global only for knowledge reusable across repositories; otherwise use repo:/absolute/path. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
     }
 }
 
