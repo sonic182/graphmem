@@ -380,6 +380,7 @@ dependencies = [
  "directories",
  "rmcp",
  "rusqlite",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",

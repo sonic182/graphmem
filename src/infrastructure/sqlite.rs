@@ -205,6 +205,69 @@ impl Database {
         Ok(memories)
     }
 
+    pub fn search_memories_in_scopes(
+        &self,
+        query: &str,
+        scopes: &[String],
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
+        validate_text("query", query)?;
+        let mut scopes = scopes
+            .iter()
+            .map(|scope| normalize_scope(scope))
+            .collect::<Result<Vec<_>>>()?;
+        scopes.sort();
+        scopes.dedup();
+        if scopes.is_empty() {
+            scopes.push("global".to_owned());
+        }
+        let limit = limit_value(limit)?;
+        let placeholders = (0..scopes.len())
+            .map(|index| format!("?{}", index + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rank_start = scopes.len() + 2;
+        let rank_placeholders = (0..scopes.len())
+            .map(|index| format!("?{}", rank_start + index))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let limit_placeholder = format!("?{}", rank_start + scopes.len());
+        let sql = format!(
+            "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
+                    m.last_accessed_at, m.access_count, -bm25(memories_fts) AS score
+             FROM memories_fts
+             JOIN memories m ON m.rowid = memories_fts.rowid
+             WHERE memories_fts MATCH ?1
+               AND (NOT EXISTS (
+                   SELECT 1 FROM memory_scopes ms WHERE ms.memory_id = m.id
+               ) OR EXISTS (
+                   SELECT 1 FROM memory_scopes ms
+                   JOIN scopes s ON s.id = ms.scope_id
+                   WHERE ms.memory_id = m.id AND (s.name = 'global' OR s.name IN ({placeholders}))
+               ))
+             ORDER BY CASE WHEN EXISTS (
+                   SELECT 1 FROM memory_scopes ms
+                   JOIN scopes s ON s.id = ms.scope_id
+                   WHERE ms.memory_id = m.id AND s.name IN ({rank_placeholders})
+               ) THEN 0 ELSE 1 END,
+               bm25(memories_fts) ASC, m.importance DESC, m.updated_at DESC, m.id DESC
+             LIMIT {limit_placeholder}"
+        );
+        let mut values = Vec::with_capacity(1 + scopes.len() * 2 + 1);
+        values.push(rusqlite::types::Value::Text(query.to_owned()));
+        values.extend(scopes.iter().cloned().map(rusqlite::types::Value::Text));
+        values.extend(scopes.iter().cloned().map(rusqlite::types::Value::Text));
+        values.push(rusqlite::types::Value::Integer(limit));
+        let mut statement = self.connection.prepare(&sql)?;
+        let memories = statement
+            .query_map(
+                rusqlite::params_from_iter(values.iter()),
+                search_result_from_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(memories)
+    }
+
     pub fn create_scope(&self, name: &str) -> Result<Scope> {
         let name = normalize_scope(name)?;
         let id = Uuid::now_v7();

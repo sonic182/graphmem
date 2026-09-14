@@ -23,6 +23,7 @@ enum Command {
     Forget { id: Uuid },
     Scopes,
     Doctor,
+    Mcp,
 }
 
 #[derive(Args)]
@@ -47,13 +48,13 @@ struct ListArgs {
 #[derive(Args)]
 struct SearchArgs {
     query: String,
-    #[arg(long)]
-    scope: Option<String>,
+    #[arg(long = "scope")]
+    scopes: Vec<String>,
     #[arg(long, default_value_t = 10)]
     limit: usize,
 }
 
-pub fn run() -> Result<(), Box<dyn Error>> {
+pub async fn run() -> Result<(), Box<dyn Error>> {
     match Cli::parse().command {
         Command::Remember(args) => {
             let mut service = MemoryService::open_default()?;
@@ -75,7 +76,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::Search(args) => {
             let service = MemoryService::open_default()?;
-            print_search_results(service.search(&args.query, args.scope.as_deref(), args.limit)?);
+            let results = if args.scopes.is_empty() {
+                service.search(&args.query, None, args.limit)?
+            } else {
+                service.search_scopes(&args.query, &args.scopes, args.limit)?
+            };
+            print_search_results(results);
         }
         Command::Forget { id } => {
             let service = MemoryService::open_default()?;
@@ -91,6 +97,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             println!("database: {}", service.database_path().display());
             println!("status: healthy");
         }
+        Command::Mcp => crate::mcp::run().await?,
     }
     Ok(())
 }

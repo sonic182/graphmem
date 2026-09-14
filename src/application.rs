@@ -43,7 +43,12 @@ impl MemoryService {
     }
 
     pub fn remember(&mut self, request: RememberRequest) -> Result<Memory> {
-        for scope in &request.scopes {
+        let scopes = if request.scopes.is_empty() {
+            vec!["global".to_owned()]
+        } else {
+            request.scopes
+        };
+        for scope in &scopes {
             self.database.get_scope_by_name(scope)?;
         }
 
@@ -54,7 +59,7 @@ impl MemoryService {
         )?;
 
         let mut scope_ids = Vec::new();
-        for name in request.scopes {
+        for name in scopes {
             let scope = match self.database.get_scope_by_name(&name)? {
                 Some(scope) => scope,
                 None => self.database.create_scope(&name)?,
@@ -94,6 +99,22 @@ impl MemoryService {
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
         Ok(self.database.search_memories(query, scope, limit)?)
+    }
+
+    pub fn search_scopes(
+        &self,
+        query: &str,
+        scopes: &[String],
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
+        let scopes = if scopes.is_empty() {
+            vec!["global".to_owned()]
+        } else {
+            scopes.to_vec()
+        };
+        Ok(self
+            .database
+            .search_memories_in_scopes(query, &scopes, limit)?)
     }
 
     pub fn forget(&self, id: Uuid) -> Result<()> {

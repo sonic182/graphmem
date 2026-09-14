@@ -1243,16 +1243,16 @@ Which database convention does this project use?
 
 # 33. Phase 4: MCP server
 
-- [ ] Implement stdio MCP transport
-- [ ] Implement server initialization
-- [ ] Implement `remember`
-- [ ] Implement `recall`
-- [ ] Implement `forget`
-- [ ] Implement `inspect`
-- [ ] Validate tool schemas
-- [ ] Ensure stdout contains MCP protocol only
-- [ ] Send logs to stderr
-- [ ] Add MCP integration tests
+- [x] Implement stdio MCP transport
+- [x] Implement server initialization
+- [x] Implement `remember`
+- [x] Implement `recall`
+- [x] Implement `forget`
+- [x] Implement `inspect`
+- [x] Validate tool schemas
+- [x] Ensure stdout contains MCP protocol only
+- [x] Send logs to stderr
+- [x] Add MCP integration tests
 
 ### Done when
 
@@ -1313,8 +1313,8 @@ Initially relationships may be explicit or derived from structured `remember` ca
 - [ ] Detect Git repository root
 - [ ] Derive repository scope automatically
 - [ ] Support user scope
-- [ ] Support global scope
-- [ ] Define scope precedence
+- [x] Support global scope
+- [x] Define scope precedence
 - [ ] Include current scope automatically in MCP calls where appropriate
 - [ ] Test same memory query across multiple repositories
 
