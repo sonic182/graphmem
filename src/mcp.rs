@@ -93,7 +93,7 @@ struct ForgetOutput {
 impl MemoryServer {
     #[tool(
         name = "remember",
-        description = "Store durable memory. Use global for generally reusable knowledge; use repo:/absolute/path for project-specific knowledge."
+        description = "Store a durable fact, decision, preference, or project rule. Use global for generally reusable knowledge; use repo:/absolute/path for project-specific knowledge."
     )]
     fn remember(
         &self,
@@ -119,7 +119,7 @@ impl MemoryServer {
 
     #[tool(
         name = "recall",
-        description = "Search memories. Without scopes, search global knowledge; with repo:/absolute/path, include that repository and global memories, with repository memories first."
+        description = "Search memory content using SQLite FTS5, not semantic or vector search. Prefer concise keywords over a question. The query uses FTS5 MATCH grammar: whitespace is implicit AND (deploy retry); double quotes make a phrase (\"integration test\"); a trailing * makes a prefix (migrat*); uppercase AND, OR, and NOT combine expressions; parentheses group expressions; and NEAR(term1 term2, N) finds terms close together. Quote text containing punctuation or operators when it should be literal. If FTS5 rejects the expression, the server retries it as one quoted literal phrase. Results are ranked by FTS5 BM25, then importance and recency. Full grammar: https://sqlite.org/fts5.html. Without scopes, search global knowledge; with repo:/absolute/path, include that repository and global memories, with repository memories first."
     )]
     fn recall(
         &self,
@@ -142,7 +142,10 @@ impl MemoryServer {
         Ok(Json(RecallOutput { memories }))
     }
 
-    #[tool(name = "forget", description = "Delete a memory by id.")]
+    #[tool(
+        name = "forget",
+        description = "Permanently delete one memory by id. Use inspect first when the id or contents are uncertain."
+    )]
     fn forget(
         &self,
         Parameters(input): Parameters<IdInput>,
@@ -159,7 +162,7 @@ impl MemoryServer {
 
     #[tool(
         name = "inspect",
-        description = "Inspect a memory by id, including its scopes."
+        description = "Return one memory by id, including its content, metadata, and scopes. Use this before forgetting a memory."
     )]
     fn inspect(
         &self,

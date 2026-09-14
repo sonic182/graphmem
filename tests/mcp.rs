@@ -81,6 +81,13 @@ fn serves_memory_lifecycle_over_stdio() {
         .map(|tool| tool["name"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(names, ["forget", "inspect", "recall", "remember"]);
+    let recall = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "recall")
+        .expect("recall tool is listed");
+    let description = recall["description"].as_str().expect("recall description");
+    assert!(description.contains("SQLite FTS5"));
+    assert!(description.contains("https://sqlite.org/fts5.html"));
 
     let invalid = mcp.request(
         8,

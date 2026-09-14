@@ -1306,7 +1306,7 @@ Initially relationships may be explicit or derived from structured `remember` ca
 - [x] Support global scope
 - [x] Define scope precedence
 - [ ] Include current scope automatically in MCP calls where appropriate
-- [ ] Test same memory query across multiple repositories
+- [x] Test same memory query across multiple repositories
 
 Example:
 
@@ -1416,7 +1416,7 @@ Tests should focus on behavior rather than implementation details.
 ## Search
 
 - [x] obvious memory ranks first
-- [ ] repo scope beats global scope
+- [x] repo scope beats global scope
 - [x] irrelevant memory ranks lower
 - [x] forgotten memory is not returned
 
@@ -1429,10 +1429,10 @@ Tests should focus on behavior rather than implementation details.
 
 ## MCP
 
-- [ ] valid MCP startup
-- [ ] valid JSON schemas
-- [ ] persistence across process restart
-- [ ] logs never contaminate stdout
+- [x] valid MCP startup
+- [x] valid JSON schemas
+- [x] persistence across process restart
+- [x] logs never contaminate stdout
 
 ---
 
@@ -1495,19 +1495,19 @@ install binary → run binary
 
 The MVP is complete when:
 
-- [ ] the project produces one executable
-- [ ] no external database is required
-- [ ] no daemon is required
-- [ ] memories persist under the user's local data directory
-- [ ] memories support scopes
-- [ ] SQLite FTS search works
+- [x] the project produces one executable
+- [x] no external database is required
+- [x] no daemon is required
+- [x] memories persist under the user's local data directory
+- [x] memories support scopes
+- [x] SQLite FTS search works
 - [ ] Claude Code can use it over MCP stdio
 - [ ] Codex can use it over MCP stdio
-- [ ] memories survive client/process restarts
+- [x] memories survive client/process restarts
 - [ ] repository memories can override global/user memories
-- [ ] the user can inspect memories from the CLI
-- [ ] the user can delete memories
-- [ ] logs cannot break the MCP stdio protocol
+- [x] the user can inspect memories from the CLI
+- [x] the user can delete memories
+- [x] logs cannot break the MCP stdio protocol
 
 Graph traversal does **not** need to be sophisticated for MVP.
 
