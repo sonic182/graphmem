@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use graphmem::Database;
+use graphmem::{Database, EntityReference, Relation};
 
 fn test_database() -> (Database, PathBuf) {
     let nonce = SystemTime::now()
@@ -116,6 +116,41 @@ fn failed_scope_batch_rolls_back_all_associations() {
     assert!(result.is_err());
     assert!(database.list_memory_scopes(memory.id).unwrap().is_empty());
 
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
+fn remembers_entities_and_relations_atomically() {
+    let (mut database, path) = test_database();
+    let memory = database
+        .remember_with_graph(
+            "the api depends on sqlite",
+            "fact",
+            0.5,
+            &["global".to_owned()],
+            &[EntityReference {
+                kind: "component".to_owned(),
+                name: "API".to_owned(),
+            }],
+            &[Relation {
+                source: EntityReference {
+                    kind: "component".to_owned(),
+                    name: "API".to_owned(),
+                },
+                relation: "depends_on".to_owned(),
+                target: EntityReference {
+                    kind: "database".to_owned(),
+                    name: "SQLite".to_owned(),
+                },
+                metadata: None,
+            }],
+        )
+        .expect("memory and graph are created");
+    assert_eq!(database.list_memory_scopes(memory.id).unwrap().len(), 1);
+    assert_eq!(database.list_memory_entities(memory.id).unwrap().len(), 2);
+    assert_eq!(database.list_entities().unwrap().len(), 2);
+    assert_eq!(database.list_outgoing_edges(1).unwrap().len(), 1);
     drop(database);
     remove_database(&path);
 }

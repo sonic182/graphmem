@@ -8,7 +8,7 @@
 **Storage:** Embedded SQLite  
 **Transport:** MCP over stdio  
 **Primary clients:** Claude Code, Codex CLI  
-**Data location:** `~/.memory/` by default
+**Data location:** `~/.graphmem/` by default
 
 ---
 
@@ -68,12 +68,12 @@ The binary should provide:
 4. graph relationships
 5. full-text retrieval
 6. a human-readable/debuggable CLI
-7. optional semantic/vector search later
+7. local semantic and graph-aware retrieval
 
 All persistent information should live under:
 
 ```text
-~/.memory/
+~/.graphmem/
 ```
 
 or the appropriate platform-specific data directory.
@@ -81,7 +81,7 @@ or the appropriate platform-specific data directory.
 Example:
 
 ```text
-~/.memory/
+~/.graphmem/
 ├── memory.sqlite
 └── config.toml
 ```
@@ -138,7 +138,7 @@ Codex CLI ─────▶│ memory binary  │◀──── Human CLI
                 │ FTS5           │
                 └────────────────┘
 
-                ~/.memory/
+                ~/.graphmem/
 ```
 
 The process starts when Claude Code or Codex launches the MCP server and exits when the client closes it.
@@ -416,66 +416,45 @@ The memory server should own graph semantics.
 
 # 11. Search
 
-Retrieval should initially avoid embeddings.
-
-The MVP should combine:
-
-```text
-SQLite FTS5
-+
-scope specificity
-+
-graph proximity
-+
-importance
-+
-recency
-```
-
-Conceptual ranking:
+Recall uses local semantic embeddings and Personalized PageRank (PPR) over a
+small heterogeneous graph:
 
 ```text
-score =
-    text_relevance
-  + scope_relevance
-  + graph_relevance
-  + importance
-  + recency
+query embeddings → memory and relation-fact seeds
+explicit memory ↔ entity links
+bidirectional entity relations
+                 ↓
+                PPR
+                 ↓
+         scoped narrative memories
 ```
 
-Exact weighting should remain configurable and should be benchmarked later.
+Only memories that match the requested scopes are eligible for output; global
+entities and relations may provide traversal context but cannot expose an
+out-of-scope memory. Direct query text matches entity names as an additional
+symbolic seed. This is deliberately the non-trained HippoRAG-style baseline;
+query-specific edge weighting and learned traversal remain future work.
 
-Do not prematurely optimize ranking constants.
+`Qwen/Qwen3-Embedding-0.6B` runs locally through Candle. Its model files are
+downloaded on the first enabled recall and cached under `models/` beside the
+database. Memory and edge vectors are cached in SQLite and regenerated lazily
+after a memory content update. When the model cannot initialize or infer,
+Graphmem logs the failure to stderr and retains the existing SQLite FTS5
+ranking as a fallback.
 
----
+Configure embeddings in `~/.graphmem/config.toml` (or the
+`GRAPHMEM_HOME` directory):
 
-# 12. Vector search
-
-Vector search is explicitly **not required for MVP**.
-
-Possible later implementation:
-
-```text
-sqlite-vec
+```toml
+[embedding]
+enabled = true
+model = "Qwen/Qwen3-Embedding-0.6B"
+revision = "main"
 ```
 
-This preserves the single-database architecture:
-
-```text
-memory.sqlite
-├── structured data
-├── graph
-├── FTS
-└── vectors
-```
-
-Potential local embedding implementation:
-
-```text
-fastembed
-```
-
-Embeddings should only be added after evaluating retrieval quality using FTS + graph signals.
+`GRAPHMEM_EMBEDDINGS=off` disables them. `GRAPHMEM_EMBEDDING_MODEL`,
+`GRAPHMEM_EMBEDDING_REVISION`, and `GRAPHMEM_EMBEDDING_CACHE_DIR` override
+those values for one process.
 
 ---
 
@@ -570,19 +549,15 @@ Conceptual request:
     "user:alvaro",
     "global"
   ],
-  "limit": 10
+  "limit": 10,
+  "use_embeddings": true
 }
 ```
 
-Retrieval should combine:
-
-```text
-FTS relevance
-scope relevance
-graph relationships
-importance
-recency
-```
+Retrieval combines scoped semantic seeds, explicit graph context, and PPR.
+SQLite FTS5 remains the lexical fallback when embeddings are disabled or
+unavailable. Set `use_embeddings` to `false` for a per-call lexical comparison
+without loading the embedding model.
 
 Results should include enough provenance for the model to reason about trustworthiness.
 
@@ -789,7 +764,7 @@ Avoid manually assuming `$HOME`.
 Default Unix-style location may resolve conceptually to:
 
 ```text
-~/.memory/
+~/.graphmem/
 ```
 
 but platform-native paths should be considered.
@@ -817,7 +792,8 @@ Logs should go to:
 stderr
 ```
 
-or an optional log file.
+and `~/.graphmem/logs/graphmem.log`. The file follows `GRAPHMEM_HOME` when set,
+so development and production logs remain isolated.
 
 ---
 
@@ -893,26 +869,33 @@ Do not create traits for components unless multiple implementations are actually
 Default:
 
 ```text
-~/.memory/config.toml
+~/.graphmem/config.toml
 ```
 
 Possible initial options:
 
 ```toml
-database = "~/.memory/memory.sqlite"
+[embedding]
+enabled = true
+model = "Qwen/Qwen3-Embedding-0.6B"
+revision = "main"
+backend = "auto"
+# cache_dir = "/optional/model/cache"
 
-[search]
-limit = 10
-
-[ranking]
-scope_weight = 1.0
-recency_weight = 0.2
-importance_weight = 0.3
+[runtime]
+worker_threads = 4
 ```
 
 Most users should not need to create this file.
 
 Defaults should work without configuration.
+
+`GRAPHMEM_EMBEDDINGS=off` disables embeddings. The model, revision, cache
+directory, and backend can be overridden with `GRAPHMEM_EMBEDDING_MODEL`,
+`GRAPHMEM_EMBEDDING_REVISION`, `GRAPHMEM_EMBEDDING_CACHE_DIR`, and
+`GRAPHMEM_EMBEDDING_BACKEND`; `GRAPHMEM_TOKIO_WORKER_THREADS` overrides the
+runtime worker count. `auto` selects CUDA only for binaries compiled with
+Candle CUDA support and otherwise uses CPU; `cpu` and `cuda` force a choice.
 
 ---
 
@@ -1331,38 +1314,21 @@ Only after observing real usage:
 - [ ] Add superseding memories
 - [ ] Add invalidation instead of deletion
 - [ ] Evaluate automatic consolidation
-- [ ] Build regression retrieval dataset
+- [x] Build regression retrieval dataset
 
 Do not add ML merely because it is available.
 
 ---
 
-# 38. Phase 9: Optional semantic search
+# 38. Phase 9: Local semantic graph retrieval
 
-Only implement if FTS retrieval proves insufficient.
-
-- [ ] Evaluate `sqlite-vec`
-- [ ] Evaluate local embedding models
-- [ ] Evaluate `fastembed`
-- [ ] Add embedding table/index
-- [ ] Implement hybrid lexical/vector search
-- [ ] Benchmark against FTS-only retrieval
-- [ ] Measure binary/build impact
-- [ ] Make embeddings optional
-
-Success criterion:
-
-Semantic retrieval must demonstrate a meaningful improvement over:
-
-```text
-FTS
-+
-scope
-+
-graph
-+
-recency
-```
+- [x] Use a local embedding model through Candle
+- [x] Cache memory and relationship-fact vectors in SQLite
+- [x] Make embeddings optional and preserve lexical fallback
+- [x] Link caller-verified entities and relations to memories
+- [x] Rank scoped memory with semantic seeds and PPR
+- [ ] Evaluate CatRAG query-specific edge weights
+- [ ] Evaluate GraphFlow learned traversal
 
 before becoming part of the default architecture.
 

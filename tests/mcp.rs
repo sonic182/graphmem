@@ -14,11 +14,13 @@ struct Mcp {
 
 impl Mcp {
     fn start(home: &Path) -> Self {
-        fs::create_dir_all(home).expect("MCP test home is created");
         Self::start_in(home, home)
     }
 
     fn start_in(home: &Path, directory: &Path) -> Self {
+        fs::create_dir_all(home).expect("MCP test home is created");
+        fs::write(home.join("config.toml"), "[embedding]\nenabled = false\n")
+            .expect("MCP test embeddings are disabled");
         let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
             .env("GRAPHMEM_HOME", home)
@@ -106,10 +108,20 @@ fn serves_memory_lifecycle_over_stdio() {
         .find(|tool| tool["name"] == "recall")
         .expect("recall tool is listed");
     let description = recall["description"].as_str().expect("recall description");
-    assert!(description.contains("SQLite FTS5"));
-    assert!(description.contains("https://sqlite.org/fts5.html"));
-    assert!(description.contains("server's working directory"));
-    assert!(description.contains("not the entity graph"));
+    assert!(description.contains("falls back to lexical ranking"));
+    assert!(description.contains("out-of-scope memory is never returned"));
+    assert!(
+        recall["inputSchema"]["properties"]["use_embeddings"]["description"]
+            .as_str()
+            .expect("use_embeddings description")
+            .contains("exact-token lookup")
+    );
+    assert!(
+        recall["inputSchema"]["properties"]["scopes"]["description"]
+            .as_str()
+            .expect("scopes description")
+            .contains("server's working directory")
+    );
     let stats = listed_tools
         .iter()
         .find(|tool| tool["name"] == "stats")
@@ -131,7 +143,15 @@ fn serves_memory_lifecycle_over_stdio() {
     let remembered = mcp.request(
         3,
         "tools/call",
-        json!({"name":"remember","arguments":{"content":"stdio memory"}}),
+        json!({"name":"remember","arguments":{
+            "content":"stdio memory",
+            "entities":[{"kind":"component","name":"MCP"}],
+            "relations":[{
+                "source":{"kind":"component","name":"MCP"},
+                "relation":"uses",
+                "target":{"kind":"transport","name":"stdio"}
+            }]
+        }}),
     );
     let id = remembered["result"]["structuredContent"]["id"]
         .as_i64()
@@ -139,6 +159,15 @@ fn serves_memory_lifecycle_over_stdio() {
     assert_eq!(
         remembered["result"]["structuredContent"]["scopes"],
         json!(["global"])
+    );
+    let graph = mcp.request(
+        9,
+        "tools/call",
+        json!({"name":"graph","arguments":{"kind":"component","name":"MCP","direction":"outgoing"}}),
+    );
+    assert_eq!(
+        graph["result"]["structuredContent"]["paths"][0]["hops"][0]["entity"]["name"],
+        "stdio"
     );
 
     drop(mcp);
@@ -151,7 +180,7 @@ fn serves_memory_lifecycle_over_stdio() {
     let recalled = mcp.request(
         5,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"stdio"}}),
+        json!({"name":"recall","arguments":{"query":"stdio","use_embeddings":false}}),
     );
     assert_eq!(
         recalled["result"]["structuredContent"]["memories"][0]["id"],
@@ -395,7 +424,66 @@ fn relates_normalized_entities_and_traverses_bounded_paths() {
 }
 
 #[test]
-fn recall_boosts_memories_adjacent_to_a_graph_matched_entity() {
+fn graph_inspection_preserves_alternative_simple_paths() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-graph-quality-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    for (id, source, target) in [
+        (2, "root", "left"),
+        (3, "root", "right"),
+        (4, "left", "target"),
+        (5, "right", "target"),
+    ] {
+        mcp.request(
+            id,
+            "tools/call",
+            json!({"name":"relate","arguments":{"source":{"kind":"node","name":source},"relation":"leads_to","target":{"kind":"node","name":target}}}),
+        );
+    }
+    let graph = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"graph","arguments":{"kind":"node","name":"root","direction":"outgoing","max_depth":2}}),
+    );
+    let paths = graph["result"]["structuredContent"]["paths"]
+        .as_array()
+        .expect("graph paths");
+    let target_paths = paths
+        .iter()
+        .filter(|path| {
+            path["hops"]
+                .as_array()
+                .is_some_and(|hops| hops.len() == 2 && hops[1]["entity"]["name"] == "target")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(target_paths.len(), 2);
+    assert!(
+        target_paths
+            .iter()
+            .any(|path| path["hops"][0]["entity"]["name"] == "left")
+    );
+    assert!(
+        target_paths
+            .iter()
+            .any(|path| path["hops"][0]["entity"]["name"] == "right")
+    );
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn recall_boosts_direct_graph_neighbors_but_not_second_hops() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is valid")
@@ -413,35 +501,49 @@ fn recall_boosts_memories_adjacent_to_a_graph_matched_entity() {
     mcp.request(
         2,
         "tools/call",
-        json!({"name":"relate","arguments":{"source":{"kind":"problem","name":"storm"},"relation":"solved_by","target":{"kind":"solution","name":"circuit-breaker"}}}),
+        json!({"name":"relate","arguments":{"source":{"kind":"problem","name":"outage"},"relation":"solved_by","target":{"kind":"solution","name":"retry"}}}),
     );
-    let high_importance_no_neighbor = mcp.request(
+    mcp.request(
         3,
         "tools/call",
-        json!({"name":"remember","arguments":{"content":"incident happened last night","importance":0.9,"scopes":["global"]}}),
+        json!({"name":"relate","arguments":{"source":{"kind":"solution","name":"retry"},"relation":"requires","target":{"kind":"change","name":"deployment"}}}),
     );
-    let neighbor_id = high_importance_no_neighbor["result"]["structuredContent"]["id"]
-        .as_i64()
-        .expect("first memory id");
-    let low_importance_neighbor = mcp.request(
+    let direct_neighbor = mcp.request(
         4,
         "tools/call",
-        json!({"name":"remember","arguments":{"content":"incident resolved via circuit-breaker automatically","importance":0.1,"scopes":["global"]}}),
+        json!({"name":"remember","arguments":{"content":"incident resolved by retry","importance":0.0,"scopes":["global"]}}),
     );
-    let boosted_id = low_importance_neighbor["result"]["structuredContent"]["id"]
+    let direct_neighbor_id = direct_neighbor["result"]["structuredContent"]["id"]
         .as_i64()
-        .expect("second memory id");
-    let recalled = mcp.request(
+        .expect("direct neighbor memory id");
+    let second_hop = mcp.request(
         5,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"incident OR storm","scopes":["global"]}}),
+        json!({"name":"remember","arguments":{"content":"incident deployment steps","importance":1.0,"scopes":["global"]}}),
+    );
+    let second_hop_id = second_hop["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("second hop memory id");
+    let unrelated = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"incident unrelated notes","importance":0.9,"scopes":["global"]}}),
+    );
+    let unrelated_id = unrelated["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("unrelated memory id");
+    let recalled = mcp.request(
+        7,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"incident OR outage","scopes":["global"]}}),
     );
     let memories = recalled["result"]["structuredContent"]["memories"]
         .as_array()
         .expect("recalled memories");
-    assert_eq!(memories.len(), 2);
-    assert_eq!(memories[0]["id"], boosted_id);
-    assert_eq!(memories[1]["id"], neighbor_id);
+    assert_eq!(memories.len(), 3);
+    assert_eq!(memories[0]["id"], direct_neighbor_id);
+    assert_eq!(memories[1]["id"], second_hop_id);
+    assert_eq!(memories[2]["id"], unrelated_id);
     drop(mcp);
     fs::remove_dir_all(home).expect("MCP test data is removed");
 }

@@ -4,13 +4,21 @@ version = "0.1.0"
 edition = "2024"
 autobins = false
 
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+
 [[bin]]
 name = "gmem"
 path = "src/main.rs"
 
 [dependencies]
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
 clap = { version = "4", features = ["derive"] }
 directories = "6"
+hf-hub = "0.4"
 rmcp = { version = "3", features = ["transport-io"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 schemars = "1"
@@ -18,4 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokenizers = "0.22"
+toml = "0.9"
 tracing = "0.1"
+tracing-subscriber = "0.3"

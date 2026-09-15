@@ -4,10 +4,10 @@ use std::{
 };
 
 use graphmem::{
-    Edge, Entity, GraphDirection, GraphHop, GraphPath, StoreStats,
+    Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Relation, StoreStats,
     application::{
-        EntityReference, GraphDetails, GraphRequest, MemoryDetails, MemoryService, RelateRequest,
-        RelationDetails, RememberRequest,
+        GraphDetails, GraphRequest, MemoryDetails, MemoryService, RelateRequest, RelationDetails,
+        RememberRequest,
     },
     infrastructure::repository::git_repository_root,
 };
@@ -57,35 +57,71 @@ impl MemoryServer {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct RememberInput {
+    /// The memory itself: one concise, self-contained statement of the fact,
+    /// decision, or rule, plus why it exists when that is not obvious.
     content: String,
+    /// Category of the memory, such as decision, convention, constraint, or
+    /// incident. Defaults to observation.
     #[serde(default)]
     memory_type: Option<String>,
+    /// How costly it would be for a future task to miss this, from 0.0 to 1.0.
+    /// Defaults to 0.0; reserve values above 0.7 for information whose absence
+    /// leads to a wrong or expensive change.
     #[serde(default)]
     importance: Option<f64>,
+    /// Where the memory belongs: global for knowledge reusable across
+    /// repositories, or repo:/absolute/path for one repository. Omit to use the
+    /// repository containing the server's working directory.
     #[serde(default)]
     scopes: Vec<String>,
+    /// Entities this memory is about, so recall can reach it through graph
+    /// context. Use stable canonical names.
+    #[serde(default)]
+    entities: Vec<EntityInput>,
+    /// Verified directed relations this memory establishes; stored in the graph
+    /// and linked to this memory in one call.
+    #[serde(default)]
+    relations: Vec<RelateInput>,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct RecallInput {
+    /// What you need context about: the component, symbol, error, or decision.
+    /// Natural language works; with use_embeddings false this is an FTS5 query
+    /// where whitespace means AND.
     query: String,
+    /// Where to search: global, or repo:/absolute/path. Omit to search the
+    /// repository containing the server's working directory plus global.
     #[serde(default)]
     scopes: Vec<String>,
+    /// Maximum memories to return. Defaults to 10; 3 to 5 is usually enough
+    /// before starting a task.
     #[serde(default)]
     limit: Option<usize>,
+    /// Defaults to true. Set false for an exact-token lookup such as a literal
+    /// symbol, error string, or path, which skips the embedding model.
+    #[serde(default)]
+    use_embeddings: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct EntityInput {
+    /// Stable type of the thing, such as crate, service, module, or library.
     kind: String,
+    /// Canonical name of the thing, spelled the same way everywhere.
     name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct RelateInput {
+    /// Entity the relation points from.
     source: EntityInput,
+    /// Concise snake_case verb such as depends_on, uses, owns, or implements,
+    /// read as source relation target.
     relation: String,
+    /// Entity the relation points to.
     target: EntityInput,
+    /// Optional short note qualifying the edge.
     #[serde(default)]
     metadata: Option<String>,
 }
@@ -100,18 +136,24 @@ enum GraphDirectionInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GraphInput {
+    /// Kind of the entity to start from.
     kind: String,
+    /// Name of the entity to start from.
     name: String,
+    /// Which edges to follow. Defaults to both.
     #[serde(default)]
     direction: Option<GraphDirectionInput>,
+    /// Hops to traverse, 1 to 3. Defaults to 1.
     #[serde(default)]
     max_depth: Option<usize>,
+    /// Maximum paths to return, 1 to 100.
     #[serde(default)]
     limit: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct IdInput {
+    /// Memory id, as returned by recall or remember.
     id: i64,
 }
 
@@ -199,7 +241,15 @@ struct GraphOutput {
 impl MemoryServer {
     #[tool(
         name = "remember",
-        description = "Store a durable narrative memory: a fact, decision, rationale, preference, or project rule. Memories are separate from the entity graph: this does not create entities or relationships. When scopes are omitted, store it in the Git repository containing the server's working directory; outside a Git repository, store it in global. Pass global for generally reusable knowledge or repo:/absolute/path to override the default."
+        description = "Store a durable narrative memory: a verified fact, decision, rationale, \
+             convention, constraint, or preference that a future task would otherwise have to \
+             rediscover. Do not store secrets, speculation, transient progress, or anything \
+             readable from the source. Recall first and update your understanding rather than \
+             saving a near-duplicate. Attach the entities the memory is about: without them it \
+             is findable only by its own wording, while an attached entity lets a later query \
+             reach it through the graph. Repeated relations reuse the existing edge. When scopes are \
+             omitted, store it in the Git repository containing the server's working directory, \
+             or in global outside a repository."
     )]
     fn remember(
         &self,
@@ -216,6 +266,8 @@ impl MemoryServer {
                     .unwrap_or_else(|| "observation".to_owned()),
                 importance: input.importance.unwrap_or(0.0),
                 scopes,
+                entities: input.entities.into_iter().map(entity_reference).collect(),
+                relations: input.relations.into_iter().map(relation).collect(),
             })
             .map_err(|error| tool_error(error.to_string()))?;
         let details = service
@@ -226,7 +278,17 @@ impl MemoryServer {
 
     #[tool(
         name = "recall",
-        description = "Search scoped narrative memory content using SQLite FTS5, not the entity graph, semantic search, or vector search. Prefer concise keywords over a question. The query uses FTS5 MATCH grammar: whitespace is implicit AND (deploy retry); double quotes make a phrase (\"integration test\"); a trailing * makes a prefix (migrat*); uppercase AND, OR, and NOT combine expressions; parentheses group expressions; and NEAR(term1 term2, N) finds terms close together. Quote text containing punctuation or operators when it should be literal. Terms holding characters FTS5 cannot parse bare, such as hyphens, are quoted automatically without affecting surrounding operators; if FTS5 still rejects the expression, the server retries the whole query as one quoted literal phrase. Results are ranked by FTS5 BM25, then importance and recency. Full grammar: https://sqlite.org/fts5.html. When scopes are omitted, search the Git repository containing the server's working directory plus global memory, with repository memories first; outside a Git repository, search global memory. Pass repo:/absolute/path to override the default."
+        description = "Search scoped narrative memories before investigating or changing code, to \
+             recover decisions, conventions, and constraints that are not in the repository. \
+             Ranking scores memories, entities and relations by meaning and then propagates that \
+             rank along graph edges, so a natural-language query works and a memory can be \
+             reached through the entities it is attached to. Recall always returns its best \
+             candidates, even when the store holds nothing relevant, and scores are relative \
+             within one query rather than a measure of relevance; treat a result that does not \
+             address the task as nothing known. Scope filtering happens before ranking, so \
+             out-of-scope memory is never returned. The embedding model downloads into the local \
+             Graphmem data directory on first use; if it cannot load, recall falls back to \
+             lexical ranking."
     )]
     fn recall(
         &self,
@@ -234,9 +296,14 @@ impl MemoryServer {
     ) -> Result<Json<RecallOutput>, CallToolResult> {
         validate_scopes(&input.scopes)?;
         let scopes = self.scopes(input.scopes);
-        let service = self.lock()?;
+        let mut service = self.lock()?;
         let results = service
-            .search_scopes(&input.query, &scopes, input.limit.unwrap_or(10))
+            .search_scopes_with_embeddings(
+                &input.query,
+                &scopes,
+                input.limit.unwrap_or(10),
+                input.use_embeddings.unwrap_or(true),
+            )
             .map_err(|error| tool_error(error.to_string()))?;
         let memories = results
             .into_iter()
@@ -252,7 +319,9 @@ impl MemoryServer {
 
     #[tool(
         name = "stats",
-        description = "Report read-only totals for both separate local stores: all scoped narrative memories and scopes, plus all unscoped graph entities and edges. This returns counts only; use recall for memory content and graph for relationship paths."
+        description = "Report read-only totals for both separate local stores: all scoped \
+             narrative memories and scopes, plus all unscoped graph entities and edges. This \
+             returns counts only; use recall for memory content and graph for relationship paths."
     )]
     fn stats(&self) -> Result<Json<StatsOutput>, CallToolResult> {
         let stats = self
@@ -264,7 +333,12 @@ impl MemoryServer {
 
     #[tool(
         name = "relate",
-        description = "Store a graph-only, durable directed relationship between named entities; it does not create or link a narrative memory. Use source -> relation -> target with a concise snake_case relation such as depends_on, uses, or solved_by. Use this only for verified, reusable facts; it creates missing entities from kind and name, and repeating the same relationship reuses the existing edge. Graph entities and edges are currently unscoped, so every graph query sees the same local graph."
+        description = "Store a graph-only directed relationship between named entities; it does \
+             not create or link a narrative memory, so use remember with relations when the fact \
+             also needs an explanation. Use this only for verified, durable structure such as a \
+             crate depending on a library or a service owning a component. Missing entities are \
+             created, and repeating the same relationship reuses the existing edge. The graph is \
+             unscoped and shared by every query, so avoid repository-specific or speculative edges."
     )]
     fn relate(
         &self,
@@ -284,7 +358,11 @@ impl MemoryServer {
 
     #[tool(
         name = "graph",
-        description = "Inspect the unscoped entity graph only; this does not search narrative memories. Use it before adding uncertain or duplicate relations. By default, traverse one hop in both directions. Set direction to incoming or outgoing when needed; max_depth is 1 through 3 and limit is 1 through 100. Each result path starts at the requested entity; an incoming hop means the related entity points to the preceding entity."
+        description = "Inspect the unscoped entity graph around one entity; this does not search \
+             narrative memories. Use it to expand context around a recall result, and before \
+             adding an uncertain or possibly duplicate relation. Each result path starts at the \
+             requested entity; an incoming hop means the related entity points to the preceding \
+             entity."
     )]
     fn graph(
         &self,
@@ -338,7 +416,22 @@ impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("gmem", "0.1.0"))
-            .with_instructions("Graphmem has two separate local stores. Narrative memory is scoped, searchable text: use remember for verified facts, decisions, rationale, constraints, preferences, and reusable project rules; use recall before work when that context may matter. The entity graph is unscoped structured data: use relate for verified source -> relation -> target facts and graph to inspect their bounded paths. Use stats for read-only counts of both stores. A memory never creates or links an entity or edge, and an edge never creates or links a memory; store both when a relationship needs an explanation. Do not store secrets, credentials, private personal data, transient debugging output, or unverified speculation. Omitted memory scopes use the Git repository containing the server's startup working directory and include global memories during recall; outside a Git repository, they use global. Pass global for reusable knowledge or repo:/absolute/path to override that default. Prefer recall over creating duplicate memories, and inspect before forgetting when uncertain.")
+            .with_instructions(
+                "Graphmem has two separate local stores: scoped narrative memory and an entity \
+                 graph. The entity graph is unscoped. Use remember for verified facts, decisions, \
+                 rationale, constraints, preferences, and reusable project rules; attach the \
+                 entities a memory is about, because a memory stored without them can only ever \
+                 be found by its own wording. Use relate for verified graph-only facts and graph \
+                 to inspect bounded paths. Use recall before investigating or changing code, \
+                 stats for read-only counts, and \
+                 inspect before forgetting when uncertain. Do not store secrets, credentials, \
+                 private personal data, transient debugging output, or unverified speculation. \
+                 Omitted memory scopes use the Git repository containing the server's startup \
+                 working directory and include global memories during recall; outside a Git \
+                 repository, they use global. Pass global for reusable knowledge or \
+                 repo:/absolute/path to override that default. Prefer recall over creating \
+                 duplicate memories.",
+            )
     }
 }
 
@@ -370,6 +463,15 @@ fn entity_reference(input: EntityInput) -> EntityReference {
     EntityReference {
         kind: input.kind,
         name: input.name,
+    }
+}
+
+fn relation(input: RelateInput) -> Relation {
+    Relation {
+        source: entity_reference(input.source),
+        relation: input.relation,
+        target: entity_reference(input.target),
+        metadata: input.metadata,
     }
 }
 
