@@ -95,7 +95,8 @@ sin importar si preguntas por software, ciudades o coches.
 - [ ] Query-specific edge weights
 - [ ] Weighted/directed PPR
 - [ ] Key-Fact Passage Enhancement (provenance `memory_edges` + boost `×2.5`)
-- [ ] LLM edge scorer / Recognition Memory — diferido a propósito, no forma parte de este roadmap
+- [ ] Cross-encoder edge scorer (reranker local, MiniLM) — planeado, reemplaza al `LLM_classify` del paper
+- [ ] Recognition Memory (filtro LLM de triples) — diferido a propósito, fuera de este roadmap
 
 Estimación: ~65–70% de un "CatRAG-lite" razonable para graphmem; ~45–50% de
 una reproducción fiel del paper completo (que además exige un LLM scorer).
@@ -113,7 +114,7 @@ Static Graph Fallacy.
 Los tres mecanismos de CatRAG, y cómo mapean a graphmem:
 
 1. **Symbolic Anchoring** — ✅ ya hecho (`entity_anchor_weight` + `text_mentions`, sin llamada a LLM para NER).
-2. **Query-Aware Dynamic Edge Weighting** — filtro barato por coseno sobre las outgoing edges de los top seeds (`Nseed=5`, `Kedge=15` en el paper oficial), y solo entonces (en el paper) un LLM clasifica cada edge en `Irrelevant/Weak/High/Direct` → multiplicador de peso. graphmem se queda con el filtro por coseno y **sustituye el LLM por un mapeo monótono coseno→multiplicador**, verificado con `retrieval_eval.rs` en vez de con un juez externo.
+2. **Query-Aware Dynamic Edge Weighting** — filtro barato por coseno sobre las outgoing edges de los top seeds (`Nseed=5`, `Kedge=15` en el paper oficial), y solo entonces (en el paper) un LLM clasifica cada edge en `Irrelevant/Weak/High/Direct` → multiplicador de peso. graphmem sustituye ese LLM por un **cross-encoder reranker local tipo MiniLM** (p.ej. `cross-encoder/ms-marco-MiniLM-L-6-v2`): mismo rol de juez query↔fact, pero un modelo pequeño BERT-family, cargable con `candle_transformers::models::bert` igual que DistilBERT hoy en `embedding.rs`, sin API externa. Da un score continuo en vez de 4 etiquetas, que se mapea a multiplicador con una función monótona — se verifica con `retrieval_eval.rs`, no con un juez externo.
 3. **Key-Fact Passage Enhancement** — si un triple es relevante, los passages que lo contienen reciben `new_weight(entity, passage) = weight * (1 + β)` con `β=2.5` en el paper. Requiere saber qué facts aparecen en qué passage — hoy graphmem no guarda esa relación.
 
 ```text
@@ -137,14 +138,17 @@ Minibot ─uses──────── Python   w=1        Minibot ─uses─�
   ```
   sin duplicar texto ni atributos; `remember_with_graph` la puebla al crear los edges de una memory.
 - [ ] Key-Fact Passage Enhancement: cuando un edge es relevante, boost `×2.5` de la transición entity→memory correspondiente vía `memory_edges`, renormalizando la masa total.
+- [ ] `CrossEncoderEdgeScorer`: cargar un cross-encoder MiniLM (p.ej. `cross-encoder/ms-marco-MiniLM-L-6-v2`, BERT-family, vía `candle_transformers::models::bert`) que puntúe `(query, edge_document(edge))` como par conjunto en vez de comparar embeddings independientes — mismo patrón "retrieve con bi-encoder, rerank con cross-encoder" que ya usa search bi-encoder + este reranker.
 - [ ] Nuevo fixture "hub semantic drift" en `retrieval_eval.rs` (una entidad con muchos edges de temas distintos) para verificar que el reponderado reduce la dispersión hacia vecinos irrelevantes, no solo mejora casos ya fáciles.
-- [ ] Trait `EdgeScorer` para dejar la puerta abierta a un scorer basado en LLM sin contaminar el core:
+- [ ] Trait `EdgeScorer` para desacoplar "cómo se puntúa un edge candidato" de PPR, con tres niveles posibles detrás de la misma interfaz:
   ```rust
   trait EdgeScorer {
       fn score(&self, query: &str, candidates: &[EdgeCandidate]) -> Vec<f64>;
   }
   ```
-  `EmbeddingEdgeScorer` (coseno + mapeo monótono) como único default; `LlmEdgeScorer` queda como posibilidad futura detrás de la misma interfaz, **no implementarlo todavía**.
+  - `EmbeddingEdgeScorer` (coseno + mapeo monótono, ya disponible como señal hoy) — default v1, coste cero adicional.
+  - `CrossEncoderEdgeScorer` (reranker MiniLM local, ver mecanismo 2 arriba) — mejora de calidad planeada, sigue siendo 100% local/sin API.
+  - `LlmEdgeScorer` (LLM externo tipo el paper original) — posibilidad futura detrás de la misma interfaz, **no implementarlo todavía**.
 
 La API objetivo es la misma que ya se imaginó desde el principio:
 
