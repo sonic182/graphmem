@@ -5,7 +5,8 @@ Graphmem is currently `0.0.1`. The SQLite schema in
 there is no schema version table and no automatic migration system yet.
 
 The current additive upgrade creates `memory_entities`, `memory_embeddings`,
-and `edge_embeddings` with `CREATE TABLE IF NOT EXISTS`. Existing memories,
+`entity_embeddings`, and `edge_embeddings` with `CREATE TABLE IF NOT EXISTS`.
+Existing memories,
 scopes, entities, and edges remain valid. Embeddings are populated lazily on
 recall; graph links are only created from explicit `remember` entities and
 relations, never inferred during an upgrade.

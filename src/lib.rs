@@ -1,7 +1,5 @@
 pub mod application;
-pub mod config;
 pub mod domain;
-pub mod embedding;
 pub mod infrastructure;
 #[cfg(test)]
 mod retrieval_eval;

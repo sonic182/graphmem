@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -513,6 +514,36 @@ impl Database {
             .query_map([memory_id], entity_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(entities)
+    }
+
+    pub fn entities_by_memory(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Entity>>> {
+        let mut grouped = HashMap::new();
+        if memory_ids.is_empty() {
+            return Ok(grouped);
+        }
+        let placeholders = (0..memory_ids.len())
+            .map(|index| format!("?{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT e.id, e.kind, e.name, e.canonical_name, e.created_at, e.updated_at, me.memory_id
+             FROM entities e
+             JOIN memory_entities me ON me.entity_id = e.id
+             WHERE me.memory_id IN ({placeholders}) ORDER BY me.memory_id, e.id"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(memory_ids), |row| {
+                Ok((row.get::<_, i64>(6)?, entity_from_row(row)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (memory_id, entity) in rows {
+            grouped
+                .entry(memory_id)
+                .or_insert_with(Vec::new)
+                .push(entity);
+        }
+        Ok(grouped)
     }
 
     pub fn memory_embedding(

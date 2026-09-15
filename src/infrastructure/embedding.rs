@@ -7,7 +7,7 @@ use hf_hub::{Repo, RepoType, api::sync::ApiBuilder};
 use thiserror::Error;
 use tokenizers::Tokenizer;
 
-use crate::config::EmbeddingConfig;
+use crate::infrastructure::config::EmbeddingConfig;
 
 #[derive(Debug, Error)]
 pub enum EmbeddingError {

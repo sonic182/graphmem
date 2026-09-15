@@ -5,9 +5,11 @@ use thiserror::Error;
 use crate::{
     Database, Edge, Entity, EntityReference, GraphDirection, GraphPath, Memory, Relation, Scope,
     SearchResult, StorageError, StoreStats,
-    config::{ConfigError, EmbeddingConfig, RetrievalConfig, embedding_config, retrieval_config},
     domain::{personalized_pagerank, text_mentions},
-    embedding::{Embedder, EmbeddingError, EmbeddingModel},
+    infrastructure::config::{
+        ConfigError, EmbeddingConfig, RetrievalConfig, embedding_config, retrieval_config,
+    },
+    infrastructure::embedding::{Embedder, EmbeddingError, EmbeddingModel},
 };
 
 pub type Result<T> = std::result::Result<T, ApplicationError>;
@@ -396,10 +398,12 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
     let mut edge_endpoints = Vec::new();
     let mut anchors = Vec::new();
 
+    let memory_ids = memories.iter().map(|memory| memory.id).collect::<Vec<_>>();
+    let mut memory_entities = database.entities_by_memory(&memory_ids)?;
     for (index, memory) in memories.iter().enumerate() {
         let vector = memory_vector(database, embedder, memory.id, &memory.content)?;
         memory_scores.push((index, dot_product(&query_vector, &vector)));
-        for entity in database.list_memory_entities(memory.id)? {
+        for entity in memory_entities.remove(&memory.id).unwrap_or_default() {
             if let Some(&entity_node) = entity_nodes.get(&entity.id) {
                 add_link(&mut adjacency, index, entity_node);
             }
@@ -600,8 +604,8 @@ mod tests {
 
     use crate::{
         Database, EntityReference, Relation,
-        config::{EmbeddingConfig, RetrievalConfig},
-        embedding::{EmbeddingError, EmbeddingModel},
+        infrastructure::config::{EmbeddingConfig, RetrievalConfig},
+        infrastructure::embedding::{EmbeddingError, EmbeddingModel},
     };
 
     use super::{MemoryService, RememberRequest, revision_key, semantic_results};

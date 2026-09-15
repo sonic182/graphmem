@@ -8,8 +8,8 @@ use std::{
 use crate::{
     Database, EntityReference, Relation,
     application::semantic_results,
-    config::RetrievalConfig,
-    embedding::{EmbeddingError, EmbeddingModel},
+    infrastructure::config::RetrievalConfig,
+    infrastructure::embedding::{EmbeddingError, EmbeddingModel},
 };
 
 const SCOPE: &str = "repo:/eval";

@@ -7,7 +7,7 @@ fn main() {
         .and_then(|path| path.parent().map(ToOwned::to_owned));
     let worker_threads = data_dir
         .as_deref()
-        .and_then(|path| graphmem::config::runtime_config(path).ok())
+        .and_then(|path| graphmem::infrastructure::config::runtime_config(path).ok())
         .map(|config| config.worker_threads)
         .unwrap_or(4);
     if let Err(error) = init_logging() {
