@@ -245,8 +245,9 @@ impl MemoryServer {
              convention, constraint, or preference that a future task would otherwise have to \
              rediscover. Do not store secrets, speculation, transient progress, or anything \
              readable from the source. Recall first and update your understanding rather than \
-             saving a near-duplicate. Attaching entities and relations makes the memory reachable \
-             through graph context; repeated relations reuse the existing edge. When scopes are \
+             saving a near-duplicate. Attach the entities the memory is about: without them it \
+             is findable only by its own wording, while an attached entity lets a later query \
+             reach it through the graph. Repeated relations reuse the existing edge. When scopes are \
              omitted, store it in the Git repository containing the server's working directory, \
              or in global outside a repository."
     )]
@@ -279,11 +280,15 @@ impl MemoryServer {
         name = "recall",
         description = "Search scoped narrative memories before investigating or changing code, to \
              recover decisions, conventions, and constraints that are not in the repository. \
-             Ranking is semantic and boosts memories linked to entities the query matches or \
-             their graph neighbors, so a natural-language query works. Scope filtering happens \
-             before ranking, so out-of-scope memory is never returned. The embedding model \
-             downloads into the local Graphmem data directory on first use; if it cannot load, \
-             recall falls back to lexical ranking."
+             Ranking scores memories, entities and relations by meaning and then propagates that \
+             rank along graph edges, so a natural-language query works and a memory can be \
+             reached through the entities it is attached to. Recall always returns its best \
+             candidates, even when the store holds nothing relevant, and scores are relative \
+             within one query rather than a measure of relevance; treat a result that does not \
+             address the task as nothing known. Scope filtering happens before ranking, so \
+             out-of-scope memory is never returned. The embedding model downloads into the local \
+             Graphmem data directory on first use; if it cannot load, recall falls back to \
+             lexical ranking."
     )]
     fn recall(
         &self,
@@ -414,10 +419,11 @@ impl ServerHandler for MemoryServer {
             .with_instructions(
                 "Graphmem has two separate local stores: scoped narrative memory and an entity \
                  graph. The entity graph is unscoped. Use remember for verified facts, decisions, \
-                 rationale, constraints, preferences, and reusable project rules; add entities \
-                 and relations when the memory establishes durable retrieval context. Use relate \
-                 for verified graph-only facts and graph to inspect bounded paths. Use recall \
-                 before work when that context may matter, stats for read-only counts, and \
+                 rationale, constraints, preferences, and reusable project rules; attach the \
+                 entities a memory is about, because a memory stored without them can only ever \
+                 be found by its own wording. Use relate for verified graph-only facts and graph \
+                 to inspect bounded paths. Use recall before investigating or changing code, \
+                 stats for read-only counts, and \
                  inspect before forgetting when uncertain. Do not store secrets, credentials, \
                  private personal data, transient debugging output, or unverified speculation. \
                  Omitted memory scopes use the Git repository containing the server's startup \
