@@ -75,6 +75,7 @@ pub struct ReembedStats {
     pub memories: usize,
     pub entities: usize,
     pub edges: usize,
+    pub failures: Vec<String>,
 }
 
 pub struct MemoryService {
@@ -277,32 +278,53 @@ impl MemoryService {
         }
         let embedder = embedder.as_ref().expect("embedder just loaded");
 
+        let mut stats = ReembedStats {
+            memories: 0,
+            entities: 0,
+            edges: 0,
+            failures: Vec::new(),
+        };
+
         let memories = database.list_all_memories()?;
         for memory in &memories {
-            memory_vector(database, embedder, memory.id, &memory.content)?;
+            match memory_vector(database, embedder, memory.id, &memory.content) {
+                Ok(_) => stats.memories += 1,
+                Err(error) => stats
+                    .failures
+                    .push(format!("memory {}: {error}", memory.id)),
+            }
         }
 
         let entities = database.list_entities()?;
         for entity in &entities {
-            entity_vector(database, embedder, entity)?;
+            match entity_vector(database, embedder, entity) {
+                Ok(_) => stats.entities += 1,
+                Err(error) => stats
+                    .failures
+                    .push(format!("entity {}: {error}", entity.id)),
+            }
         }
         let entities_by_id: HashMap<i64, &Entity> =
             entities.iter().map(|entity| (entity.id, entity)).collect();
 
         let edges = database.list_all_edges()?;
         for edge in &edges {
-            // FK constraints (edges.source_id/target_id REFERENCES entities
-            // ON DELETE CASCADE) guarantee both endpoints exist.
-            let source = entities_by_id[&edge.source_id];
-            let target = entities_by_id[&edge.target_id];
-            edge_vector(database, embedder, edge, source, target)?;
+            let (Some(source), Some(target)) = (
+                entities_by_id.get(&edge.source_id),
+                entities_by_id.get(&edge.target_id),
+            ) else {
+                stats
+                    .failures
+                    .push(format!("edge {}: source or target entity missing", edge.id));
+                continue;
+            };
+            match edge_vector(database, embedder, edge, source, target) {
+                Ok(_) => stats.edges += 1,
+                Err(error) => stats.failures.push(format!("edge {}: {error}", edge.id)),
+            }
         }
 
-        Ok(ReembedStats {
-            memories: memories.len(),
-            entities: entities.len(),
-            edges: edges.len(),
-        })
+        Ok(stats)
     }
 
     fn lexical_search(

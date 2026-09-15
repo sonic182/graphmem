@@ -132,12 +132,29 @@ disabled; set [embedding] enabled = true (or unset GRAPHMEM_EMBEDDINGS) to
 reembed`. If the configured model fails to download or load, it exits
 non-zero with that error instead of silently doing nothing.
 
+**One failing record never blocks the rest of the store**: `reembed` still
+visits every memory, entity, and edge even if some individual record fails
+to embed. Each failure is printed with the record's kind and id, and the
+command exits non-zero if any occurred, but every other record still gets
+migrated in the same pass — re-run `gmem reembed` afterward and only the
+still-failing records are retried (everything else is already current and
+skipped per the idempotency check above).
+
 **Typical migration**, after editing `model` in `config.toml` (or setting
 `GRAPHMEM_EMBEDDING_MODEL`):
 
 ```sh
 gmem reembed
 # reembedded 14 memories, 16 entities, 7 edges under the current embedding model
+```
+
+If some records fail:
+
+```sh
+gmem reembed
+# reembedded 13 memories, 16 entities, 7 edges under the current embedding model
+# 1 item(s) failed to reembed:
+#   memory 42: model inference failed: ...
 ```
 
 Note that `revision` in the cache key doesn't include the compute backend

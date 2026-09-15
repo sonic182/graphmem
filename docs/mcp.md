@@ -38,8 +38,11 @@ repository scope from its working directory; outside a Git repository it uses
 
 Embeddings default to `sentence-transformers/msmarco-distilbert-cos-v5` through Candle. The model is
 downloaded on the first enabled recall and cached under `models/` in the
-Graphmem data directory. To disable embeddings and retain SQLite FTS5 lexical
-ranking, use either:
+Graphmem data directory. Content is silently truncated to the model's
+`max_position_embeddings` (512 tokens for the default model) before
+embedding, so only the first ~512 tokens of a very long memory, entity, or
+edge document affect its embedding. To disable embeddings and retain SQLite
+FTS5 lexical ranking, use either:
 
 ```toml
 # ~/.graphmem/config.toml
@@ -66,7 +69,10 @@ nobody queries can stay embedded under the old model indefinitely. Run
 `gmem reembed` once after changing the model to eagerly recompute every
 memory, entity, and edge across every scope in the store. It fails loudly
 (instead of silently falling back to lexical ranking) if the new model can't
-load, and is safe to re-run — already-current rows are skipped.
+load, and is safe to re-run — already-current rows are skipped. It processes
+every record regardless of individual failures; it prints each failure with
+the record's id and exits non-zero if any occurred, but a single failing
+record never blocks the rest of the store from migrating.
 
 Tokio uses four workers by default. Override it in the same file when needed:
 

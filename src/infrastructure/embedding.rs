@@ -6,7 +6,7 @@ use candle_transformers::models::{distilbert, qwen3};
 use hf_hub::{Repo, RepoType, api::sync::ApiBuilder};
 use serde::Deserialize;
 use thiserror::Error;
-use tokenizers::Tokenizer;
+use tokenizers::{Tokenizer, TruncationDirection, TruncationParams};
 
 use crate::infrastructure::config::EmbeddingConfig;
 
@@ -33,6 +33,11 @@ pub enum EmbeddingError {
 #[derive(Deserialize)]
 struct ModelTypeProbe {
     model_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MaxLengthProbe {
+    max_position_embeddings: Option<usize>,
 }
 
 enum Backbone {
@@ -79,8 +84,19 @@ impl Embedder {
         let weights_path = repository.get("model.safetensors")?;
         let config_bytes = std::fs::read(config_path)?;
         let model_type = serde_json::from_slice::<ModelTypeProbe>(&config_bytes)?.model_type;
-        let tokenizer = Tokenizer::from_file(tokenizer_path)
+        let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
+        if let Some(max_length) =
+            serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings
+        {
+            tokenizer
+                .with_truncation(Some(TruncationParams {
+                    max_length,
+                    direction: TruncationDirection::Right,
+                    ..Default::default()
+                }))
+                .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
+        }
         let backbone = match model_type.as_deref() {
             None | Some("qwen3") => {
                 let dtype = device.bf16_default_to_f32();

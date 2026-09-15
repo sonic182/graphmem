@@ -159,6 +159,13 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 "reembedded {} memories, {} entities, {} edges under the current embedding model",
                 stats.memories, stats.entities, stats.edges
             );
+            if !stats.failures.is_empty() {
+                eprintln!("{} item(s) failed to reembed:", stats.failures.len());
+                for failure in &stats.failures {
+                    eprintln!("  {failure}");
+                }
+                return Err(format!("{} item(s) failed to reembed", stats.failures.len()).into());
+            }
         }
         Command::Doctor => {
             let service = MemoryService::open_default()?;
