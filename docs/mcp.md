@@ -36,7 +36,7 @@ for project-specific knowledge. If scopes are omitted, the server derives the
 repository scope from its working directory; outside a Git repository it uses
 `global`. Explicit scopes must be `global` or an absolute `repo:` path.
 
-Embeddings default to `Qwen/Qwen3-Embedding-0.6B` through Candle. The model is
+Embeddings default to `sentence-transformers/msmarco-distilbert-cos-v5` through Candle. The model is
 downloaded on the first enabled recall and cached under `models/` in the
 Graphmem data directory. To disable embeddings and retain SQLite FTS5 lexical
 ranking, use either:

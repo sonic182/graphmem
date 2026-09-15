@@ -6,7 +6,7 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
-const DEFAULT_MODEL: &str = "Qwen/Qwen3-Embedding-0.6B";
+const DEFAULT_MODEL: &str = "sentence-transformers/msmarco-distilbert-cos-v5";
 const DEFAULT_REVISION: &str = "main";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

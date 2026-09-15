@@ -10,7 +10,7 @@ remains available as a lexical fallback and as a per-request comparison mode.
 - Local SQLite storage; no hosted service required.
 - Scoped memories (`global` or `repo:/absolute/path`) with scope isolation.
 - Verified entities and directed relations attached atomically to memories.
-- Local `Qwen/Qwen3-Embedding-0.6B` embeddings through Candle.
+- Local `sentence-transformers/msmarco-distilbert-cos-v5` embeddings through Candle.
 - CUDA, CPU, or automatic backend selection.
 - MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`,
   `inspect`, and `forget` tools.
@@ -81,7 +81,7 @@ Create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
 [embedding]
 enabled = true
 backend = "auto"       # auto, cpu, or cuda
-model = "Qwen/Qwen3-Embedding-0.6B"
+model = "sentence-transformers/msmarco-distilbert-cos-v5"
 revision = "main"
 cache_dir = "/home/user/.graphmem/models"
 
