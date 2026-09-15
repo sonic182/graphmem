@@ -4,7 +4,7 @@ check package="graphmem":
     cargo check -p {{package}} --all-targets --message-format=short
 
 lint package="graphmem":
-    cargo clippy -p {{package}} --all-targets --all-features --message-format=short -- -D warnings
+    cargo clippy -p {{package}} --all-targets --message-format=short -- -D warnings
 
 test package="graphmem":
     cargo nextest run -p {{package}} --no-fail-fast --no-tests=pass

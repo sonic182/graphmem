@@ -18,5 +18,7 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets --message-format=short
-      - run: cargo clippy --workspace --all-targets --all-features --message-format=short -- -D warnings
+      # Not --all-features: the cuda feature only switches candle to cudarc,
+      # whose build script needs nvcc, and gates no code of ours to lint.
+      - run: cargo clippy --workspace --all-targets --message-format=short -- -D warnings
       - run: cargo nextest run --workspace --no-fail-fast --no-tests=pass
