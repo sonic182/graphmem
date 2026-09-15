@@ -6,7 +6,9 @@
       "args": [
         "mcp"
       ],
-      "env": {}
+      "env": {
+        "GRAPHMEM_HOME": "/home/johanderson/.graphmem-dev"
+      }
     }
   }
 }

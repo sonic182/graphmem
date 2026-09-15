@@ -483,19 +483,16 @@ Embeddings should only be added after evaluating retrieval quality using FTS + g
 
 The MCP surface should remain intentionally small.
 
-Initial tools:
+Current tools:
 
 ```text
 remember
 recall
 forget
 inspect
-```
-
-Potential later tool:
-
-```text
+stats
 relate
+graph
 ```
 
 Avoid exposing low-level operations such as:
@@ -1239,6 +1236,9 @@ Which database convention does this project use?
 - [x] Implement `recall`
 - [x] Implement `forget`
 - [x] Implement `inspect`
+- [x] Implement `stats`
+- [x] Implement `relate`
+- [x] Implement `graph`
 - [x] Validate tool schemas
 - [x] Ensure stdout contains MCP protocol only
 - [x] Send logs to stderr
@@ -1262,20 +1262,20 @@ recall the memory
 ## Claude Code
 
 - [x] Verify current MCP configuration
-- [ ] Add documented setup
+- [x] Add documented setup
 - [x] Test `remember`
 - [x] Test `recall`
-- [ ] Test multiple sessions
+- [x] Test multiple sessions
 - [x] Test repository-scoped memory
 
 ## Codex
 
-- [ ] Verify current MCP configuration
-- [ ] Add documented setup
-- [ ] Test `remember`
-- [ ] Test `recall`
-- [ ] Test multiple sessions
-- [ ] Test repository-scoped memory
+- [x] Verify current MCP configuration
+- [x] Add documented setup
+- [x] Test `remember`
+- [x] Test `recall`
+- [x] Test multiple sessions
+- [x] Test repository-scoped memory
 
 ---
 
@@ -1447,6 +1447,9 @@ remember
 recall
 forget
 inspect
+stats
+relate
+graph
 ```
 
 over twenty database-oriented tools.

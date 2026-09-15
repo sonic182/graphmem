@@ -4,13 +4,18 @@ Run `gmem mcp` as an MCP server over newline-delimited JSON-RPC. The
 database is the same SQLite database used by the CLI and is selected with
 `GRAPHMEM_HOME`.
 
-The server exposes exactly four tools:
+The server exposes six tools:
 
 - `remember`: stores `content`, with optional `memory_type`, `importance`, and
-  `scopes`. Defaults are `observation`, `0.0`, and `global`.
+  `scopes`. Defaults are `observation`, `0.0`, and the server repository scope
+  (or `global` outside a repository).
 - `recall`: searches `query` with optional `scopes` and `limit` (default 10).
-  Without scopes it searches global memories. A repository scope also includes
-  global memories, with repository matches first.
+  Omitted scopes search the server repository plus `global`, with repository
+  matches first.
+- `stats`: returns the counts of memories, scopes, entities, and edges.
+- `relate`: stores a directed relationship between two entities.
+- `graph`: inspects incoming, outgoing, or both relationship paths for an
+  entity.
 - `inspect`: returns a memory and its scopes by numeric `id`.
 - `forget`: deletes a memory by numeric `id`.
 
@@ -19,9 +24,10 @@ numbers.
 
 For example, a successful `remember` response contains `"id": 1`.
 
-Scopes are explicit: use `global` for reusable knowledge and
-`repo:/absolute/path/to/repository` for project-specific knowledge. The server
-does not infer a repository from the working directory.
+Use `global` for reusable knowledge and `repo:/absolute/path/to/repository`
+for project-specific knowledge. If scopes are omitted, the server derives the
+repository scope from its working directory; outside a Git repository it uses
+`global`. Explicit scopes must be `global` or an absolute `repo:` path.
 
 Example configuration:
 
