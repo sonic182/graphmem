@@ -139,6 +139,7 @@ Minibot ─uses──────── Python   w=1        Minibot ─uses─�
   sin duplicar texto ni atributos; `remember_with_graph` la puebla al crear los edges de una memory.
 - [ ] Key-Fact Passage Enhancement: cuando un edge es relevante, boost `×2.5` de la transición entity→memory correspondiente vía `memory_edges`, renormalizando la masa total.
 - [ ] `CrossEncoderEdgeScorer`: cargar un cross-encoder MiniLM (p.ej. `cross-encoder/ms-marco-MiniLM-L-6-v2`, BERT-family, vía `candle_transformers::models::bert`) que puntúe `(query, edge_document(edge))` como par conjunto en vez de comparar embeddings independientes — mismo patrón "retrieve con bi-encoder, rerank con cross-encoder" que ya usa search bi-encoder + este reranker.
+- [ ] Config `[retrieval] edge_scorer = "cosine" | "cross_encoder"` (default `"cosine"`), mismo patrón que `[embedding] model`/`enabled` (`config.toml` + override por env var). No es una elección mutuamente excluyente de motor: el filtro coarse por coseno **siempre** corre primero (selecciona los `K_edge` candidatos reutilizando embeddings ya calculados); el config solo decide si además se re-puntúa ese shortlist con el cross-encoder antes de convertirlo en multiplicador. `"cosine"` es más liviano (coste ~0, ya calculado); `"cross_encoder"` añade una forward pass por candidato (~`K_edge`≈15 por query) a cambio de mayor precisión.
 - [ ] Nuevo fixture "hub semantic drift" en `retrieval_eval.rs` (una entidad con muchos edges de temas distintos) para verificar que el reponderado reduce la dispersión hacia vecinos irrelevantes, no solo mejora casos ya fáciles.
 - [ ] Trait `EdgeScorer` para desacoplar "cómo se puntúa un edge candidato" de PPR, con tres niveles posibles detrás de la misma interfaz:
   ```rust
@@ -146,9 +147,10 @@ Minibot ─uses──────── Python   w=1        Minibot ─uses─�
       fn score(&self, query: &str, candidates: &[EdgeCandidate]) -> Vec<f64>;
   }
   ```
-  - `EmbeddingEdgeScorer` (coseno + mapeo monótono, ya disponible como señal hoy) — default v1, coste cero adicional.
-  - `CrossEncoderEdgeScorer` (reranker MiniLM local, ver mecanismo 2 arriba) — mejora de calidad planeada, sigue siendo 100% local/sin API.
+  - `EmbeddingEdgeScorer` (usa directamente el coseno del filtro coarse + mapeo monótono, ya disponible como señal hoy) — default, coste cero adicional.
+  - `CrossEncoderEdgeScorer` (re-puntúa el mismo shortlist con el reranker MiniLM local, ver mecanismo 2 arriba) — mejora de calidad opcional vía config, sigue siendo 100% local/sin API.
   - `LlmEdgeScorer` (LLM externo tipo el paper original) — posibilidad futura detrás de la misma interfaz, **no implementarlo todavía**.
+  - Selección vía `[retrieval] edge_scorer` en `config.toml` (ver arriba) — el filtro coarse por coseno es común a las tres, `EdgeScorer` solo decide si hay una segunda pasada de scoring.
 
 La API objetivo es la misma que ya se imaginó desde el principio:
 

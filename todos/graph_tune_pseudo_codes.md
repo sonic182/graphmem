@@ -120,9 +120,9 @@ function RETRIEVE_CATRAG(query, graph, top_k):
         scored = [(e, cos(q_vec, embed(e))) for e in candidates]
         top_candidates = top_n(scored, K_edge)            # K_edge ≈ 15
 
-        # filtro caro: un scorer clasifica/puntúa cada candidato superviviente
-        for (e, _score) in top_candidates:
-            relevance = edge_scorer.score(query, e)          # ver EDGE SCORERS más abajo
+        # segunda pasada, opcional según config: re-puntuar el shortlist
+        for (e, coarse_score) in top_candidates:
+            relevance = edge_scorer.score(query, e, coarse_score)  # ver EDGE SCORERS más abajo
             multiplier = relevance_to_multiplier(relevance)
             edge_weight_overlay[(u, e.target)] =
                 static_weight(u, e.target) * multiplier
@@ -168,23 +168,38 @@ misma interfaz — nada en `RETRIEVE_CATRAG`/`WEIGHTED_PPR` cambia al pasar de
 una a otra:
 
 ```text
-# --- Tier 1: EmbeddingEdgeScorer (default v1, coste cero adicional) ---
-function EMBEDDING_SCORE(query, edge, q_vec):
-    return cos(q_vec, embed(edge))            # bi-encoder: query y edge embebidos por separado
+# el filtro coarse por coseno (dentro de RETRIEVE_CATRAG, arriba) SIEMPRE
+# corre primero y ya produce `coarse_score` para cada candidato del
+# shortlist; edge_scorer.score() decide si eso basta o si hay que
+# re-puntuar con algo más preciso — se elige vía config, no por código:
+#
+#   [retrieval] edge_scorer = "cosine" | "cross_encoder"   # default "cosine"
+
+function MAKE_EDGE_SCORER(config):
+    match config.edge_scorer:
+        "cosine":         return EmbeddingEdgeScorer()
+        "cross_encoder":  return CrossEncoderEdgeScorer(load_cross_encoder_model())
+        # "llm" no expuesto todavía — ver Tier 3 más abajo
 
 
-# --- Tier 2: CrossEncoderEdgeScorer (reranker local, p.ej. MiniLM) ---
-function CROSS_ENCODER_SCORE(query, edge, cross_encoder_model):
+# --- Tier 1: EmbeddingEdgeScorer (default, coste cero adicional) ---
+function EMBEDDING_SCORE(query, edge, coarse_score):
+    return coarse_score                        # reutiliza el score del filtro coarse, no recalcula nada
+
+
+# --- Tier 2: CrossEncoderEdgeScorer (reranker local opcional, p.ej. MiniLM) ---
+function CROSS_ENCODER_SCORE(query, edge, coarse_score, cross_encoder_model):
     pair_text = (query, edge_document(edge))   # edge_document(e) = "source relation target"
     return cross_encoder_model.forward(pair_text)
     # BERT-family: [CLS] del par (query, edge_document) -> cabeza lineal -> 1 score
     # más preciso que Tier 1 porque query y edge se atienden mutuamente
-    # (no se comparan dos embeddings calculados de forma independiente),
-    # sigue siendo 100% local — sin llamada a un LLM externo
+    # (no se comparan dos embeddings calculados de forma independiente);
+    # solo corre sobre el shortlist ya filtrado por coseno (~K_edge candidatos
+    # por query), sigue siendo 100% local — sin llamada a un LLM externo
 
 
 # --- Tier 3: LlmEdgeScorer (fuera de este roadmap por ahora) ---
-function LLM_SCORE(query, edge, llm):
+function LLM_SCORE(query, edge, coarse_score, llm):
     label = llm.classify(query, edge.source, edge.relation, edge.target, context(edge.target))
     return label_to_score(label)               # {Irrelevant, Weak, High, Direct} -> score
 
@@ -194,11 +209,13 @@ function relevance_to_multiplier(relevance):
 ```
 
 Tier 1 ya está disponible hoy (`edge_vector` + coseno, usado globalmente
-para elegir seeds); Tier 2 es la mejora de calidad planeada — mismo rol
-que `LLM_classify` en el paper, pero con `cross-encoder/ms-marco-MiniLM-L-6-v2`
+para elegir seeds; aquí solo se reutiliza el mismo número, sin coste
+extra). Tier 2 es la mejora de calidad opcional — mismo rol que
+`LLM_classify` en el paper, pero con `cross-encoder/ms-marco-MiniLM-L-6-v2`
 o similar en vez de un LLM, cargable vía `candle_transformers::models::bert`
-igual que DistilBERT en `embedding.rs`; Tier 3 queda deliberadamente fuera
-del roadmap.
+igual que DistilBERT en `embedding.rs`, y una forward pass por candidato
+(~`K_edge`≈15 por query — barato en CPU, pero no gratis, de ahí el toggle
+por config). Tier 3 queda deliberadamente fuera del roadmap.
 
 ---
 
