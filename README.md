@@ -1,0 +1,111 @@
+# Graphmem
+
+Graphmem is a local memory service for agents and developer tools. It stores
+scoped narrative memories alongside an entity graph, then combines semantic
+embeddings, graph context, and Personalized PageRank for recall. SQLite FTS5
+remains available as a lexical fallback and as a per-request comparison mode.
+
+## Highlights
+
+- Local SQLite storage; no hosted service required.
+- Scoped memories (`global` or `repo:/absolute/path`) with scope isolation.
+- Verified entities and directed relations attached atomically to memories.
+- Local `Qwen/Qwen3-Embedding-0.6B` embeddings through Candle.
+- CUDA, CPU, or automatic backend selection.
+- MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`,
+  `inspect`, and `forget` tools.
+- `recall` accepts `use_embeddings: false` to force lexical FTS5 ranking.
+
+## Build
+
+Stable Rust is required. CPU builds need no extra feature:
+
+```sh
+cargo build
+```
+
+With CUDA support (and a working CUDA toolkit):
+
+```sh
+./debug_build.sh       # cargo build --features cuda
+./build.sh              # cargo build --release --features cuda
+```
+
+The binary is `target/debug/gmem` or `target/release/gmem`.
+
+## CLI
+
+```sh
+gmem remember "Use nextest for integration tests" \
+  --type convention --scope repo:/absolute/path/to/project
+gmem search "integration tests"
+gmem graph component api --direction both --max-depth 2
+gmem mcp
+```
+
+The default data directory is `~/.graphmem`. Set `GRAPHMEM_HOME` to use a
+separate store, for example `~/.graphmem-dev`.
+
+## MCP
+
+Configure an MCP client to launch:
+
+```json
+{
+  "mcpServers": {
+    "graphmem": {
+      "command": "/absolute/path/to/gmem",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+`recall` uses embeddings by default. For a lexical comparison, pass:
+
+```json
+{
+  "query": "What handles intermittent outages?",
+  "use_embeddings": false,
+  "limit": 10
+}
+```
+
+See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
+
+## Configuration
+
+Create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
+
+```toml
+[embedding]
+enabled = true
+backend = "auto"       # auto, cpu, or cuda
+model = "Qwen/Qwen3-Embedding-0.6B"
+revision = "main"
+cache_dir = "/home/user/.graphmem/models"
+
+[runtime]
+worker_threads = 4
+```
+
+`backend = "auto"` selects CUDA when available and otherwise uses CPU.
+`GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded
+on first enabled recall and cached locally.
+
+Logs are appended to `~/.graphmem/logs/graphmem.log` (or the corresponding
+`GRAPHMEM_HOME` directory):
+
+```sh
+tail -f ~/.graphmem/logs/graphmem.log
+```
+
+## Development
+
+```sh
+just verify
+```
+
+This runs formatting checks, compilation, Clippy, and the test suite. More
+background is available in [Project_doc.md](Project_doc.md) and
+[docs/schema-evolution.md](docs/schema-evolution.md).
