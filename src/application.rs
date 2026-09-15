@@ -22,6 +22,14 @@ pub enum ApplicationError {
     Config(#[from] ConfigError),
     #[error("{0} not found")]
     NotFound(&'static str),
+    #[error(transparent)]
+    Embedding(#[from] EmbeddingError),
+    #[error(transparent)]
+    Semantic(#[from] SemanticError),
+    #[error(
+        "embeddings are disabled; set [embedding] enabled = true (or unset GRAPHMEM_EMBEDDINGS) to reembed"
+    )]
+    EmbeddingsDisabled,
 }
 
 pub struct RememberRequest {
@@ -61,6 +69,13 @@ pub struct GraphRequest {
 pub struct GraphDetails {
     pub entity: Entity,
     pub paths: Vec<GraphPath>,
+}
+
+pub struct ReembedStats {
+    pub memories: usize,
+    pub entities: usize,
+    pub edges: usize,
+    pub failures: Vec<String>,
 }
 
 pub struct MemoryService {
@@ -248,6 +263,70 @@ impl MemoryService {
         semantic_results(database, embedder, retrieval_config, query, scopes, limit)
     }
 
+    pub fn reembed_all(&mut self) -> Result<ReembedStats> {
+        if !self.embedding_config.enabled {
+            return Err(ApplicationError::EmbeddingsDisabled);
+        }
+        let Self {
+            database,
+            embedding_config,
+            embedder,
+            ..
+        } = self;
+        if embedder.is_none() {
+            *embedder = Some(Embedder::load(embedding_config)?);
+        }
+        let embedder = embedder.as_ref().expect("embedder just loaded");
+
+        let mut stats = ReembedStats {
+            memories: 0,
+            entities: 0,
+            edges: 0,
+            failures: Vec::new(),
+        };
+
+        let memories = database.list_all_memories()?;
+        for memory in &memories {
+            match memory_vector(database, embedder, memory.id, &memory.content) {
+                Ok(_) => stats.memories += 1,
+                Err(error) => stats
+                    .failures
+                    .push(format!("memory {}: {error}", memory.id)),
+            }
+        }
+
+        let entities = database.list_entities()?;
+        for entity in &entities {
+            match entity_vector(database, embedder, entity) {
+                Ok(_) => stats.entities += 1,
+                Err(error) => stats
+                    .failures
+                    .push(format!("entity {}: {error}", entity.id)),
+            }
+        }
+        let entities_by_id: HashMap<i64, &Entity> =
+            entities.iter().map(|entity| (entity.id, entity)).collect();
+
+        let edges = database.list_all_edges()?;
+        for edge in &edges {
+            let (Some(source), Some(target)) = (
+                entities_by_id.get(&edge.source_id),
+                entities_by_id.get(&edge.target_id),
+            ) else {
+                stats
+                    .failures
+                    .push(format!("edge {}: source or target entity missing", edge.id));
+                continue;
+            };
+            match edge_vector(database, embedder, edge, source, target) {
+                Ok(_) => stats.edges += 1,
+                Err(error) => stats.failures.push(format!("edge {}: {error}", edge.id)),
+            }
+        }
+
+        Ok(stats)
+    }
+
     fn lexical_search(
         &self,
         query: &str,
@@ -362,7 +441,7 @@ impl MemoryService {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum SemanticError {
+pub enum SemanticError {
     #[error(transparent)]
     Embedding(#[from] EmbeddingError),
     #[error(transparent)]
