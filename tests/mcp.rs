@@ -108,11 +108,20 @@ fn serves_memory_lifecycle_over_stdio() {
         .find(|tool| tool["name"] == "recall")
         .expect("recall tool is listed");
     let description = recall["description"].as_str().expect("recall description");
-    assert!(description.contains("Personalized PageRank"));
-    assert!(description.contains("SQLite FTS5 lexical ranking"));
-    assert!(recall["inputSchema"]["properties"]["use_embeddings"].is_object());
-    assert!(description.contains("server's working directory"));
+    assert!(description.contains("falls back to lexical ranking"));
     assert!(description.contains("out-of-scope memory is never returned"));
+    assert!(
+        recall["inputSchema"]["properties"]["use_embeddings"]["description"]
+            .as_str()
+            .expect("use_embeddings description")
+            .contains("exact-token lookup")
+    );
+    assert!(
+        recall["inputSchema"]["properties"]["scopes"]["description"]
+            .as_str()
+            .expect("scopes description")
+            .contains("server's working directory")
+    );
     let stats = listed_tools
         .iter()
         .find(|tool| tool["name"] == "stats")
