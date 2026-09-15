@@ -17,6 +17,8 @@ struct Mcp {
 impl Mcp {
     fn start(home: &Path) -> Self {
         fs::create_dir_all(home).expect("MCP test home is created");
+        fs::write(home.join("config.toml"), "[embedding]\nenabled = false\n")
+            .expect("MCP test embeddings are disabled");
         let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
             .env("GRAPHMEM_HOME", home)
@@ -69,6 +71,7 @@ fn run(data_dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_gmem"))
         .args(args)
         .env("GRAPHMEM_HOME", data_dir)
+        .env("GRAPHMEM_EMBEDDINGS", "off")
         .output()
         .expect("gmem runs")
 }

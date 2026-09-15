@@ -4,14 +4,21 @@ Run `gmem mcp` as an MCP server over newline-delimited JSON-RPC. The
 database is the same SQLite database used by the CLI and is selected with
 `GRAPHMEM_HOME`.
 
-The server exposes six tools:
+The server exposes seven tools:
 
 - `remember`: stores `content`, with optional `memory_type`, `importance`, and
-  `scopes`. Defaults are `observation`, `0.0`, and the server repository scope
-  (or `global` outside a repository).
-- `recall`: searches `query` with optional `scopes` and `limit` (default 10).
-  Omitted scopes search the server repository plus `global`, with repository
-  matches first.
+  `scopes`, verified `entities`, and verified directed `relations`. Entity and
+  relation endpoints are linked to the new memory atomically. Defaults are
+  `observation`, `0.0`, and the server repository scope (or `global` outside a
+  repository).
+- `recall`: searches `query` with optional `scopes`, `limit` (default 10), and
+  `use_embeddings` (default `true`). Set `use_embeddings = false` to force
+  SQLite FTS5 lexical ranking for an apples-to-apples comparison without
+  loading the embedding model.
+  using local semantic seeds and Personalized PageRank over linked memories,
+  entities, and relations. Omitted scopes search the server repository plus
+  `global`, with repository matches first. The scope filter is applied before
+  ranking, so results never include another repository's memory.
 - `stats`: returns the counts of memories, scopes, entities, and edges.
 - `relate`: stores a directed relationship between two entities.
 - `graph`: inspects incoming, outgoing, or both relationship paths for an
@@ -28,6 +35,47 @@ Use `global` for reusable knowledge and `repo:/absolute/path/to/repository`
 for project-specific knowledge. If scopes are omitted, the server derives the
 repository scope from its working directory; outside a Git repository it uses
 `global`. Explicit scopes must be `global` or an absolute `repo:` path.
+
+Embeddings default to `Qwen/Qwen3-Embedding-0.6B` through Candle. The model is
+downloaded on the first enabled recall and cached under `models/` in the
+Graphmem data directory. To disable embeddings and retain SQLite FTS5 lexical
+ranking, use either:
+
+```toml
+# ~/.graphmem/config.toml
+[embedding]
+enabled = false
+backend = "auto"
+```
+
+`backend` accepts `auto`, `cpu`, or `cuda`; `auto` selects CUDA when the
+binary was built with Candle's CUDA feature and a device is available, then
+falls back to CPU. Use `cpu` to force CPU or `cuda` to fail instead of falling
+back. Build CUDA support with `cargo build --features cuda` when the CUDA
+toolkit is installed. `GRAPHMEM_EMBEDDINGS=off` disables embeddings entirely.
+`GRAPHMEM_EMBEDDING_MODEL`,
+`GRAPHMEM_EMBEDDING_REVISION`, and `GRAPHMEM_EMBEDDING_CACHE_DIR` override the
+remaining model settings. If loading or inference fails, recall reports the
+failure on stderr and falls back to lexical ranking.
+
+Tokio uses four workers by default. Override it in the same file when needed:
+
+```toml
+[runtime]
+worker_threads = 4
+```
+
+`GRAPHMEM_TOKIO_WORKER_THREADS` overrides that value for one process.
+
+All process logs append to `logs/graphmem.log` below the active Graphmem data
+directory: `~/.graphmem/logs/graphmem.log` by default, or
+`$GRAPHMEM_HOME/logs/graphmem.log` when that override is set. MCP protocol
+messages remain on stdout; the log records model-cache/download, model-ready,
+fallback, and command-failure events. For a live view, run:
+
+```sh
+tail -f ~/.graphmem/logs/graphmem.log
+```
 
 Example configuration:
 

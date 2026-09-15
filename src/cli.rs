@@ -2,10 +2,8 @@ use std::error::Error;
 
 use clap::{Args, Parser, Subcommand};
 use graphmem::{
-    GraphDirection, Memory, Scope, SearchResult,
-    application::{
-        EntityReference, GraphDetails, GraphRequest, MemoryDetails, MemoryService, RememberRequest,
-    },
+    EntityReference, GraphDirection, Memory, Scope, SearchResult,
+    application::{GraphDetails, GraphRequest, MemoryDetails, MemoryService, RememberRequest},
 };
 
 #[derive(Parser)]
@@ -84,6 +82,8 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 memory_type: args.memory_type,
                 importance: args.importance,
                 scopes: args.scopes,
+                entities: Vec::new(),
+                relations: Vec::new(),
             })?;
             println!("remembered: {}", memory.id);
         }
@@ -96,7 +96,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             print_memory_details(service.show(id)?);
         }
         Command::Search(args) => {
-            let service = MemoryService::open_default()?;
+            let mut service = MemoryService::open_default()?;
             let results = if args.scopes.is_empty() {
                 service.search(&args.query, None, args.limit)?
             } else {

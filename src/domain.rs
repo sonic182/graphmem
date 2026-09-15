@@ -43,6 +43,20 @@ pub struct Edge {
     pub metadata: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityReference {
+    pub kind: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relation {
+    pub source: EntityReference,
+    pub relation: String,
+    pub target: EntityReference,
+    pub metadata: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphDirection {
     Incoming,
@@ -75,9 +89,49 @@ pub fn text_mentions(haystack: &str, needle: &str) -> bool {
     !needle.is_empty() && haystack.to_lowercase().contains(&needle.to_lowercase())
 }
 
+pub fn personalized_pagerank(adjacency: &[Vec<usize>], seeds: &[(usize, f64)]) -> Vec<f64> {
+    let mut restart = vec![0.0; adjacency.len()];
+    for &(node, weight) in seeds {
+        if node < restart.len() && weight.is_finite() && weight > 0.0 {
+            restart[node] += weight;
+        }
+    }
+    let total = restart.iter().sum::<f64>();
+    if total == 0.0 {
+        return restart;
+    }
+    for weight in &mut restart {
+        *weight /= total;
+    }
+
+    let mut rank = restart.clone();
+    for _ in 0..32 {
+        let mut next = restart
+            .iter()
+            .map(|weight| weight * 0.5)
+            .collect::<Vec<_>>();
+        for (node, neighbors) in adjacency.iter().enumerate() {
+            if neighbors.is_empty() {
+                for (target, weight) in restart.iter().enumerate() {
+                    next[target] += rank[node] * 0.5 * weight;
+                }
+            } else {
+                let share = rank[node] * 0.5 / neighbors.len() as f64;
+                for &neighbor in neighbors {
+                    if neighbor < next.len() {
+                        next[neighbor] += share;
+                    }
+                }
+            }
+        }
+        rank = next;
+    }
+    rank
+}
+
 #[cfg(test)]
 mod tests {
-    use super::text_mentions;
+    use super::{personalized_pagerank, text_mentions};
 
     #[test]
     fn matches_case_insensitively() {
@@ -97,5 +151,11 @@ mod tests {
     #[test]
     fn rejects_empty_needle() {
         assert!(!text_mentions("retry the connection", "   "));
+    }
+
+    #[test]
+    fn pagerank_carries_a_seed_across_multiple_hops() {
+        let rank = personalized_pagerank(&[vec![1], vec![0, 2], vec![1], vec![]], &[(0, 1.0)]);
+        assert!(rank[2] > rank[3]);
     }
 }

@@ -9,7 +9,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 
 use crate::domain::{
-    Edge, Entity, GraphDirection, GraphHop, GraphPath, Memory, Scope, SearchResult, StoreStats,
+    Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
+    SearchResult, StoreStats,
 };
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -117,6 +118,75 @@ impl Database {
         })
     }
 
+    pub fn remember_with_graph(
+        &mut self,
+        content: &str,
+        memory_type: &str,
+        importance: f64,
+        scopes: &[String],
+        entities: &[EntityReference],
+        relations: &[Relation],
+    ) -> Result<Memory> {
+        validate_text("content", content)?;
+        validate_text("memory_type", memory_type)?;
+        validate_importance(importance)?;
+        let scopes = scopes
+            .iter()
+            .map(|scope| normalize_scope(scope))
+            .collect::<Result<Vec<_>>>()?;
+        let entities = entities
+            .iter()
+            .map(normalize_entity_reference)
+            .collect::<Result<Vec<_>>>()?;
+        let relations = relations
+            .iter()
+            .map(normalize_relation)
+            .collect::<Result<Vec<_>>>()?;
+        let timestamp = now_millis()?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO memories
+             (content, memory_type, importance, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![content, memory_type.trim(), importance, timestamp],
+        )?;
+        let memory_id = transaction.last_insert_rowid();
+        for scope in scopes {
+            transaction.execute(
+                "INSERT OR IGNORE INTO scopes (name, created_at) VALUES (?1, ?2)",
+                params![scope, timestamp],
+            )?;
+            let scope_id =
+                transaction.query_row("SELECT id FROM scopes WHERE name = ?1", [scope], |row| {
+                    row.get::<_, i64>(0)
+                })?;
+            transaction.execute(
+                "INSERT OR IGNORE INTO memory_scopes (memory_id, scope_id) VALUES (?1, ?2)",
+                params![memory_id, scope_id],
+            )?;
+        }
+        for entity in &entities {
+            let entity = get_or_create_entity(&transaction, entity, timestamp)?;
+            link_memory_entity(&transaction, memory_id, entity.id)?;
+        }
+        for relation in &relations {
+            let source = get_or_create_entity(&transaction, &relation.source, timestamp)?;
+            let target = get_or_create_entity(&transaction, &relation.target, timestamp)?;
+            get_or_create_edge(&transaction, source.id, relation, target.id, timestamp)?;
+            link_memory_entity(&transaction, memory_id, source.id)?;
+            link_memory_entity(&transaction, memory_id, target.id)?;
+        }
+        let memory = transaction.query_row(
+            "SELECT id, content, memory_type, importance, created_at, updated_at,
+                    last_accessed_at, access_count
+             FROM memories WHERE id = ?1",
+            [memory_id],
+            memory_from_row,
+        )?;
+        transaction.commit()?;
+        Ok(memory)
+    }
+
     pub fn get_memory(&self, id: i64) -> Result<Option<Memory>> {
         self.connection
             .query_row(
@@ -147,6 +217,10 @@ impl Database {
              WHERE id = ?1",
             params![id, content, memory_type.trim(), importance, now_millis()?],
         )?;
+        if changed == 1 {
+            self.connection
+                .execute("DELETE FROM memory_embeddings WHERE memory_id = ?1", [id])?;
+        }
         Ok(changed == 1)
     }
 
@@ -180,6 +254,18 @@ impl Database {
         Ok(memories)
     }
 
+    pub fn list_all_memories(&self) -> Result<Vec<Memory>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, content, memory_type, importance, created_at, updated_at,
+                    last_accessed_at, access_count
+             FROM memories ORDER BY created_at DESC, id DESC",
+        )?;
+        let memories = statement
+            .query_map([], memory_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(memories)
+    }
+
     pub fn list_memories_in_scope(&self, scope: &str, limit: usize) -> Result<Vec<Memory>> {
         let scope = normalize_scope(scope)?;
         let limit = limit_value(limit)?;
@@ -194,6 +280,32 @@ impl Database {
         )?;
         let memories = statement
             .query_map(params![scope, limit], memory_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(memories)
+    }
+
+    pub fn list_memories_in_scopes(&self, scopes: &[String]) -> Result<Vec<Memory>> {
+        let scopes = normalized_scopes(scopes)?;
+        let placeholders = (0..scopes.len())
+            .map(|index| format!("?{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
+                    m.last_accessed_at, m.access_count
+             FROM memories m
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM memory_scopes ms WHERE ms.memory_id = m.id
+             ) OR EXISTS (
+                 SELECT 1 FROM memory_scopes ms
+                 JOIN scopes s ON s.id = ms.scope_id
+                 WHERE ms.memory_id = m.id AND (s.name = 'global' OR s.name IN ({placeholders}))
+             )
+             ORDER BY m.created_at DESC, m.id DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let memories = statement
+            .query_map(rusqlite::params_from_iter(scopes), memory_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(memories)
     }
@@ -237,15 +349,7 @@ impl Database {
         proximate_names: &[String],
     ) -> Result<Vec<SearchResult>> {
         validate_text("query", query)?;
-        let mut scopes = scopes
-            .iter()
-            .map(|scope| normalize_scope(scope))
-            .collect::<Result<Vec<_>>>()?;
-        scopes.sort();
-        scopes.dedup();
-        if scopes.is_empty() {
-            scopes.push("global".to_owned());
-        }
+        let scopes = normalized_scopes(scopes)?;
         let limit = limit_value(limit)?;
         let placeholders = (0..scopes.len())
             .map(|index| format!("?{}", index + 2))
@@ -398,6 +502,45 @@ impl Database {
         Ok(scopes)
     }
 
+    pub fn list_memory_entities(&self, memory_id: i64) -> Result<Vec<Entity>> {
+        let mut statement = self.connection.prepare(
+            "SELECT e.id, e.kind, e.name, e.canonical_name, e.created_at, e.updated_at
+             FROM entities e
+             JOIN memory_entities me ON me.entity_id = e.id
+             WHERE me.memory_id = ?1 ORDER BY e.id",
+        )?;
+        let entities = statement
+            .query_map([memory_id], entity_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(entities)
+    }
+
+    pub fn memory_embedding(
+        &self,
+        memory_id: i64,
+        model: &str,
+        revision: &str,
+    ) -> Result<Option<Vec<f32>>> {
+        self.embedding("memory_embeddings", "memory_id", memory_id, model, revision)
+    }
+
+    pub fn store_memory_embedding(
+        &self,
+        memory_id: i64,
+        model: &str,
+        revision: &str,
+        vector: &[f32],
+    ) -> Result<()> {
+        self.store_embedding(
+            "memory_embeddings",
+            "memory_id",
+            memory_id,
+            model,
+            revision,
+            vector,
+        )
+    }
+
     pub fn create_entity(&self, kind: &str, name: &str, canonical_name: &str) -> Result<Entity> {
         validate_text("kind", kind)?;
         validate_text("name", name)?;
@@ -527,6 +670,42 @@ impl Database {
             .map_err(StorageError::from)
     }
 
+    pub fn list_all_edges(&self) -> Result<Vec<Edge>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, source_id, relation, target_id, created_at, metadata FROM edges ORDER BY id",
+        )?;
+        let edges = statement
+            .query_map([], edge_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(edges)
+    }
+
+    pub fn edge_embedding(
+        &self,
+        edge_id: i64,
+        model: &str,
+        revision: &str,
+    ) -> Result<Option<Vec<f32>>> {
+        self.embedding("edge_embeddings", "edge_id", edge_id, model, revision)
+    }
+
+    pub fn store_edge_embedding(
+        &self,
+        edge_id: i64,
+        model: &str,
+        revision: &str,
+        vector: &[f32],
+    ) -> Result<()> {
+        self.store_embedding(
+            "edge_embeddings",
+            "edge_id",
+            edge_id,
+            model,
+            revision,
+            vector,
+        )
+    }
+
     pub fn get_edge_by_endpoints(
         &self,
         source_id: i64,
@@ -640,6 +819,66 @@ impl Database {
             .query_map([id], edge_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(edges)
+    }
+
+    fn embedding(
+        &self,
+        table: &str,
+        id_column: &str,
+        id: i64,
+        model: &str,
+        revision: &str,
+    ) -> Result<Option<Vec<f32>>> {
+        let sql = format!(
+            "SELECT dimensions, vector FROM {table} WHERE {id_column} = ?1 AND model = ?2 AND revision = ?3"
+        );
+        let embedding = self
+            .connection
+            .query_row(&sql, params![id, model, revision], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .optional()
+            .map_err(StorageError::from)?;
+        embedding
+            .map(|(dimensions, bytes)| decode_vector(&bytes, dimensions))
+            .transpose()
+    }
+
+    fn store_embedding(
+        &self,
+        table: &str,
+        id_column: &str,
+        id: i64,
+        model: &str,
+        revision: &str,
+        vector: &[f32],
+    ) -> Result<()> {
+        if vector.is_empty() {
+            return Err(StorageError::Invalid {
+                field: "embedding",
+                message: "must not be empty",
+            });
+        }
+        let sql = format!(
+            "INSERT INTO {table} ({id_column}, model, revision, dimensions, vector)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT({id_column}) DO UPDATE SET
+                 model = excluded.model,
+                 revision = excluded.revision,
+                 dimensions = excluded.dimensions,
+                 vector = excluded.vector"
+        );
+        self.connection.execute(
+            &sql,
+            params![
+                id,
+                model,
+                revision,
+                vector.len() as i64,
+                encode_vector(vector)
+            ],
+        )?;
+        Ok(())
     }
 
     fn graph_path(&self, edge_ids: &str, directions: &str) -> Result<GraphPath> {
@@ -770,6 +1009,26 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
              CREATE INDEX IF NOT EXISTS idx_edges_source_id ON edges(source_id);
              CREATE INDEX IF NOT EXISTS idx_edges_target_id ON edges(target_id);
              CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
+             CREATE TABLE IF NOT EXISTS memory_entities (
+                 memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                 entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                 PRIMARY KEY (memory_id, entity_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_memory_entities_entity_id ON memory_entities(entity_id);
+             CREATE TABLE IF NOT EXISTS memory_embeddings (
+                 memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+                 model TEXT NOT NULL,
+                 revision TEXT NOT NULL,
+                 dimensions INTEGER NOT NULL,
+                 vector BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS edge_embeddings (
+                 edge_id INTEGER PRIMARY KEY REFERENCES edges(id) ON DELETE CASCADE,
+                 model TEXT NOT NULL,
+                 revision TEXT NOT NULL,
+                 dimensions INTEGER NOT NULL,
+                 vector BLOB NOT NULL
+             );
              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                  content,
                  content='memories',
@@ -831,6 +1090,112 @@ fn entity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entity> {
     })
 }
 
+#[derive(Debug)]
+struct NormalizedEntityReference {
+    kind: String,
+    name: String,
+    canonical_name: String,
+}
+
+#[derive(Debug)]
+struct NormalizedRelation {
+    source: NormalizedEntityReference,
+    relation: String,
+    target: NormalizedEntityReference,
+    metadata: Option<String>,
+}
+
+fn normalize_entity_reference(entity: &EntityReference) -> Result<NormalizedEntityReference> {
+    validate_text("kind", &entity.kind)?;
+    validate_text("name", &entity.name)?;
+    let name = entity.name.trim().to_owned();
+    Ok(NormalizedEntityReference {
+        kind: entity.kind.trim().to_lowercase(),
+        canonical_name: name.to_lowercase(),
+        name,
+    })
+}
+
+fn normalize_relation(relation: &Relation) -> Result<NormalizedRelation> {
+    validate_text("relation", &relation.relation)?;
+    Ok(NormalizedRelation {
+        source: normalize_entity_reference(&relation.source)?,
+        relation: relation.relation.trim().to_owned(),
+        target: normalize_entity_reference(&relation.target)?,
+        metadata: relation.metadata.clone(),
+    })
+}
+
+fn get_or_create_entity(
+    transaction: &Transaction<'_>,
+    entity: &NormalizedEntityReference,
+    timestamp: i64,
+) -> Result<Entity> {
+    if let Some(entity) = transaction
+        .query_row(
+            "SELECT id, kind, name, canonical_name, created_at, updated_at
+             FROM entities WHERE kind = ?1 AND canonical_name = ?2",
+            params![entity.kind, entity.canonical_name],
+            entity_from_row,
+        )
+        .optional()?
+    {
+        return Ok(entity);
+    }
+    transaction.execute(
+        "INSERT INTO entities (kind, name, canonical_name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![entity.kind, entity.name, entity.canonical_name, timestamp],
+    )?;
+    transaction
+        .query_row(
+            "SELECT id, kind, name, canonical_name, created_at, updated_at
+             FROM entities WHERE id = ?1",
+            [transaction.last_insert_rowid()],
+            entity_from_row,
+        )
+        .map_err(StorageError::from)
+}
+
+fn get_or_create_edge(
+    transaction: &Transaction<'_>,
+    source_id: i64,
+    relation: &NormalizedRelation,
+    target_id: i64,
+    timestamp: i64,
+) -> Result<()> {
+    let exists = transaction
+        .query_row(
+            "SELECT 1 FROM edges WHERE source_id = ?1 AND relation = ?2 AND target_id = ?3",
+            params![source_id, relation.relation, target_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !exists {
+        transaction.execute(
+            "INSERT INTO edges (source_id, relation, target_id, created_at, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                source_id,
+                relation.relation,
+                target_id,
+                timestamp,
+                relation.metadata
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn link_memory_entity(transaction: &Transaction<'_>, memory_id: i64, entity_id: i64) -> Result<()> {
+    transaction.execute(
+        "INSERT OR IGNORE INTO memory_entities (memory_id, entity_id) VALUES (?1, ?2)",
+        params![memory_id, entity_id],
+    )?;
+    Ok(())
+}
+
 fn edge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Edge> {
     Ok(Edge {
         id: row.get(0)?,
@@ -890,6 +1255,44 @@ fn limit_value(value: usize) -> Result<i64> {
 fn normalize_scope(value: &str) -> Result<String> {
     validate_text("scope", value)?;
     Ok(value.trim().to_owned())
+}
+
+fn normalized_scopes(scopes: &[String]) -> Result<Vec<String>> {
+    let mut scopes = scopes
+        .iter()
+        .map(|scope| normalize_scope(scope))
+        .collect::<Result<Vec<_>>>()?;
+    scopes.sort();
+    scopes.dedup();
+    if scopes.is_empty() {
+        scopes.push("global".to_owned());
+    }
+    Ok(scopes)
+}
+
+fn encode_vector(vector: &[f32]) -> Vec<u8> {
+    vector
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect()
+}
+
+fn decode_vector(bytes: &[u8], dimensions: i64) -> Result<Vec<f32>> {
+    let dimensions = usize::try_from(dimensions).map_err(|_| StorageError::Invalid {
+        field: "embedding",
+        message: "has invalid dimensions",
+    })?;
+    let (chunks, remainder) = bytes.as_chunks::<4>();
+    if dimensions == 0 || chunks.len() != dimensions || !remainder.is_empty() {
+        return Err(StorageError::Invalid {
+            field: "embedding",
+            message: "has invalid vector data",
+        });
+    }
+    Ok(chunks
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
+        .collect())
 }
 
 fn run_fts_query<T>(
