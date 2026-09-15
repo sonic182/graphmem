@@ -22,6 +22,14 @@ pub enum ApplicationError {
     Config(#[from] ConfigError),
     #[error("{0} not found")]
     NotFound(&'static str),
+    #[error(transparent)]
+    Embedding(#[from] EmbeddingError),
+    #[error(transparent)]
+    Semantic(#[from] SemanticError),
+    #[error(
+        "embeddings are disabled; set [embedding] enabled = true (or unset GRAPHMEM_EMBEDDINGS) to reembed"
+    )]
+    EmbeddingsDisabled,
 }
 
 pub struct RememberRequest {
@@ -61,6 +69,12 @@ pub struct GraphRequest {
 pub struct GraphDetails {
     pub entity: Entity,
     pub paths: Vec<GraphPath>,
+}
+
+pub struct ReembedStats {
+    pub memories: usize,
+    pub entities: usize,
+    pub edges: usize,
 }
 
 pub struct MemoryService {
@@ -248,6 +262,49 @@ impl MemoryService {
         semantic_results(database, embedder, retrieval_config, query, scopes, limit)
     }
 
+    pub fn reembed_all(&mut self) -> Result<ReembedStats> {
+        if !self.embedding_config.enabled {
+            return Err(ApplicationError::EmbeddingsDisabled);
+        }
+        let Self {
+            database,
+            embedding_config,
+            embedder,
+            ..
+        } = self;
+        if embedder.is_none() {
+            *embedder = Some(Embedder::load(embedding_config)?);
+        }
+        let embedder = embedder.as_ref().expect("embedder just loaded");
+
+        let memories = database.list_all_memories()?;
+        for memory in &memories {
+            memory_vector(database, embedder, memory.id, &memory.content)?;
+        }
+
+        let entities = database.list_entities()?;
+        for entity in &entities {
+            entity_vector(database, embedder, entity)?;
+        }
+        let entities_by_id: HashMap<i64, &Entity> =
+            entities.iter().map(|entity| (entity.id, entity)).collect();
+
+        let edges = database.list_all_edges()?;
+        for edge in &edges {
+            // FK constraints (edges.source_id/target_id REFERENCES entities
+            // ON DELETE CASCADE) guarantee both endpoints exist.
+            let source = entities_by_id[&edge.source_id];
+            let target = entities_by_id[&edge.target_id];
+            edge_vector(database, embedder, edge, source, target)?;
+        }
+
+        Ok(ReembedStats {
+            memories: memories.len(),
+            entities: entities.len(),
+            edges: edges.len(),
+        })
+    }
+
     fn lexical_search(
         &self,
         query: &str,
@@ -362,7 +419,7 @@ impl MemoryService {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum SemanticError {
+pub enum SemanticError {
     #[error(transparent)]
     Embedding(#[from] EmbeddingError),
     #[error(transparent)]

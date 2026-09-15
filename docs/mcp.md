@@ -58,6 +58,16 @@ toolkit is installed. `GRAPHMEM_EMBEDDINGS=off` disables embeddings entirely.
 remaining model settings. If loading or inference fails, recall reports the
 failure on stderr and falls back to lexical ranking.
 
+Switching `model` (or `GRAPHMEM_EMBEDDING_MODEL`) does not convert existing
+embeddings — different models produce incompatible vectors, so a switch means
+recomputing them. This happens lazily: `remember`, `relate`, and `recall`
+only re-embed what they actually touch, so memories in a `repo:` scope
+nobody queries can stay embedded under the old model indefinitely. Run
+`gmem reembed` once after changing the model to eagerly recompute every
+memory, entity, and edge across every scope in the store. It fails loudly
+(instead of silently falling back to lexical ranking) if the new model can't
+load, and is safe to re-run — already-current rows are skipped.
+
 Tokio uses four workers by default. Override it in the same file when needed:
 
 ```toml

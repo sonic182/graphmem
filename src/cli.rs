@@ -23,6 +23,7 @@ enum Command {
     Forget { id: i64 },
     Flush(FlushArgs),
     Scopes,
+    Reembed,
     Doctor,
     Mcp,
 }
@@ -150,6 +151,14 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         Command::Scopes => {
             let service = MemoryService::open_default()?;
             print_scopes(service.scopes()?);
+        }
+        Command::Reembed => {
+            let mut service = MemoryService::open_default()?;
+            let stats = service.reembed_all()?;
+            println!(
+                "reembedded {} memories, {} entities, {} edges under the current embedding model",
+                stats.memories, stats.entities, stats.edges
+            );
         }
         Command::Doctor => {
             let service = MemoryService::open_default()?;

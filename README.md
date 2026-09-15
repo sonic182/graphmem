@@ -40,11 +40,15 @@ gmem remember "Use nextest for integration tests" \
   --type convention --scope repo:/absolute/path/to/project
 gmem search "integration tests"
 gmem graph component api --direction both --max-depth 2
+gmem reembed
 gmem mcp
 ```
 
 The default data directory is `~/.graphmem`. Set `GRAPHMEM_HOME` to use a
 separate store, for example `~/.graphmem-dev`.
+
+See [docs/cli.md](docs/cli.md) for the complete command reference, including
+`gmem reembed` (the embedding-model migration command).
 
 ## MCP
 

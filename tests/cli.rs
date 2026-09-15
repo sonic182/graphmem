@@ -135,6 +135,10 @@ fn memory_lifecycle_works_across_cli_processes() {
     let doctor = stdout(run(&data_dir, &["doctor"]));
     assert!(doctor.contains("status: healthy"));
 
+    let reembed_disabled = run(&data_dir, &["reembed"]);
+    assert!(!reembed_disabled.status.success());
+    assert!(String::from_utf8_lossy(&reembed_disabled.stderr).contains("embeddings are disabled"));
+
     let forgotten = stdout(run(&data_dir, &["forget", &id]));
     assert_eq!(forgotten, format!("forgot: {id}\n"));
 

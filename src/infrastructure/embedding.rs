@@ -81,9 +81,9 @@ impl Embedder {
         let model_type = serde_json::from_slice::<ModelTypeProbe>(&config_bytes)?.model_type;
         let tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
-        let dtype = device.bf16_default_to_f32();
         let backbone = match model_type.as_deref() {
             None | Some("qwen3") => {
+                let dtype = device.bf16_default_to_f32();
                 let model_config = serde_json::from_slice::<qwen3::Config>(&config_bytes)?;
                 let weights = unsafe {
                     VarBuilder::from_mmaped_safetensors(&[weights_path], dtype, &device)?
@@ -92,9 +92,13 @@ impl Embedder {
                 Backbone::Qwen3(qwen3::Model::new(&model_config, weights)?)
             }
             Some("distilbert") => {
+                // candle-transformers' distilbert attention casts scores to F32 for
+                // softmax but matmuls the result against the still-BF16 value tensor,
+                // so BF16 weights fail on CUDA (fine on CPU, where dtype is already
+                // F32 throughout). Force F32 regardless of device to sidestep it.
                 let model_config = serde_json::from_slice::<distilbert::Config>(&config_bytes)?;
                 let weights = unsafe {
-                    VarBuilder::from_mmaped_safetensors(&[weights_path], dtype, &device)?
+                    VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)?
                 };
                 Backbone::DistilBert(distilbert::DistilBertModel::load(weights, &model_config)?)
             }
