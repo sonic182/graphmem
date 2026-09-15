@@ -1,6 +1,6 @@
 ---
 name: graphmem-mcp
-description: Use the connected Graphmem (gmem) MCP server during software development. At the start of each substantive task, make one bounded memory recall before investigating or changing code; store verified decisions, conventions, constraints, and dependency relationships without recording transient or sensitive data.
+description: Use the connected Graphmem (gmem) MCP server during software development. At the start of each substantive task, make one bounded semantic recall before investigating or changing code; store verified decisions, conventions, constraints, and dependency relationships without recording transient or sensitive data.
 ---
 
 # Graphmem MCP for software development
@@ -16,7 +16,9 @@ The stores remain separate, but `recall` boosts narrative memories that mention 
 
 ## During development
 
-Before investigating or changing code for every substantive task, call `recall` once with a short FTS query built from concrete task identifiers such as a component, symbol, error, or decision. Use `limit: 3` to `5`. Skip this only for direct no-code or logistical requests, or when Graphmem is unavailable. Search with keywords rather than a natural-language question. FTS5 whitespace means AND; use quoted phrases, a trailing `*` for a prefix, and uppercase `OR` or `NOT` when alternatives should match.
+Before investigating or changing code for every substantive task, call `recall` exactly once with `limit: 3` to `5` and a concise query containing the concrete component, symbol, error, or decision. Embeddings plus graph context are the default, so natural language and paraphrases are useful. Skip this only for direct no-code or logistical requests, or when Graphmem is unavailable.
+
+Set `use_embeddings: false` only when you need an exact-token lookup, such as a literal symbol, error string, or file path; in that mode the query is FTS5, so use short keywords, quoted phrases, a trailing `*` for a prefix, and uppercase `OR` or `NOT`, because whitespace means AND.
 
 Do not repeatedly recall the same context within a task. Use `stats` only to diagnose the local store, not as a routine step.
 
@@ -31,7 +33,7 @@ Use `remember` after work only for verified information that is likely to help a
 - significant resolved failure causes or compatibility requirements;
 - stable preferences that affect future implementation work.
 
-Make the content concise and self-contained: state the fact or decision, why it exists when that is non-obvious, and the affected area. Use a descriptive `memory_type` such as `decision`, `convention`, `constraint`, or `incident`; reserve higher `importance` for information whose absence is likely to cause a wrong or costly change.
+Make the content concise and self-contained: state the fact or decision, why it exists when that is non-obvious, and the affected area. When the memory establishes verified retrieval context, attach its entities and directed relations in the same `remember` call; this links the memory atomically. Use a descriptive `memory_type` such as `decision`, `convention`, `constraint`, or `incident`; reserve higher `importance` for information whose absence is likely to cause a wrong or costly change.
 
 Do not store secrets, credentials, private personal data, unverified speculation, temporary progress updates, raw debugging output, or source code that can be read directly from the repository.
 
@@ -49,7 +51,7 @@ For example:
 
 ## Store verified relationships
 
-Use `graph` to inspect an entity before adding an uncertain or potentially duplicate relationship. Use `relate` only for verified, durable facts such as a crate depending on a library, a service owning a component, or a module implementing an interface.
+Use `graph` to inspect an entity before adding an uncertain or potentially duplicate relationship, and to inspect bounded context around a recall result. Use `relate` only for verified, durable graph-only facts such as a crate depending on a library, a service owning a component, or a module implementing an interface. If the fact belongs in a narrative memory too, use `remember` with entities and relations instead.
 
 Choose stable entity kinds and names, and use a concise `snake_case` relation such as `depends_on`, `uses`, `owns`, or `implements`. The graph is unscoped, so do not add repository-specific or speculative relationships. `relate` creates missing entities and reuses an existing identical edge.
 
