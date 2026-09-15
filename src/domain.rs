@@ -89,7 +89,12 @@ pub fn text_mentions(haystack: &str, needle: &str) -> bool {
     !needle.is_empty() && haystack.to_lowercase().contains(&needle.to_lowercase())
 }
 
-pub fn personalized_pagerank(adjacency: &[Vec<usize>], seeds: &[(usize, f64)]) -> Vec<f64> {
+pub fn personalized_pagerank(
+    adjacency: &[Vec<usize>],
+    seeds: &[(usize, f64)],
+    damping: f64,
+    iterations: usize,
+) -> Vec<f64> {
     let mut restart = vec![0.0; adjacency.len()];
     for &(node, weight) in seeds {
         if node < restart.len() && weight.is_finite() && weight > 0.0 {
@@ -105,18 +110,17 @@ pub fn personalized_pagerank(adjacency: &[Vec<usize>], seeds: &[(usize, f64)]) -
     }
 
     let mut rank = restart.clone();
-    for _ in 0..32 {
+    for _ in 0..iterations {
         let mut next = restart
             .iter()
-            .map(|weight| weight * 0.5)
+            .map(|weight| weight * (1.0 - damping))
             .collect::<Vec<_>>();
+        let mut dangling = 0.0;
         for (node, neighbors) in adjacency.iter().enumerate() {
             if neighbors.is_empty() {
-                for (target, weight) in restart.iter().enumerate() {
-                    next[target] += rank[node] * 0.5 * weight;
-                }
+                dangling += rank[node];
             } else {
-                let share = rank[node] * 0.5 / neighbors.len() as f64;
+                let share = rank[node] * damping / neighbors.len() as f64;
                 for &neighbor in neighbors {
                     if neighbor < next.len() {
                         next[neighbor] += share;
@@ -124,7 +128,18 @@ pub fn personalized_pagerank(adjacency: &[Vec<usize>], seeds: &[(usize, f64)]) -
                 }
             }
         }
+        for (target, weight) in restart.iter().enumerate() {
+            next[target] += dangling * damping * weight;
+        }
+        let delta = rank
+            .iter()
+            .zip(&next)
+            .map(|(previous, current)| (previous - current).abs())
+            .sum::<f64>();
         rank = next;
+        if delta < 1e-9 {
+            break;
+        }
     }
     rank
 }
@@ -155,7 +170,21 @@ mod tests {
 
     #[test]
     fn pagerank_carries_a_seed_across_multiple_hops() {
-        let rank = personalized_pagerank(&[vec![1], vec![0, 2], vec![1], vec![]], &[(0, 1.0)]);
+        let rank = personalized_pagerank(
+            &[vec![1], vec![0, 2], vec![1], vec![]],
+            &[(0, 1.0)],
+            0.5,
+            32,
+        );
         assert!(rank[2] > rank[3]);
+    }
+
+    #[test]
+    fn pagerank_redistributes_dangling_mass_over_the_restart_vector() {
+        let adjacency = [vec![1], vec![0], vec![], vec![]];
+        let rank = personalized_pagerank(&adjacency, &[(0, 0.75), (2, 0.25)], 0.5, 64);
+        assert!(rank[0] > rank[1]);
+        assert!(rank[2] > rank[3]);
+        assert!((rank.iter().sum::<f64>() - 1.0).abs() < 1e-9);
     }
 }

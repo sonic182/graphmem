@@ -706,6 +706,32 @@ impl Database {
         )
     }
 
+    pub fn entity_embedding(
+        &self,
+        entity_id: i64,
+        model: &str,
+        revision: &str,
+    ) -> Result<Option<Vec<f32>>> {
+        self.embedding("entity_embeddings", "entity_id", entity_id, model, revision)
+    }
+
+    pub fn store_entity_embedding(
+        &self,
+        entity_id: i64,
+        model: &str,
+        revision: &str,
+        vector: &[f32],
+    ) -> Result<()> {
+        self.store_embedding(
+            "entity_embeddings",
+            "entity_id",
+            entity_id,
+            model,
+            revision,
+            vector,
+        )
+    }
+
     pub fn get_edge_by_endpoints(
         &self,
         source_id: i64,
@@ -1024,6 +1050,13 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
              );
              CREATE TABLE IF NOT EXISTS edge_embeddings (
                  edge_id INTEGER PRIMARY KEY REFERENCES edges(id) ON DELETE CASCADE,
+                 model TEXT NOT NULL,
+                 revision TEXT NOT NULL,
+                 dimensions INTEGER NOT NULL,
+                 vector BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS entity_embeddings (
+                 entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
                  model TEXT NOT NULL,
                  revision TEXT NOT NULL,
                  dimensions INTEGER NOT NULL,

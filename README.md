@@ -85,6 +85,13 @@ model = "Qwen/Qwen3-Embedding-0.6B"
 revision = "main"
 cache_dir = "/home/user/.graphmem/models"
 
+[retrieval]
+seed_top_k = 20            # memories kept as PageRank seeds
+seed_temperature = 0.05    # lower sharpens the gap between seeds
+memory_seed_weight = 0.5   # share of seed mass for memories vs. the graph
+entity_anchor_weight = 0.2 # pull toward entities named in the query
+damping = 0.5
+
 [runtime]
 worker_threads = 4
 ```
@@ -92,6 +99,10 @@ worker_threads = 4
 `backend = "auto"` selects CUDA when available and otherwise uses CPU.
 `GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded
 on first enabled recall and cached locally.
+
+Every `[retrieval]` key also reads a `GRAPHMEM_RETRIEVAL_*` environment variable,
+so values can be swept without editing the file. `seed_temperature` is the one
+that matters most: raising it flattens ranking toward returning the whole store.
 
 Logs are appended to `~/.graphmem/logs/graphmem.log` (or the corresponding
 `GRAPHMEM_HOME` directory):

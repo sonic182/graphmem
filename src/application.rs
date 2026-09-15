@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::{
     Database, Edge, Entity, EntityReference, GraphDirection, GraphPath, Memory, Relation, Scope,
     SearchResult, StorageError, StoreStats,
-    config::{ConfigError, EmbeddingConfig, embedding_config},
+    config::{ConfigError, EmbeddingConfig, RetrievalConfig, embedding_config, retrieval_config},
     domain::{personalized_pagerank, text_mentions},
     embedding::{Embedder, EmbeddingError, EmbeddingModel},
 };
@@ -64,6 +64,7 @@ pub struct GraphDetails {
 pub struct MemoryService {
     database: Database,
     embedding_config: EmbeddingConfig,
+    retrieval_config: RetrievalConfig,
     embedder: Option<Embedder>,
     embedding_attempted: bool,
 }
@@ -77,6 +78,7 @@ impl MemoryService {
         })?;
         Ok(Self {
             embedding_config: embedding_config(data_dir)?,
+            retrieval_config: retrieval_config(data_dir)?,
             database,
             embedder: None,
             embedding_attempted: false,
@@ -97,14 +99,53 @@ impl MemoryService {
         } else {
             request.scopes
         };
-        Ok(self.database.remember_with_graph(
+        let memory = self.database.remember_with_graph(
             &request.content,
             &request.memory_type,
             request.importance,
             &scopes,
             &request.entities,
             &request.relations,
-        )?)
+        )?;
+        self.embed_stored_memory(&memory);
+        Ok(memory)
+    }
+
+    fn embed_stored_memory(&self, memory: &Memory) {
+        let Some(embedder) = self.embedder.as_ref() else {
+            return;
+        };
+        let database = &self.database;
+        let stored = memory_vector(database, embedder, memory.id, &memory.content).and_then(
+            |_| -> std::result::Result<(), SemanticError> {
+                for entity in database.list_memory_entities(memory.id)? {
+                    entity_vector(database, embedder, &entity)?;
+                }
+                Ok(())
+            },
+        );
+        if let Err(error) = stored {
+            tracing::warn!(%error, "storing embeddings failed; recall will backfill them");
+        }
+    }
+
+    fn embed_stored_relation(&self, details: &RelationDetails) {
+        let Some(embedder) = self.embedder.as_ref() else {
+            return;
+        };
+        let database = &self.database;
+        let stored = entity_vector(database, embedder, &details.source)
+            .and(entity_vector(database, embedder, &details.target))
+            .and(edge_vector(
+                database,
+                embedder,
+                &details.edge,
+                &details.source,
+                &details.target,
+            ));
+        if let Err(error) = stored {
+            tracing::warn!(%error, "storing embeddings failed; recall will backfill them");
+        }
     }
 
     pub fn list(&self, scope: Option<&str>, limit: usize) -> Result<Vec<Memory>> {
@@ -188,6 +229,7 @@ impl MemoryService {
         let Self {
             database,
             embedding_config,
+            retrieval_config,
             embedder,
             embedding_attempted,
         } = self;
@@ -201,7 +243,7 @@ impl MemoryService {
         let Some(embedder) = embedder.as_ref() else {
             return Ok(None);
         };
-        semantic_results(database, embedder, query, scopes, limit)
+        semantic_results(database, embedder, retrieval_config, query, scopes, limit)
     }
 
     fn lexical_search(
@@ -273,11 +315,13 @@ impl MemoryService {
                     request.metadata.as_deref(),
                 )?,
             };
-        Ok(RelationDetails {
+        let details = RelationDetails {
             source,
             edge,
             target,
-        })
+        };
+        self.embed_stored_relation(&details);
+        Ok(details)
     }
 
     pub fn graph(&self, request: GraphRequest) -> Result<GraphDetails> {
@@ -316,16 +360,17 @@ impl MemoryService {
 }
 
 #[derive(Debug, Error)]
-enum SemanticError {
+pub(crate) enum SemanticError {
     #[error(transparent)]
     Embedding(#[from] EmbeddingError),
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-fn semantic_results<M: EmbeddingModel>(
+pub(crate) fn semantic_results<M: EmbeddingModel>(
     database: &Database,
     embedder: &M,
+    retrieval: &RetrievalConfig,
     query: &str,
     scopes: Option<&[String]>,
     limit: usize,
@@ -345,30 +390,15 @@ fn semantic_results<M: EmbeddingModel>(
         entity_nodes.insert(entity.id, memories.len() + index);
     }
     let mut adjacency = vec![Vec::new(); memories.len() + entities.len()];
-    let mut seeds = Vec::new();
+    let mut memory_scores = Vec::new();
+    let mut entity_scores = Vec::new();
+    let mut edge_scores = Vec::new();
+    let mut edge_endpoints = Vec::new();
+    let mut anchors = Vec::new();
 
     for (index, memory) in memories.iter().enumerate() {
-        let vector = match database.memory_embedding(
-            memory.id,
-            embedder.model_name(),
-            embedder.revision(),
-        )? {
-            Some(vector) => vector,
-            None => {
-                let vector = embedder.embed_document(&memory.content)?;
-                database.store_memory_embedding(
-                    memory.id,
-                    embedder.model_name(),
-                    embedder.revision(),
-                    &vector,
-                )?;
-                vector
-            }
-        };
-        let score = dot_product(&query_vector, &vector);
-        if score > 0.0 {
-            seeds.push((index, score));
-        }
+        let vector = memory_vector(database, embedder, memory.id, &memory.content)?;
+        memory_scores.push((index, dot_product(&query_vector, &vector)));
         for entity in database.list_memory_entities(memory.id)? {
             if let Some(&entity_node) = entity_nodes.get(&entity.id) {
                 add_link(&mut adjacency, index, entity_node);
@@ -377,10 +407,14 @@ fn semantic_results<M: EmbeddingModel>(
     }
 
     for entity in &entities {
+        let node = entity_nodes[&entity.id];
+        let vector = entity_vector(database, embedder, entity)?;
+        entity_scores.push((node, dot_product(&query_vector, &vector)));
         if text_mentions(query, &entity.canonical_name) {
-            seeds.push((entity_nodes[&entity.id], 1.0));
+            anchors.push((node, retrieval.entity_anchor_weight));
         }
     }
+
     for edge in edges {
         let Some(&source_node) = entity_nodes.get(&edge.source_id) else {
             continue;
@@ -391,32 +425,44 @@ fn semantic_results<M: EmbeddingModel>(
         add_link(&mut adjacency, source_node, target_node);
         let source = &entities[source_node - memories.len()];
         let target = &entities[target_node - memories.len()];
-        let document = format!("{} {} {}", source.name, edge.relation, target.name);
-        let vector =
-            match database.edge_embedding(edge.id, embedder.model_name(), embedder.revision())? {
-                Some(vector) => vector,
-                None => {
-                    let vector = embedder.embed_document(&document)?;
-                    database.store_edge_embedding(
-                        edge.id,
-                        embedder.model_name(),
-                        embedder.revision(),
-                        &vector,
-                    )?;
-                    vector
-                }
-            };
-        let score = dot_product(&query_vector, &vector);
-        if score > 0.0 {
-            seeds.push((source_node, score * 0.5));
-            seeds.push((target_node, score * 0.5));
-        }
+        let vector = edge_vector(database, embedder, &edge, source, target)?;
+        edge_scores.push((edge_endpoints.len(), dot_product(&query_vector, &vector)));
+        edge_endpoints.push((source_node, target_node));
     }
-    if seeds.is_empty() {
+
+    let mut memory_seeds = sharpen(
+        memory_scores,
+        retrieval.seed_top_k,
+        retrieval.seed_temperature,
+    );
+    let mut graph_seeds = sharpen(
+        entity_scores,
+        retrieval.seed_top_k,
+        retrieval.seed_temperature,
+    );
+    for (edge, weight) in sharpen(
+        edge_scores,
+        retrieval.seed_top_k,
+        retrieval.seed_temperature,
+    ) {
+        let (source_node, target_node) = edge_endpoints[edge];
+        graph_seeds.push((source_node, weight * 0.5));
+        graph_seeds.push((target_node, weight * 0.5));
+    }
+    scale(&mut graph_seeds, 1.0 - retrieval.memory_seed_weight);
+    graph_seeds.extend(anchors);
+    scale(&mut memory_seeds, retrieval.memory_seed_weight);
+    memory_seeds.extend(graph_seeds);
+    if memory_seeds.is_empty() {
         return Ok(None);
     }
 
-    let rank = personalized_pagerank(&adjacency, &seeds);
+    let rank = personalized_pagerank(
+        &adjacency,
+        &memory_seeds,
+        retrieval.damping,
+        PAGERANK_ITERATIONS,
+    );
     let mut results = memories
         .into_iter()
         .enumerate()
@@ -437,6 +483,97 @@ fn semantic_results<M: EmbeddingModel>(
     });
     results.truncate(limit);
     Ok(Some(results))
+}
+
+fn memory_vector<M: EmbeddingModel>(
+    database: &Database,
+    embedder: &M,
+    memory_id: i64,
+    content: &str,
+) -> std::result::Result<Vec<f32>, SemanticError> {
+    let revision = revision_key(embedder);
+    if let Some(vector) = database.memory_embedding(memory_id, embedder.model_name(), &revision)? {
+        return Ok(vector);
+    }
+    let vector = embedder.embed_document(content)?;
+    database.store_memory_embedding(memory_id, embedder.model_name(), &revision, &vector)?;
+    Ok(vector)
+}
+
+fn entity_vector<M: EmbeddingModel>(
+    database: &Database,
+    embedder: &M,
+    entity: &Entity,
+) -> std::result::Result<Vec<f32>, SemanticError> {
+    let revision = revision_key(embedder);
+    if let Some(vector) = database.entity_embedding(entity.id, embedder.model_name(), &revision)? {
+        return Ok(vector);
+    }
+    let vector = embedder.embed_document(&entity_document(entity))?;
+    database.store_entity_embedding(entity.id, embedder.model_name(), &revision, &vector)?;
+    Ok(vector)
+}
+
+fn edge_vector<M: EmbeddingModel>(
+    database: &Database,
+    embedder: &M,
+    edge: &Edge,
+    source: &Entity,
+    target: &Entity,
+) -> std::result::Result<Vec<f32>, SemanticError> {
+    let revision = revision_key(embedder);
+    if let Some(vector) = database.edge_embedding(edge.id, embedder.model_name(), &revision)? {
+        return Ok(vector);
+    }
+    let vector = embedder.embed_document(&edge_document(edge, source, target))?;
+    database.store_edge_embedding(edge.id, embedder.model_name(), &revision, &vector)?;
+    Ok(vector)
+}
+
+pub(crate) fn entity_document(entity: &Entity) -> String {
+    format!("{} {}", entity.kind, entity.name)
+}
+
+pub(crate) fn edge_document(edge: &Edge, source: &Entity, target: &Entity) -> String {
+    format!(
+        "{} {} {}",
+        source.name,
+        edge.relation.replace('_', " "),
+        target.name
+    )
+}
+
+// Stored vectors are keyed by model and revision only, so a change to the text
+// built by entity_document or edge_document must bump this or stale vectors
+// silently survive.
+const DOCUMENT_FORMAT: &str = "d1";
+const PAGERANK_ITERATIONS: usize = 32;
+
+fn revision_key<M: EmbeddingModel>(embedder: &M) -> String {
+    format!("{}#{DOCUMENT_FORMAT}", embedder.revision())
+}
+
+fn sharpen(mut scored: Vec<(usize, f64)>, top_k: usize, temperature: f64) -> Vec<(usize, f64)> {
+    scored.retain(|(_, score)| score.is_finite());
+    scored.sort_by(|left, right| right.1.total_cmp(&left.1));
+    scored.truncate(top_k);
+    let Some(&(_, best)) = scored.first() else {
+        return Vec::new();
+    };
+    scored
+        .into_iter()
+        .map(|(key, score)| (key, ((score - best) / temperature).exp()))
+        .collect()
+}
+
+fn scale(seeds: &mut [(usize, f64)], weight: f64) {
+    let total = seeds.iter().map(|(_, seed)| seed).sum::<f64>();
+    if total <= 0.0 {
+        return;
+    }
+    for (_, seed) in seeds {
+        *seed = *seed / total * weight;
+    }
 }
 
 fn add_link(adjacency: &mut [Vec<usize>], first: usize, second: usize) {
@@ -463,11 +600,11 @@ mod tests {
 
     use crate::{
         Database, EntityReference, Relation,
-        config::EmbeddingConfig,
+        config::{EmbeddingConfig, RetrievalConfig},
         embedding::{EmbeddingError, EmbeddingModel},
     };
 
-    use super::{MemoryService, RememberRequest, semantic_results};
+    use super::{MemoryService, RememberRequest, revision_key, semantic_results};
 
     struct FakeEmbedder;
 
@@ -507,6 +644,7 @@ mod tests {
         ));
         let mut service = MemoryService {
             database: Database::open(&root.join("memory.sqlite")).expect("database opens"),
+            retrieval_config: RetrievalConfig::default(),
             embedding_config: EmbeddingConfig {
                 enabled: true,
                 model: "missing-model".to_owned(),
@@ -601,6 +739,7 @@ mod tests {
         let results = semantic_results(
             &database,
             &FakeEmbedder,
+            &RetrievalConfig::default(),
             "different wording",
             Some(&["repo:/a".to_owned()]),
             10,
@@ -614,15 +753,16 @@ mod tests {
         assert!(ids.contains(&seed.id));
         assert!(ids.contains(&linked.id));
         assert!(!ids.contains(&excluded.id));
+        let revision = revision_key(&FakeEmbedder);
         assert!(
             database
-                .memory_embedding(seed.id, "test-model", "test-revision")
+                .memory_embedding(seed.id, "test-model", &revision)
                 .unwrap()
                 .is_some()
         );
         assert!(
             database
-                .edge_embedding(1, "test-model", "test-revision")
+                .edge_embedding(1, "test-model", &revision)
                 .unwrap()
                 .is_some()
         );

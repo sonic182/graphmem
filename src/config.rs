@@ -18,6 +18,27 @@ pub struct EmbeddingConfig {
     pub backend: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RetrievalConfig {
+    pub seed_top_k: usize,
+    pub seed_temperature: f64,
+    pub memory_seed_weight: f64,
+    pub entity_anchor_weight: f64,
+    pub damping: f64,
+}
+
+impl Default for RetrievalConfig {
+    fn default() -> Self {
+        Self {
+            seed_top_k: 20,
+            seed_temperature: 0.05,
+            memory_seed_weight: 0.5,
+            entity_anchor_weight: 0.2,
+            damping: 0.5,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub worker_threads: usize,
@@ -36,6 +57,7 @@ pub enum ConfigError {
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     embedding: Option<FileEmbeddingConfig>,
+    retrieval: Option<FileRetrievalConfig>,
     runtime: Option<FileRuntimeConfig>,
 }
 
@@ -49,18 +71,29 @@ struct FileEmbeddingConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct FileRetrievalConfig {
+    seed_top_k: Option<usize>,
+    seed_temperature: Option<f64>,
+    memory_seed_weight: Option<f64>,
+    entity_anchor_weight: Option<f64>,
+    damping: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct FileRuntimeConfig {
     worker_threads: Option<usize>,
 }
 
+fn read_file_config(data_dir: &Path) -> Result<FileConfig, ConfigError> {
+    match fs::read_to_string(data_dir.join("config.toml")) {
+        Ok(contents) => Ok(toml::from_str::<FileConfig>(&contents)?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(FileConfig::default()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub fn embedding_config(data_dir: &Path) -> Result<EmbeddingConfig, ConfigError> {
-    let path = data_dir.join("config.toml");
-    let file = match fs::read_to_string(path) {
-        Ok(contents) => toml::from_str::<FileConfig>(&contents)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileConfig::default(),
-        Err(error) => return Err(error.into()),
-    };
-    let embedding = file.embedding.unwrap_or_default();
+    let embedding = read_file_config(data_dir)?.embedding.unwrap_or_default();
     Ok(EmbeddingConfig {
         enabled: env::var("GRAPHMEM_EMBEDDINGS")
             .ok()
@@ -83,13 +116,56 @@ pub fn embedding_config(data_dir: &Path) -> Result<EmbeddingConfig, ConfigError>
     })
 }
 
-pub fn runtime_config(data_dir: &Path) -> Result<RuntimeConfig, ConfigError> {
-    let path = data_dir.join("config.toml");
-    let file = match fs::read_to_string(path) {
-        Ok(contents) => toml::from_str::<FileConfig>(&contents)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileConfig::default(),
-        Err(error) => return Err(error.into()),
+pub fn retrieval_config(data_dir: &Path) -> Result<RetrievalConfig, ConfigError> {
+    let file = read_file_config(data_dir)?.retrieval.unwrap_or_default();
+    let defaults = RetrievalConfig::default();
+    let config = RetrievalConfig {
+        seed_top_k: env_number("GRAPHMEM_RETRIEVAL_SEED_TOP_K")?
+            .or(file.seed_top_k)
+            .unwrap_or(defaults.seed_top_k),
+        seed_temperature: env_number("GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE")?
+            .or(file.seed_temperature)
+            .unwrap_or(defaults.seed_temperature),
+        memory_seed_weight: env_number("GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT")?
+            .or(file.memory_seed_weight)
+            .unwrap_or(defaults.memory_seed_weight),
+        entity_anchor_weight: env_number("GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT")?
+            .or(file.entity_anchor_weight)
+            .unwrap_or(defaults.entity_anchor_weight),
+        damping: env_number("GRAPHMEM_RETRIEVAL_DAMPING")?
+            .or(file.damping)
+            .unwrap_or(defaults.damping),
     };
+    if config.seed_top_k == 0 {
+        return Err(ConfigError::Invalid(
+            "retrieval.seed_top_k must be at least 1".to_owned(),
+        ));
+    }
+    if !(config.seed_temperature > 0.0 && config.seed_temperature <= 1.0) {
+        return Err(ConfigError::Invalid(
+            "retrieval.seed_temperature must be between 0 and 1".to_owned(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&config.memory_seed_weight) {
+        return Err(ConfigError::Invalid(
+            "retrieval.memory_seed_weight must be between 0 and 1".to_owned(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&config.entity_anchor_weight) {
+        return Err(ConfigError::Invalid(
+            "retrieval.entity_anchor_weight must be between 0 and 1".to_owned(),
+        ));
+    }
+    if !(config.damping > 0.0 && config.damping < 1.0) {
+        return Err(ConfigError::Invalid(
+            "retrieval.damping must be between 0 and 1, exclusive".to_owned(),
+        ));
+    }
+    Ok(config)
+}
+
+pub fn runtime_config(data_dir: &Path) -> Result<RuntimeConfig, ConfigError> {
+    let file = read_file_config(data_dir)?;
     let worker_threads = match env::var("GRAPHMEM_TOKIO_WORKER_THREADS") {
         Ok(value) => value.parse::<usize>().map_err(|_| {
             ConfigError::Invalid(
@@ -111,6 +187,17 @@ pub fn runtime_config(data_dir: &Path) -> Result<RuntimeConfig, ConfigError> {
 
 fn env_value(name: &str) -> Option<String> {
     env::var(name).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn env_number<T: std::str::FromStr>(name: &str) -> Result<Option<T>, ConfigError> {
+    env_value(name)
+        .map(|value| {
+            value
+                .trim()
+                .parse::<T>()
+                .map_err(|_| ConfigError::Invalid(format!("{name} must be a number")))
+        })
+        .transpose()
 }
 
 #[cfg(test)]
