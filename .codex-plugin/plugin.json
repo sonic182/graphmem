@@ -9,7 +9,7 @@
   "repository": "https://github.com/sonic182/graphmem",
   "keywords": ["memory", "mcp", "knowledge", "development"],
   "skills": "./skills/",
-  "hooks": "./hooks/codex-hooks.json",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Graphmem",
     "shortDescription": "Durable project memory",

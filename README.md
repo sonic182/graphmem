@@ -91,15 +91,20 @@ For a CUDA build, use:
 just install-codex-plugin true
 ```
 
+The CUDA build requires `nvcc` on your `PATH`.
+
 The recipe installs `gmem` and registers its MCP server only when `gmem` is
 not already configured; the optional `true` adds Cargo's `cuda` feature for that new
 install. It then adds the checkout as a Codex marketplace and installs
 `graphmem`. An existing `gmem` configuration is left unchanged. Open `/hooks`
 in Codex, review and trust the two Graphmem hooks, then start a new thread.
 
-To install the plugin from GitHub, install `gmem` on your `PATH` first, then:
+To install the plugin from GitHub, install `gmem`, register it as an MCP
+server, and then install the plugin:
 
 ```sh
+cargo install --locked --git https://github.com/sonic182/graphmem
+codex mcp add gmem -- ~/.cargo/bin/gmem mcp
 codex plugin marketplace add sonic182/graphmem
 codex plugin add graphmem@graphmem
 ```
