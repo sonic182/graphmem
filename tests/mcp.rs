@@ -80,7 +80,8 @@ fn serves_memory_lifecycle_over_stdio() {
     let instructions = initialized["result"]["instructions"]
         .as_str()
         .expect("server instructions");
-    assert!(instructions.contains("Do not store secrets"));
+    assert!(instructions.contains("Use remember to store a memory"));
+    assert!(!instructions.contains("Do not store"));
     assert!(instructions.contains("startup working directory"));
     assert!(instructions.contains("two separate local stores"));
     assert!(instructions.contains("entity graph is unscoped"));
@@ -114,13 +115,13 @@ fn serves_memory_lifecycle_over_stdio() {
         recall["inputSchema"]["properties"]["use_embeddings"]["description"]
             .as_str()
             .expect("use_embeddings description")
-            .contains("exact-token lookup")
+            .contains("FTS5 lexical search")
     );
     assert!(
         recall["inputSchema"]["properties"]["scopes"]["description"]
             .as_str()
             .expect("scopes description")
-            .contains("server's working directory")
+            .contains("server's default scope")
     );
     let stats = listed_tools
         .iter()
