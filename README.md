@@ -86,20 +86,21 @@ guidance.
 
 ### Claude Code
 
-From a local checkout (development), build the binary and register it, then
-add the checkout itself as the marketplace:
+From a local checkout, install the optimized binary from it and register it,
+then add the checkout itself as the marketplace:
 
 ```sh
-cargo build
-claude mcp add gmem -- "$PWD/target/debug/gmem" mcp
+cargo install --locked --path .
+claude mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
 claude plugin marketplace add ./
 claude plugin install graphmem@graphmem
 ```
 
-The marketplace source needs the `./` prefix. Re-run `claude plugin marketplace
-update graphmem` after changing the plugin manifest or hooks, and `claude mcp
-remove gmem` before re-adding it if you switch between the debug and installed
-binary.
+Avoid registering `target/debug/gmem`: a debug build runs the embedding model
+far too slowly for everyday use. Re-run `cargo install --locked --path .` after
+pulling changes (the registered path stays the same), and `claude plugin
+marketplace update graphmem` after changing the plugin manifest or hooks. The
+marketplace source needs the `./` prefix.
 
 To install from GitHub instead:
 
@@ -162,6 +163,7 @@ backend = "auto"       # auto, cpu, or cuda
 model = "sentence-transformers/msmarco-distilbert-cos-v5"
 revision = "main"
 cache_dir = "/home/user/.graphmem/models"
+# batch_size = 16      # texts per model call; default 1 on CPU, 16 on CUDA
 
 [retrieval]
 seed_top_k = 20            # memories kept as PageRank seeds
@@ -176,7 +178,12 @@ worker_threads = 4
 
 `backend = "auto"` selects CUDA when available and otherwise uses CPU.
 `GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded
-on first enabled recall and cached locally.
+and loaded on first use (the first `remember`, `relate`, recall, or `reembed`)
+and cached locally. `remember` stores its embeddings in the same transaction,
+so it fails and stores nothing if the model cannot load or embed.
+`batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE`, and the
+`--embedding-batch-size` flag overrides both for one `gmem` run, including
+`gmem mcp`.
 
 Every `[retrieval]` key also reads a `GRAPHMEM_RETRIEVAL_*` environment variable,
 so values can be swept without editing the file. `seed_temperature` is the one

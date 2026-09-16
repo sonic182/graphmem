@@ -28,6 +28,8 @@ pub enum EmbeddingError {
     Backend(String),
     #[error("unsupported embedding model architecture: {0:?}")]
     Architecture(Option<String>),
+    #[error("embedding model failed to load earlier in this process; restart it to retry")]
+    Unavailable,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +51,7 @@ pub struct Embedder {
     backbone: Backbone,
     tokenizer: Tokenizer,
     device: Device,
+    batch_size: usize,
     pub model_name: String,
     pub revision: String,
 }
@@ -58,6 +61,15 @@ pub(crate) trait EmbeddingModel {
     fn revision(&self) -> &str;
     fn embed_query(&self, query: &str) -> Result<Vec<f32>, EmbeddingError>;
     fn embed_document(&self, document: &str) -> Result<Vec<f32>, EmbeddingError>;
+
+    /// Embeds several documents, in input order. Models that can run a
+    /// padded batch override this; the default embeds one at a time.
+    fn embed_documents(&self, documents: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        documents
+            .iter()
+            .map(|document| self.embed_document(document))
+            .collect()
+    }
 }
 
 impl Embedder {
@@ -120,31 +132,62 @@ impl Embedder {
             }
             Some(_) => return Err(EmbeddingError::Architecture(model_type)),
         };
+        // Padded batches pay off on a GPU; on CPU the padding costs more than
+        // batching saves, so default to one text per call there.
+        let batch_size = config
+            .batch_size
+            .unwrap_or(if backend == "cuda" { 16 } else { 1 })
+            .max(1);
         let embedder = Self {
             backbone,
             tokenizer,
             device,
+            batch_size,
             model_name: config.model.clone(),
             revision: config.revision.clone(),
         };
-        tracing::info!(model = %embedder.model_name, revision = %embedder.revision, backend, "embedding model ready");
+        tracing::info!(model = %embedder.model_name, revision = %embedder.revision, backend, batch_size, "embedding model ready");
         Ok(embedder)
+    }
+
+    pub fn batch_size(&self) -> usize {
+        self.batch_size
     }
 
     pub fn embed_query(&self, query: &str) -> Result<Vec<f32>, EmbeddingError> {
         match &self.backbone {
-            Backbone::Qwen3(_) => self.embed(&format!(
+            Backbone::Qwen3(_) => self.embed_document(&format!(
                 "Instruct: Given a memory request, retrieve the most relevant durable memory passages and relationship facts.\nQuery: {query}"
             )),
-            Backbone::DistilBert(_) => self.embed(query),
+            Backbone::DistilBert(_) => self.embed_document(query),
         }
     }
 
     pub fn embed_document(&self, document: &str) -> Result<Vec<f32>, EmbeddingError> {
-        self.embed(document)
+        let mut vectors = self.embed_documents(&[document])?;
+        vectors.pop().ok_or(EmbeddingError::EmptyEmbedding)
     }
 
-    fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+    /// Embeds `documents` in chunks of the configured batch size, so single
+    /// and batched calls share one code path and produce the same vectors.
+    pub fn embed_documents(&self, documents: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let mut vectors = Vec::with_capacity(documents.len());
+        for chunk in documents.chunks(self.batch_size) {
+            match &self.backbone {
+                // ponytail: Qwen3 runs one text at a time; candle 0.11's
+                // causal_mask cannot build a b>1 mask and has no padding mask.
+                Backbone::Qwen3(model) => {
+                    for document in chunk {
+                        vectors.push(self.embed_qwen3(model, document)?);
+                    }
+                }
+                Backbone::DistilBert(model) => vectors.extend(self.embed_distilbert(model, chunk)?),
+            }
+        }
+        Ok(vectors)
+    }
+
+    fn token_ids(&self, text: &str) -> Result<Vec<u32>, EmbeddingError> {
         let encoding = self
             .tokenizer
             .encode(text, true)
@@ -153,32 +196,71 @@ impl Embedder {
         if ids.is_empty() {
             return Err(EmbeddingError::EmptyEmbedding);
         }
-        let input = Tensor::new(ids, &self.device)?.unsqueeze(0)?;
-        let vector = match &self.backbone {
-            Backbone::Qwen3(model) => {
-                let mut model = model.clone();
-                model
-                    .forward(&input, 0)?
-                    .narrow(1, ids.len() - 1, 1)?
-                    .squeeze(1)?
-                    .squeeze(0)?
-                    .to_dtype(DType::F32)?
-            }
-            Backbone::DistilBert(model) => {
-                let mask = Tensor::zeros((ids.len(), ids.len()), DType::U8, &self.device)?;
-                model
-                    .forward(&input, &mask)?
-                    .mean(1)?
-                    .squeeze(0)?
-                    .to_dtype(DType::F32)?
-            }
-        };
-        let norm = vector.norm()?.to_scalar::<f32>()?;
-        if norm == 0.0 {
-            return Err(EmbeddingError::EmptyEmbedding);
-        }
-        Ok((&vector / norm as f64)?.to_vec1::<f32>()?)
+        Ok(ids.to_vec())
     }
+
+    fn embed_qwen3(&self, model: &qwen3::Model, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+        let ids = self.token_ids(text)?;
+        let input = Tensor::new(ids.as_slice(), &self.device)?.unsqueeze(0)?;
+        let mut model = model.clone();
+        let vector = model
+            .forward(&input, 0)?
+            .narrow(1, ids.len() - 1, 1)?
+            .squeeze(1)?
+            .squeeze(0)?
+            .to_dtype(DType::F32)?
+            .to_vec1::<f32>()?;
+        normalize(vector)
+    }
+
+    /// Right-pads the chunk, masks the padding out of attention, and
+    /// mean-pools only the real tokens of each row.
+    fn embed_distilbert(
+        &self,
+        model: &distilbert::DistilBertModel,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let rows = texts
+            .iter()
+            .map(|text| self.token_ids(text))
+            .collect::<Result<Vec<_>, _>>()?;
+        let batch = rows.len();
+        let length = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut ids = Vec::with_capacity(batch * length);
+        let mut padding = Vec::with_capacity(batch * length);
+        let mut real = Vec::with_capacity(batch * length);
+        for row in &rows {
+            for position in 0..length {
+                let token = row.get(position);
+                ids.push(token.copied().unwrap_or(0));
+                padding.push(u8::from(token.is_none()));
+                real.push(if token.is_some() { 1f32 } else { 0f32 });
+            }
+        }
+        let input = Tensor::from_vec(ids, (batch, length), &self.device)?;
+        // Non-zero mask entries become -inf attention scores (padding keys).
+        let mask = Tensor::from_vec(padding, (batch, 1, 1, length), &self.device)?;
+        let real = Tensor::from_vec(real, (batch, length, 1), &self.device)?;
+        let pooled = model
+            .forward(&input, &mask)?
+            .to_dtype(DType::F32)?
+            .broadcast_mul(&real)?
+            .sum(1)?
+            .broadcast_div(&real.sum(1)?)?;
+        pooled
+            .to_vec2::<f32>()?
+            .into_iter()
+            .map(normalize)
+            .collect()
+    }
+}
+
+fn normalize(vector: Vec<f32>) -> Result<Vec<f32>, EmbeddingError> {
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm == 0.0 || !norm.is_finite() {
+        return Err(EmbeddingError::EmptyEmbedding);
+    }
+    Ok(vector.into_iter().map(|value| value / norm).collect())
 }
 
 fn cached_model_files(config: &EmbeddingConfig) -> bool {
@@ -230,11 +312,43 @@ impl EmbeddingModel for Embedder {
     fn embed_document(&self, document: &str) -> Result<Vec<f32>, EmbeddingError> {
         Embedder::embed_document(self, document)
     }
+
+    fn embed_documents(&self, documents: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        Embedder::embed_documents(self, documents)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::qwen_embedding_weight_name;
+    use std::path::Path;
+
+    use super::{Embedder, qwen_embedding_weight_name};
+    use crate::infrastructure::config::embedding_config;
+
+    /// Loads the configured model from `GRAPHMEM_EMBEDDING_CACHE_DIR`, or the
+    /// repository's `.data/models` cache used by the eval script.
+    #[test]
+    #[ignore = "downloads and runs the real embedding model"]
+    fn embed_documents_matches_one_at_a_time_embedding() {
+        let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".data");
+        let mut config = embedding_config(&data_dir).unwrap();
+        config.backend = "cpu".to_owned();
+        config.batch_size = Some(3);
+        let embedder = Embedder::load(&config).unwrap();
+        let documents = [
+            "short",
+            "a noticeably longer document so the batch needs padding tokens",
+            "retry queue",
+            "the fourth document lands in a second chunk",
+        ];
+        let batched = embedder.embed_documents(&documents).unwrap();
+        assert_eq!(batched.len(), documents.len());
+        for (document, vector) in documents.iter().zip(&batched) {
+            let single = embedder.embed_document(document).unwrap();
+            let cosine: f32 = single.iter().zip(vector).map(|(a, b)| a * b).sum();
+            assert!(cosine > 0.999, "{document}: cosine {cosine}");
+        }
+    }
 
     #[test]
     fn maps_candle_qwen_names_to_embedding_checkpoint_names() {

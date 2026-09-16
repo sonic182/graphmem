@@ -8,7 +8,10 @@ The server exposes seven tools:
 
 - `remember`: stores `content`, with optional `memory_type`, `importance`, and
   `scopes`, verified `entities`, and verified directed `relations`. Entity and
-  relation endpoints are linked to the new memory atomically. Defaults are
+  relation endpoints are linked to the new memory atomically. With embeddings
+  enabled, the vectors of the memory and of any new entity or relation are
+  stored in the same transaction; if the model cannot load or embed, the call
+  fails and nothing is stored. Defaults are
   `observation`, `0.0`, and the server repository scope (or `global` outside a
   repository).
 - `recall`: searches `query` with optional `scopes`, `limit` (default 10), and
@@ -20,7 +23,9 @@ The server exposes seven tools:
   `global`, with repository matches first. The scope filter is applied before
   ranking, so results never include another repository's memory.
 - `stats`: returns the counts of memories, scopes, entities, and edges.
-- `relate`: stores a directed relationship between two entities.
+- `relate`: stores a directed relationship between two entities and embeds
+  it. On an embedding error the call fails; the entities and edge may already
+  exist without vectors, and a retry reuses them.
 - `graph`: inspects incoming, outgoing, or both relationship paths for an
   entity.
 - `inspect`: returns a memory and its scopes by numeric `id`.
@@ -37,8 +42,8 @@ repository scope from its working directory; outside a Git repository it uses
 `global`. Explicit scopes must be `global` or an absolute `repo:` path.
 
 Embeddings default to `sentence-transformers/msmarco-distilbert-cos-v5` through Candle. The model is
-downloaded on the first enabled recall and cached under `models/` in the
-Graphmem data directory. Content is silently truncated to the model's
+downloaded and loaded on first use (the first `remember`, `relate`, or
+`recall`) and cached under `models/` in the Graphmem data directory. Content is silently truncated to the model's
 `max_position_embeddings` (512 tokens for the default model) before
 embedding, so only the first ~512 tokens of a very long memory, entity, or
 edge document affect its embedding. To disable embeddings and retain SQLite
@@ -57,8 +62,11 @@ falls back to CPU. Use `cpu` to force CPU or `cuda` to fail instead of falling
 back. Build CUDA support with `cargo build --features cuda` when the CUDA
 toolkit is installed. `GRAPHMEM_EMBEDDINGS=off` disables embeddings entirely.
 `GRAPHMEM_EMBEDDING_MODEL`,
-`GRAPHMEM_EMBEDDING_REVISION`, and `GRAPHMEM_EMBEDDING_CACHE_DIR` override the
-remaining model settings. If loading or inference fails, recall reports the
+`GRAPHMEM_EMBEDDING_REVISION`, `GRAPHMEM_EMBEDDING_CACHE_DIR`, and
+`GRAPHMEM_EMBEDDING_BATCH_SIZE` override the remaining model settings.
+`batch_size` is how many texts go through the model per call. It defaults to
+`1` on CPU, where padded batches are slower, and `16` on CUDA;
+`gmem --embedding-batch-size <n> mcp` overrides it for one server. If loading or inference fails, recall reports the
 failure on stderr and falls back to lexical ranking.
 
 Switching `model` (or `GRAPHMEM_EMBEDDING_MODEL`) does not convert existing

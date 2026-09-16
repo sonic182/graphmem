@@ -2,3 +2,4 @@
 /.references/
 /.data/
 .mcp.json
+__pycache__/

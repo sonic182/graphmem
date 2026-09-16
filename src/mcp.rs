@@ -20,8 +20,8 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let server = MemoryServer::new()?;
+pub async fn run(batch_size: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    let server = MemoryServer::new(batch_size)?;
     let service = server.serve(rmcp::transport::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -33,9 +33,9 @@ pub struct MemoryServer {
 }
 
 impl MemoryServer {
-    fn new() -> Result<Self, graphmem::application::ApplicationError> {
+    fn new(batch_size: Option<usize>) -> Result<Self, graphmem::application::ApplicationError> {
         Ok(Self {
-            memory: Mutex::new(MemoryService::open_default()?),
+            memory: Mutex::new(MemoryService::open_default(batch_size)?),
             default_scope: current_scope(),
         })
     }

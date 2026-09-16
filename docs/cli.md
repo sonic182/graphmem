@@ -11,6 +11,12 @@ different data directory (for example a separate dev store), and put
 Every command below opens its own connection and exits — there is no
 long-running CLI process to keep in sync with disk state.
 
+## Global options
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--embedding-batch-size <n>` | `GRAPHMEM_EMBEDDING_BATCH_SIZE`, then `[embedding] batch_size`, then 1 on CPU / 16 on CUDA | Texts per embedding model call. Must be at least 1. Accepted before or after the subcommand, and applies to `gmem mcp` too. |
+
 ## `gmem remember <content>`
 
 Store a new narrative memory.
@@ -24,6 +30,10 @@ Store a new narrative memory.
 The CLI cannot attach entities or relations to a memory, and there is no CLI
 equivalent of the `relate` tool — both are MCP-only (the `remember` tool's
 `entities`/`relations` fields, and the `relate` tool).
+
+When embeddings are enabled, the memory's vector is computed and stored in
+the same transaction as the memory, loading the model on first use. If the
+model cannot load or embed, the command exits non-zero and nothing is stored.
 
 Prints `remembered: <id>`.
 
@@ -119,6 +129,10 @@ embedding row is looked up and stored keyed by `(model, revision)`
 are plain columns updated in place — see `src/infrastructure/sqlite.rs`), so
 switching models just overwrites the row for that id; nothing needs
 deleting first.
+
+**Batched**: records are embedded `--embedding-batch-size` at a time. If a
+batch fails, its records are retried one by one so each failure is still
+reported individually.
 
 **Idempotent and safe to re-run**: every item is cache-checked against
 `(model, revision)` before being recomputed, so re-running `gmem reembed`

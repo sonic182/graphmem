@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::domain::{
     Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
-    SearchResult, StoreStats,
+    SearchResult, StoreStats, edge_document, entity_document,
 };
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -39,6 +39,18 @@ pub struct Database {
     connection: Connection,
     path: PathBuf,
 }
+
+/// Embeds the documents of a new memory inside its `remember` transaction.
+/// `embed` receives every document at once and must return one vector per
+/// document, in order; an error rolls the whole memory back.
+pub struct VectorSink<'a, E> {
+    pub model: &'a str,
+    pub revision: &'a str,
+    pub embed: &'a mut EmbedFn<'a, E>,
+}
+
+/// Embeds documents in order, one vector per document.
+pub type EmbedFn<'a, E> = dyn FnMut(&[&str]) -> std::result::Result<Vec<Vec<f32>>, E> + 'a;
 
 impl Database {
     pub fn default_path() -> Result<PathBuf> {
@@ -128,6 +140,32 @@ impl Database {
         entities: &[EntityReference],
         relations: &[Relation],
     ) -> Result<Memory> {
+        self.remember_with_graph_and_vectors::<StorageError>(
+            content,
+            memory_type,
+            importance,
+            scopes,
+            entities,
+            relations,
+            None,
+        )
+    }
+
+    /// Stores a memory with its graph and, when `vectors` is given, the
+    /// embeddings of the memory and of any linked entity or edge that has no
+    /// vector yet for the sink's model and revision. Everything commits
+    /// together, so a failed embedding stores nothing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn remember_with_graph_and_vectors<E: From<StorageError>>(
+        &mut self,
+        content: &str,
+        memory_type: &str,
+        importance: f64,
+        scopes: &[String],
+        entities: &[EntityReference],
+        relations: &[Relation],
+        vectors: Option<VectorSink<'_, E>>,
+    ) -> std::result::Result<Memory, E> {
         validate_text("content", content)?;
         validate_text("memory_type", memory_type)?;
         validate_importance(importance)?;
@@ -144,48 +182,22 @@ impl Database {
             .map(normalize_relation)
             .collect::<Result<Vec<_>>>()?;
         let timestamp = now_millis()?;
-        let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO memories
-             (content, memory_type, importance, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?4)",
-            params![content, memory_type.trim(), importance, timestamp],
+        let transaction = self.connection.transaction().map_err(StorageError::from)?;
+        let stored = insert_memory_graph(
+            &transaction,
+            content,
+            memory_type,
+            importance,
+            &scopes,
+            &entities,
+            &relations,
+            timestamp,
         )?;
-        let memory_id = transaction.last_insert_rowid();
-        for scope in scopes {
-            transaction.execute(
-                "INSERT OR IGNORE INTO scopes (name, created_at) VALUES (?1, ?2)",
-                params![scope, timestamp],
-            )?;
-            let scope_id =
-                transaction.query_row("SELECT id FROM scopes WHERE name = ?1", [scope], |row| {
-                    row.get::<_, i64>(0)
-                })?;
-            transaction.execute(
-                "INSERT OR IGNORE INTO memory_scopes (memory_id, scope_id) VALUES (?1, ?2)",
-                params![memory_id, scope_id],
-            )?;
+        if let Some(sink) = vectors {
+            store_new_vectors(&transaction, &stored, sink)?;
         }
-        for entity in &entities {
-            let entity = get_or_create_entity(&transaction, entity, timestamp)?;
-            link_memory_entity(&transaction, memory_id, entity.id)?;
-        }
-        for relation in &relations {
-            let source = get_or_create_entity(&transaction, &relation.source, timestamp)?;
-            let target = get_or_create_entity(&transaction, &relation.target, timestamp)?;
-            get_or_create_edge(&transaction, source.id, relation, target.id, timestamp)?;
-            link_memory_entity(&transaction, memory_id, source.id)?;
-            link_memory_entity(&transaction, memory_id, target.id)?;
-        }
-        let memory = transaction.query_row(
-            "SELECT id, content, memory_type, importance, created_at, updated_at,
-                    last_accessed_at, access_count
-             FROM memories WHERE id = ?1",
-            [memory_id],
-            memory_from_row,
-        )?;
-        transaction.commit()?;
-        Ok(memory)
+        transaction.commit().map_err(StorageError::from)?;
+        Ok(stored.memory)
     }
 
     pub fn get_memory(&self, id: i64) -> Result<Option<Memory>> {
@@ -552,7 +564,14 @@ impl Database {
         model: &str,
         revision: &str,
     ) -> Result<Option<Vec<f32>>> {
-        self.embedding("memory_embeddings", "memory_id", memory_id, model, revision)
+        read_embedding(
+            &self.connection,
+            "memory_embeddings",
+            "memory_id",
+            memory_id,
+            model,
+            revision,
+        )
     }
 
     pub fn store_memory_embedding(
@@ -562,7 +581,8 @@ impl Database {
         revision: &str,
         vector: &[f32],
     ) -> Result<()> {
-        self.store_embedding(
+        write_embedding(
+            &self.connection,
             "memory_embeddings",
             "memory_id",
             memory_id,
@@ -717,7 +737,14 @@ impl Database {
         model: &str,
         revision: &str,
     ) -> Result<Option<Vec<f32>>> {
-        self.embedding("edge_embeddings", "edge_id", edge_id, model, revision)
+        read_embedding(
+            &self.connection,
+            "edge_embeddings",
+            "edge_id",
+            edge_id,
+            model,
+            revision,
+        )
     }
 
     pub fn store_edge_embedding(
@@ -727,7 +754,8 @@ impl Database {
         revision: &str,
         vector: &[f32],
     ) -> Result<()> {
-        self.store_embedding(
+        write_embedding(
+            &self.connection,
             "edge_embeddings",
             "edge_id",
             edge_id,
@@ -743,7 +771,14 @@ impl Database {
         model: &str,
         revision: &str,
     ) -> Result<Option<Vec<f32>>> {
-        self.embedding("entity_embeddings", "entity_id", entity_id, model, revision)
+        read_embedding(
+            &self.connection,
+            "entity_embeddings",
+            "entity_id",
+            entity_id,
+            model,
+            revision,
+        )
     }
 
     pub fn store_entity_embedding(
@@ -753,7 +788,8 @@ impl Database {
         revision: &str,
         vector: &[f32],
     ) -> Result<()> {
-        self.store_embedding(
+        write_embedding(
+            &self.connection,
             "entity_embeddings",
             "entity_id",
             entity_id,
@@ -876,66 +912,6 @@ impl Database {
             .query_map([id], edge_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(edges)
-    }
-
-    fn embedding(
-        &self,
-        table: &str,
-        id_column: &str,
-        id: i64,
-        model: &str,
-        revision: &str,
-    ) -> Result<Option<Vec<f32>>> {
-        let sql = format!(
-            "SELECT dimensions, vector FROM {table} WHERE {id_column} = ?1 AND model = ?2 AND revision = ?3"
-        );
-        let embedding = self
-            .connection
-            .query_row(&sql, params![id, model, revision], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
-            })
-            .optional()
-            .map_err(StorageError::from)?;
-        embedding
-            .map(|(dimensions, bytes)| decode_vector(&bytes, dimensions))
-            .transpose()
-    }
-
-    fn store_embedding(
-        &self,
-        table: &str,
-        id_column: &str,
-        id: i64,
-        model: &str,
-        revision: &str,
-        vector: &[f32],
-    ) -> Result<()> {
-        if vector.is_empty() {
-            return Err(StorageError::Invalid {
-                field: "embedding",
-                message: "must not be empty",
-            });
-        }
-        let sql = format!(
-            "INSERT INTO {table} ({id_column}, model, revision, dimensions, vector)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT({id_column}) DO UPDATE SET
-                 model = excluded.model,
-                 revision = excluded.revision,
-                 dimensions = excluded.dimensions,
-                 vector = excluded.vector"
-        );
-        self.connection.execute(
-            &sql,
-            params![
-                id,
-                model,
-                revision,
-                vector.len() as i64,
-                encode_vector(vector)
-            ],
-        )?;
-        Ok(())
     }
 
     fn graph_path(&self, edge_ids: &str, directions: &str) -> Result<GraphPath> {
@@ -1227,28 +1203,198 @@ fn get_or_create_edge(
     relation: &NormalizedRelation,
     target_id: i64,
     timestamp: i64,
-) -> Result<()> {
-    let exists = transaction
-        .query_row(
-            "SELECT 1 FROM edges WHERE source_id = ?1 AND relation = ?2 AND target_id = ?3",
-            params![source_id, relation.relation, target_id],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some();
-    if !exists {
+) -> Result<Edge> {
+    let select = |transaction: &Transaction<'_>| {
+        transaction
+            .query_row(
+                "SELECT id, source_id, relation, target_id, created_at, metadata
+                 FROM edges WHERE source_id = ?1 AND relation = ?2 AND target_id = ?3",
+                params![source_id, relation.relation, target_id],
+                edge_from_row,
+            )
+            .optional()
+    };
+    if let Some(edge) = select(transaction)? {
+        return Ok(edge);
+    }
+    transaction.execute(
+        "INSERT INTO edges (source_id, relation, target_id, created_at, metadata)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            source_id,
+            relation.relation,
+            target_id,
+            timestamp,
+            relation.metadata
+        ],
+    )?;
+    select(transaction)?.ok_or(StorageError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+}
+
+struct StoredMemoryGraph {
+    memory: Memory,
+    entities: Vec<Entity>,
+    edges: Vec<(Edge, Entity, Entity)>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_memory_graph(
+    transaction: &Transaction<'_>,
+    content: &str,
+    memory_type: &str,
+    importance: f64,
+    scopes: &[String],
+    entities: &[NormalizedEntityReference],
+    relations: &[NormalizedRelation],
+    timestamp: i64,
+) -> Result<StoredMemoryGraph> {
+    transaction.execute(
+        "INSERT INTO memories
+         (content, memory_type, importance, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![content, memory_type.trim(), importance, timestamp],
+    )?;
+    let memory_id = transaction.last_insert_rowid();
+    for scope in scopes {
         transaction.execute(
-            "INSERT INTO edges (source_id, relation, target_id, created_at, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                source_id,
-                relation.relation,
-                target_id,
-                timestamp,
-                relation.metadata
-            ],
+            "INSERT OR IGNORE INTO scopes (name, created_at) VALUES (?1, ?2)",
+            params![scope, timestamp],
+        )?;
+        let scope_id =
+            transaction.query_row("SELECT id FROM scopes WHERE name = ?1", [scope], |row| {
+                row.get::<_, i64>(0)
+            })?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO memory_scopes (memory_id, scope_id) VALUES (?1, ?2)",
+            params![memory_id, scope_id],
         )?;
     }
+    let mut linked = Vec::new();
+    for entity in entities {
+        let entity = get_or_create_entity(transaction, entity, timestamp)?;
+        link_memory_entity(transaction, memory_id, entity.id)?;
+        linked.push(entity);
+    }
+    let mut edges = Vec::new();
+    for relation in relations {
+        let source = get_or_create_entity(transaction, &relation.source, timestamp)?;
+        let target = get_or_create_entity(transaction, &relation.target, timestamp)?;
+        let edge = get_or_create_edge(transaction, source.id, relation, target.id, timestamp)?;
+        link_memory_entity(transaction, memory_id, source.id)?;
+        link_memory_entity(transaction, memory_id, target.id)?;
+        linked.push(source.clone());
+        linked.push(target.clone());
+        edges.push((edge, source, target));
+    }
+    linked.sort_by_key(|entity| entity.id);
+    linked.dedup_by_key(|entity| entity.id);
+    let memory = transaction.query_row(
+        "SELECT id, content, memory_type, importance, created_at, updated_at,
+                last_accessed_at, access_count
+         FROM memories WHERE id = ?1",
+        [memory_id],
+        memory_from_row,
+    )?;
+    Ok(StoredMemoryGraph {
+        memory,
+        entities: linked,
+        edges,
+    })
+}
+
+fn store_new_vectors<E: From<StorageError>>(
+    connection: &Connection,
+    stored: &StoredMemoryGraph,
+    sink: VectorSink<'_, E>,
+) -> std::result::Result<(), E> {
+    let (model, revision) = (sink.model, sink.revision);
+    let mut targets = vec![("memory_embeddings", "memory_id", stored.memory.id)];
+    let mut documents = vec![stored.memory.content.clone()];
+    for entity in &stored.entities {
+        let table = ("entity_embeddings", "entity_id", entity.id);
+        if read_embedding(connection, table.0, table.1, table.2, model, revision)?.is_none() {
+            targets.push(table);
+            documents.push(entity_document(entity));
+        }
+    }
+    for (edge, source, target) in &stored.edges {
+        let table = ("edge_embeddings", "edge_id", edge.id);
+        if read_embedding(connection, table.0, table.1, table.2, model, revision)?.is_none() {
+            targets.push(table);
+            documents.push(edge_document(edge, source, target));
+        }
+    }
+    let documents = documents.iter().map(String::as_str).collect::<Vec<_>>();
+    let vectors = (sink.embed)(&documents)?;
+    if vectors.len() != targets.len() {
+        return Err(StorageError::Invalid {
+            field: "embedding",
+            message: "model returned a different number of vectors than documents",
+        }
+        .into());
+    }
+    for ((table, column, id), vector) in targets.into_iter().zip(&vectors) {
+        write_embedding(connection, table, column, id, model, revision, vector)?;
+    }
+    Ok(())
+}
+
+fn read_embedding(
+    connection: &Connection,
+    table: &str,
+    id_column: &str,
+    id: i64,
+    model: &str,
+    revision: &str,
+) -> Result<Option<Vec<f32>>> {
+    let sql = format!(
+        "SELECT dimensions, vector FROM {table} WHERE {id_column} = ?1 AND model = ?2 AND revision = ?3"
+    );
+    let embedding = connection
+        .query_row(&sql, params![id, model, revision], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })
+        .optional()
+        .map_err(StorageError::from)?;
+    embedding
+        .map(|(dimensions, bytes)| decode_vector(&bytes, dimensions))
+        .transpose()
+}
+
+fn write_embedding(
+    connection: &Connection,
+    table: &str,
+    id_column: &str,
+    id: i64,
+    model: &str,
+    revision: &str,
+    vector: &[f32],
+) -> Result<()> {
+    if vector.is_empty() {
+        return Err(StorageError::Invalid {
+            field: "embedding",
+            message: "must not be empty",
+        });
+    }
+    let sql = format!(
+        "INSERT INTO {table} ({id_column}, model, revision, dimensions, vector)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT({id_column}) DO UPDATE SET
+             model = excluded.model,
+             revision = excluded.revision,
+             dimensions = excluded.dimensions,
+             vector = excluded.vector"
+    );
+    connection.execute(
+        &sql,
+        params![
+            id,
+            model,
+            revision,
+            vector.len() as i64,
+            encode_vector(vector)
+        ],
+    )?;
     Ok(())
 }
 
