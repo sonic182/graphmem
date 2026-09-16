@@ -1509,7 +1509,7 @@ fn run_fts_query<T>(
     query: &str,
     mut execute: impl FnMut(&str) -> rusqlite::Result<T>,
 ) -> rusqlite::Result<T> {
-    match execute(&quote_bareword_terms(query)) {
+    match execute(&fts_match_query(query)) {
         Err(rusqlite::Error::SqliteFailure(error, _))
             if error.code == rusqlite::ErrorCode::Unknown =>
         {
@@ -1518,6 +1518,56 @@ fn run_fts_query<T>(
         }
         result => result,
     }
+}
+
+/// Plain-language queries match any of their words, so bm25 can rank memories
+/// that share most of a question's terms; FTS5 would otherwise require all of
+/// them. Quoted phrases and `prefix*` terms stay as written inside that OR, and
+/// other punctuation separates words the way the FTS tokenizer does
+/// ("Derrickson's" still matches "Derrickson"). A query with an uppercase
+/// AND, OR, NOT, or NEAR operator keeps its exact FTS5 semantics.
+fn fts_match_query(query: &str) -> String {
+    if uses_fts_operators(query) {
+        return quote_bareword_terms(query);
+    }
+    let mut terms = Vec::new();
+    for (index, part) in query.split('"').enumerate() {
+        if index % 2 == 1 {
+            if part.chars().any(char::is_alphanumeric) {
+                terms.push(format!("\"{part}\""));
+            }
+            continue;
+        }
+        for chunk in part.split(|character: char| !is_bareword(character) && character != '*') {
+            let prefix = chunk.ends_with('*');
+            let words = chunk
+                .split('*')
+                .filter(|word| !word.is_empty())
+                .collect::<Vec<_>>();
+            for (position, word) in words.iter().enumerate() {
+                let word = if matches!(*word, "AND" | "OR" | "NOT" | "NEAR") {
+                    format!("\"{word}\"")
+                } else {
+                    (*word).to_owned()
+                };
+                if prefix && position + 1 == words.len() {
+                    terms.push(format!("{word}*"));
+                } else {
+                    terms.push(word);
+                }
+            }
+        }
+    }
+    if terms.is_empty() {
+        return quote_bareword_terms(query);
+    }
+    terms.join(" OR ")
+}
+
+fn uses_fts_operators(query: &str) -> bool {
+    query
+        .split_whitespace()
+        .any(|term| matches!(term, "AND" | "OR" | "NOT" | "NEAR") || term.starts_with("NEAR("))
 }
 
 fn quote_bareword_terms(query: &str) -> String {

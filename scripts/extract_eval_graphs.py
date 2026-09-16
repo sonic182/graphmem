@@ -12,12 +12,12 @@ HippoRAG builds its graph with LLM OpenIE; this is the deterministic stand-in
 behind `eval_retrieval.py --graphs spacy`. Every selected paragraph, supporting
 or distractor, gets:
 
-  entities   its title plus spaCy's named entities (numeric labels dropped,
-             names shorter than 3 characters dropped)
+  entities   its title plus spaCy's named entities (numeric, date, and
+             nationality labels dropped, names shorter than 3 characters dropped)
   relations  subject-verb-object triples whose subject and object are both
              entities; `prep` objects become `<verb>_<prep>` relations
 
-Output: .data/eval/graphs/<dataset>.<model>.jsonl, one JSON line per unique
+Output: .data/eval/graphs/<dataset>.<model>.v<N>.jsonl, one JSON line per unique
 paragraph: {"key", "entities", "relations"}. Existing keys are skipped, so
 re-runs only parse new paragraphs.
 
@@ -41,12 +41,23 @@ from eval_retrieval import (
     DATASET_FILES,
     GRAPH_CACHE_DIR,
     base_title,
+    graph_cache_path,
     load_examples,
     log,
     unique_paragraphs,
 )
 
-DROPPED_LABELS = {"CARDINAL", "ORDINAL", "QUANTITY", "PERCENT", "MONEY", "TIME"}
+# Numbers, dates, and nationalities ("American") link unrelated paragraphs.
+DROPPED_LABELS = {
+    "CARDINAL",
+    "ORDINAL",
+    "QUANTITY",
+    "PERCENT",
+    "MONEY",
+    "TIME",
+    "DATE",
+    "NORP",
+}
 SUBJECTS = {"nsubj", "nsubjpass"}
 OBJECTS = {"dobj", "attr", "oprd"}
 PRONOUNS = {"he", "she", "it", "they"}
@@ -112,9 +123,8 @@ def self_check(nlp: spacy.language.Language) -> None:
         ["Gustave Eiffel", "bear_in", "Dijon"],
     ], relations
     film, _ = extract(nlp("Ed Wood is a 1994 film about Ed Wood."), "Ed Wood (film)")
-    assert film == ["Ed Wood (film)", "1994"], (
-        film
-    )  # dates are kept; the bare title maps to the page
+    # Dates are dropped; the bare title maps to the page.
+    assert film == ["Ed Wood (film)"], film
     print(f"self-check OK: entities={entities} relations={relations}")
 
 
@@ -150,7 +160,7 @@ def main() -> None:
 
     GRAPH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     for dataset in args.datasets:
-        path = GRAPH_CACHE_DIR / f"{dataset}.{args.model}.jsonl"
+        path = graph_cache_path(dataset, args.model)
         done = set()
         if path.is_file():
             with path.open() as lines:

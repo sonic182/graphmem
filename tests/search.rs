@@ -105,6 +105,77 @@ fn supports_literal_fts_operators() {
 }
 
 #[test]
+fn plain_language_queries_match_any_term_and_rank_by_overlap() {
+    let (database, path) = test_database();
+    let both = database
+        .create_memory("Scott Derrickson is an American film director", "fact", 0.0)
+        .expect("memory is created");
+    let one = database
+        .create_memory("Ed Wood was an American filmmaker", "fact", 0.0)
+        .expect("memory is created");
+    database
+        .create_memory("sqlite migration notes", "fact", 0.0)
+        .expect("memory is created");
+
+    let results = database
+        .search_memories(
+            "Were Scott Derrickson and Ed Wood, directors, American?",
+            None,
+            10,
+        )
+        .expect("a natural-language question does not error");
+    let ids = results
+        .iter()
+        .map(|result| result.memory.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 2, "no single memory contains every word");
+    assert!(ids.contains(&both.id) && ids.contains(&one.id));
+
+    let results = database
+        .search_memories("scott derrickson director", None, 10)
+        .unwrap();
+    assert_eq!(
+        results[0].memory.id, both.id,
+        "more matching terms rank first"
+    );
+
+    let results = database
+        .search_memories(
+            "Who directed \"Ed Wood\" (Film) and film* in 199?",
+            None,
+            10,
+        )
+        .expect("quotes, parentheses, and prefixes in a question do not error");
+    assert_eq!(
+        results.len(),
+        2,
+        "the phrase and the film* prefix each match"
+    );
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
+fn explicit_and_keeps_requiring_every_term() {
+    let (database, path) = test_database();
+    database
+        .create_memory("cargo nextest integration", "fact", 0.0)
+        .expect("memory is created");
+    database
+        .create_memory("cargo build notes", "fact", 0.0)
+        .expect("memory is created");
+    assert_eq!(
+        database
+            .search_memories("cargo AND nextest", None, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
 fn hyphenated_query_terms_do_not_error() {
     let (database, path) = test_database();
     database

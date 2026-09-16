@@ -81,7 +81,9 @@ struct RememberInput {
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct RecallInput {
     /// What to retrieve. Natural language works; with use_embeddings false this
-    /// is an FTS5 query where whitespace means AND.
+    /// is lexical: words, "quoted phrases", and prefix* terms match if any of
+    /// them does, ranked by BM25; an uppercase AND, OR, or NOT switches to
+    /// exact FTS5 syntax.
     query: String,
     /// Where to search: global or repo:/absolute/path. Omit to search the
     /// server's default scope and global memories.

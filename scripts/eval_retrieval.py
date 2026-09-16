@@ -65,6 +65,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -88,6 +89,14 @@ MODES = {
 GRAPHS = ("none", "mentions", "spacy", "oracle")
 CORPORA = ("shared", "per-question")
 GRAPH_CACHE_DIR = DATA_DIR / "graphs"
+# Bump when extract_eval_graphs.py changes what it writes, so stale caches are not reused.
+GRAPH_CACHE_VERSION = 2
+
+
+def graph_cache_path(dataset: str, model: str) -> Path:
+    return GRAPH_CACHE_DIR / f"{dataset}.{model}.v{GRAPH_CACHE_VERSION}.jsonl"
+
+
 KS = (2, 5, 10)
 
 
@@ -226,11 +235,66 @@ def build_corpus(dataset: str, examples: list[dict], corpus: str) -> tuple[list,
 
 
 def load_graph_cache(dataset: str, model: str) -> dict[str, dict]:
-    path = GRAPH_CACHE_DIR / f"{dataset}.{model}.jsonl"
+    path = graph_cache_path(dataset, model)
     if not path.is_file():
         return {}
     with path.open() as lines:
         return {row["key"]: row for row in map(json.loads, lines)}
+
+
+def refine_spacy_graph(
+    paragraphs: dict[str, tuple[str, str]],
+    cache: dict[str, dict],
+    max_df: float,
+    min_df: int = 2,
+) -> dict[str, dict]:
+    """Corpus-aware cleanup of the per-paragraph spaCy graphs.
+
+    - Names that equal a corpus title, or its bare form ("Doctor Strange" for
+      "Doctor Strange (2016 film)"), become that title, so paragraphs link
+      the way Wikipedia hyperlinks do.
+    - Non-title entities found in more than `max_df` of the paragraphs are
+      dropped (with their relations); they connect unrelated paragraphs.
+    - Non-title entities found in fewer than `min_df` paragraphs are dropped
+      too: an entity in a single paragraph links nothing, it only adds a
+      noisy PageRank seed and embedding cost (~88% of HotpotQA's entities).
+    """
+    canonical = {}
+    for title, _ in paragraphs.values():
+        canonical.setdefault(title.lower(), title)
+        canonical.setdefault(base_title(title).lower(), title)
+    titles = {title.lower() for title, _ in paragraphs.values()}
+
+    def canon(name: str) -> str:
+        return canonical.get(name.lower(), name)
+
+    frequency = Counter()
+    for key in paragraphs:
+        if key in cache:
+            frequency.update({canon(name).lower() for name in cache[key]["entities"]})
+    # ponytail: flat document-frequency cap; IDF-weighted seeds in gmem would be the real fix
+    limit = max(2, int(max_df * len(paragraphs))) if max_df > 0 else len(paragraphs)
+
+    def keep(name: str) -> bool:
+        return name.lower() in titles or min_df <= frequency[name.lower()] <= limit
+
+    refined = {}
+    for key in paragraphs:
+        if key not in cache:
+            continue
+        entities = list(dict.fromkeys(canon(name) for name in cache[key]["entities"]))
+        relations = [
+            [canon(source), name, canon(target)]
+            for source, name, target in cache[key]["relations"]
+            if canon(source) != canon(target)
+        ]
+        refined[key] = {
+            "entities": [name for name in entities if keep(name)],
+            "relations": [
+                triple for triple in relations if keep(triple[0]) and keep(triple[2])
+            ],
+        }
+    return refined
 
 
 def entity(name: str) -> dict:
@@ -383,6 +447,47 @@ def self_check() -> None:
         "each question keeps its own copy"
     )
     assert examples[1]["scope"] == "repo:/eval/demo/1"
+    paragraphs = {
+        "a": ("Doctor Strange (2016 film)", "A film."),
+        "b": ("Scott Derrickson", "Directed Doctor Strange in the United States."),
+        "c": ("Other", "Also in the United States."),
+    }
+    cache = {
+        "a": {
+            "entities": ["Doctor Strange (2016 film)", "United States"],
+            "relations": [],
+        },
+        "b": {
+            "entities": ["Scott Derrickson", "Doctor Strange", "United States"],
+            "relations": [
+                ["Scott Derrickson", "direct", "Doctor Strange"],
+                ["Scott Derrickson", "in", "United States"],
+            ],
+        },
+        "c": {"entities": ["Other", "United States"], "relations": []},
+    }
+    refined = refine_spacy_graph(paragraphs, cache, max_df=0.5)
+    # "Solo" is in one paragraph only: dropped by min_df, kept with min_df=1.
+    cache["c"]["entities"].append("Solo")
+    assert (
+        "Solo" not in refine_spacy_graph(paragraphs, cache, max_df=0)["c"]["entities"]
+    )
+    assert (
+        "Solo"
+        in refine_spacy_graph(paragraphs, cache, max_df=0, min_df=1)["c"]["entities"]
+    )
+    cache["c"]["entities"].remove("Solo")
+    assert refined["b"]["entities"] == [
+        "Scott Derrickson",
+        "Doctor Strange (2016 film)",
+    ], refined["b"]
+    assert refined["b"]["relations"] == [
+        ["Scott Derrickson", "direct", "Doctor Strange (2016 film)"]
+    ], refined["b"]
+    assert refine_spacy_graph(paragraphs, cache, max_df=0)["c"]["entities"] == [
+        "Other",
+        "United States",
+    ]
     print("self-check OK")
 
 
@@ -400,6 +505,18 @@ def main() -> None:
         "--spacy-model",
         default="en_core_web_sm",
         help="which spaCy graph cache to read",
+    )
+    parser.add_argument(
+        "--spacy-max-df",
+        type=float,
+        default=0.02,
+        help="drop non-title spaCy entities found in more than this share of paragraphs (default: 0.02; 0 keeps all)",
+    )
+    parser.add_argument(
+        "--spacy-min-df",
+        type=int,
+        default=2,
+        help="drop non-title spaCy entities found in fewer paragraphs than this (default: 2; 1 keeps all)",
     )
     parser.add_argument(
         "--questions",
@@ -481,7 +598,25 @@ def main() -> None:
             units, oracle = build_corpus(dataset, examples, args.corpus)
             lookups = {"oracle": oracle, "spacy": {}}
             if "spacy" in args.graphs:
-                lookups["spacy"] = load_graph_cache(dataset, args.spacy_model)
+                paragraphs = unique_paragraphs(examples)
+                lookups["spacy"] = refine_spacy_graph(
+                    paragraphs,
+                    load_graph_cache(dataset, args.spacy_model),
+                    args.spacy_max_df,
+                    args.spacy_min_df,
+                )
+                spacy_entities = {
+                    name
+                    for row in lookups["spacy"].values()
+                    for name in row["entities"]
+                }
+                spacy_relations = sum(
+                    len(row["relations"]) for row in lookups["spacy"].values()
+                )
+                log(
+                    f"{dataset}: spaCy graph covers {len(lookups['spacy'])}/{len(paragraphs)} paragraphs, "
+                    f"{len(spacy_entities)} entities, {spacy_relations} relations"
+                )
             memories = sum(len(paragraphs) for _, paragraphs in units)
             log(
                 f"{dataset}: loaded {len(examples)} questions, {memories} memories in {len(units)} scope(s)"
