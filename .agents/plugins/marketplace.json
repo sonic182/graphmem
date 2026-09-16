@@ -8,7 +8,7 @@
       "name": "graphmem",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "./plugin"
       },
       "policy": {
         "installation": "AVAILABLE",

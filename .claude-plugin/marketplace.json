@@ -10,7 +10,7 @@
     {
       "name": "graphmem",
       "description": "Recall and store durable engineering knowledge over a local MCP server.",
-      "source": "./",
+      "source": "./plugin",
       "category": "productivity"
     }
   ]
