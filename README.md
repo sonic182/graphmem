@@ -104,7 +104,7 @@ server, and then install the plugin:
 
 ```sh
 cargo install --locked --git https://github.com/sonic182/graphmem
-codex mcp add gmem -- ~/.cargo/bin/gmem mcp
+codex mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
 codex plugin marketplace add sonic182/graphmem
 codex plugin add graphmem@graphmem
 ```
