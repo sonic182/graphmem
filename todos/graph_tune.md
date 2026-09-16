@@ -124,10 +124,32 @@ Minibot ─uses──────── Python   w=1        Minibot ─uses─�
        ─hosted_on─── Debian     w=1             ─hosted_on─── Debian     w=.5
 ```
 
-### Plan concreto para el próximo PR (sin LLM, sin llamadas externas)
+### Subfases de implementación (mini-entregables, sin LLM ni llamadas externas)
+
+Fase 2 se corta en cuatro PRs pequeños. `2a`+`2b` son el núcleo de CatRAG;
+`2c` y `2d` son mejoras independientes que se montan encima. Cada una deja el
+retrieval funcional por sí sola.
+
+#### Fase 2a — plumbing del overlay de pesos (PR mínimo)
 
 - [ ] `personalized_pagerank` acepta un `edge_weight_overlay: Option<&HashMap<(usize, usize), f64>>` opcional — vacío = comportamiento actual (Fase 1/1.1 intacta, cambio aditivo).
-- [ ] Dynamic edge weights desde los seeds: para los top seed entities, tomar solo sus outgoing edges, reutilizar el score `query↔edge_vector` que ya se calcula hoy (hoy se usa globalmente para elegir seeds; aquí se usa localmente para ponderar transiciones), mapear coseno → multiplicador con una función monótona simple.
+- [ ] Test en `domain.rs` que verifica que un overlay vacío reproduce exactamente el ranking de la firma antigua.
+
+Valor: aisla el cambio de firma de `domain.rs` del scoring nuevo. Sin overlay no
+hay comportamiento nuevo, así que no rompe Fase 1/1.1.
+
+#### Fase 2b — dynamic edge weights desde los seeds (núcleo CatRAG)
+
+- [ ] Para los top seed entities, tomar solo sus outgoing edges y reutilizar el score `query↔edge_vector` que ya se calcula hoy (hoy se usa globalmente para elegir seeds; aquí se usa localmente para ponderar transiciones); mapear coseno → multiplicador con una función monótona simple.
+- [ ] Alimentar ese overlay a las transiciones de PPR vía el parámetro de `2a`: que la señal `query↔edge` mueva las transiciones del random walk, no solo el restart vector.
+- [ ] Activar el coarse edge filtering como filtro **local** (top seeds × `K_edge`), no global.
+- [ ] Nuevo fixture "hub semantic drift" en `retrieval_eval.rs` (una entidad con muchos edges de temas distintos) para verificar que el reponderado reduce la dispersión hacia vecinos irrelevantes, no solo mejora casos ya fáciles.
+
+Valor: es el salto conceptual — elimina literalmente la Static Graph Fallacy.
+Toda la señal ya se calcula; aquí solo cambia dónde se consume.
+
+#### Fase 2c — provenance y Key-Fact Passage Enhancement
+
 - [ ] Tabla de provenance:
   ```sql
   CREATE TABLE memory_edges (
@@ -137,20 +159,27 @@ Minibot ─uses──────── Python   w=1        Minibot ─uses─�
   );
   ```
   sin duplicar texto ni atributos; `remember_with_graph` la puebla al crear los edges de una memory.
+- [ ] Migración de esquema para stores existentes.
 - [ ] Key-Fact Passage Enhancement: cuando un edge es relevante, boost `×2.5` de la transición entity→memory correspondiente vía `memory_edges`, renormalizando la masa total.
-- [ ] `CrossEncoderEdgeScorer`: cargar un cross-encoder MiniLM (p.ej. `cross-encoder/ms-marco-MiniLM-L-6-v2`, BERT-family, vía `candle_transformers::models::bert`) que puntúe `(query, edge_document(edge))` como par conjunto en vez de comparar embeddings independientes — mismo patrón "retrieve con bi-encoder, rerank con cross-encoder" que ya usa search bi-encoder + este reranker.
-- [ ] Config `[retrieval] edge_scorer = "cosine" | "cross_encoder"` (default `"cosine"`), mismo patrón que `[embedding] model`/`enabled` (`config.toml` + override por env var). No es una elección mutuamente excluyente de motor: el filtro coarse por coseno **siempre** corre primero (selecciona los `K_edge` candidatos reutilizando embeddings ya calculados); el config solo decide si además se re-puntúa ese shortlist con el cross-encoder antes de convertirlo en multiplicador. `"cosine"` es más liviano (coste ~0, ya calculado); `"cross_encoder"` añade una forward pass por candidato (~`K_edge`≈15 por query) a cambio de mayor precisión.
-- [ ] Nuevo fixture "hub semantic drift" en `retrieval_eval.rs` (una entidad con muchos edges de temas distintos) para verificar que el reponderado reduce la dispersión hacia vecinos irrelevantes, no solo mejora casos ya fáciles.
-- [ ] Trait `EdgeScorer` para desacoplar "cómo se puntúa un edge candidato" de PPR, con tres niveles posibles detrás de la misma interfaz:
+
+Valor: separable del scoring (es migración + provenance). Requiere `2a` para
+boostear transiciones, pero no `2b`.
+
+#### Fase 2d — cross-encoder edge scorer (calidad opcional)
+
+- [ ] Trait `EdgeScorer` para desacoplar "cómo se puntúa un edge candidato" de PPR, con tres niveles detrás de la misma interfaz:
   ```rust
   trait EdgeScorer {
       fn score(&self, query: &str, candidates: &[EdgeCandidate]) -> Vec<f64>;
   }
   ```
   - `EmbeddingEdgeScorer` (usa directamente el coseno del filtro coarse + mapeo monótono, ya disponible como señal hoy) — default, coste cero adicional.
-  - `CrossEncoderEdgeScorer` (re-puntúa el mismo shortlist con el reranker MiniLM local, ver mecanismo 2 arriba) — mejora de calidad opcional vía config, sigue siendo 100% local/sin API.
+  - `CrossEncoderEdgeScorer` (re-puntúa el mismo shortlist con el reranker MiniLM local, ver mecanismo 2 arriba) — mejora de calidad opcional vía config, sigue siendo 100% local/sin API. Cargar un cross-encoder MiniLM (p.ej. `cross-encoder/ms-marco-MiniLM-L-6-v2`, BERT-family, vía `candle_transformers::models::bert`) que puntúe `(query, edge_document(edge))` como par conjunto en vez de comparar embeddings independientes — mismo patrón "retrieve con bi-encoder, rerank con cross-encoder" que ya usa search bi-encoder + este reranker.
   - `LlmEdgeScorer` (LLM externo tipo el paper original) — posibilidad futura detrás de la misma interfaz, **no implementarlo todavía**.
-  - Selección vía `[retrieval] edge_scorer` en `config.toml` (ver arriba) — el filtro coarse por coseno es común a las tres, `EdgeScorer` solo decide si hay una segunda pasada de scoring.
+- [ ] Config `[retrieval] edge_scorer = "cosine" | "cross_encoder"` (default `"cosine"`), mismo patrón que `[embedding] model`/`enabled` (`config.toml` + override por env var). No es una elección mutuamente excluyente de motor: el filtro coarse por coseno **siempre** corre primero (selecciona los `K_edge` candidatos reutilizando embeddings ya calculados); el config solo decide si además se re-puntúa ese shortlist con el cross-encoder antes de convertirlo en multiplicador. `"cosine"` es más liviano (coste ~0, ya calculado); `"cross_encoder"` añade una forward pass por candidato (~`K_edge`≈15 por query) a cambio de mayor precisión.
+
+Valor: el más caro y el más aislable. El trait espera a que exista el segundo
+scorer real; no se introduce antes (YAGNI).
 
 La API objetivo es la misma que ya se imaginó desde el principio:
 
