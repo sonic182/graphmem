@@ -59,7 +59,11 @@ backend = "auto"
 `backend` accepts `auto`, `cpu`, or `cuda`; `auto` selects CUDA when the
 binary was built with Candle's CUDA feature and a device is available, then
 falls back to CPU. Use `cpu` to force CPU or `cuda` to fail instead of falling
-back. Build CUDA support with `cargo build --features cuda` when the CUDA
+back. `wgpu` (alias `vulkan`) is experimental: it runs the model on a
+Vulkan GPU, such as an AMD iGPU, through candle's open WGPU pull request.
+It needs a build with `--features wgpu`, access to the GPU's render node
+(on Linux, membership in the `render` group), and an explicit
+`backend = "wgpu"`; `auto` never selects it. Its default batch size is 8. Build CUDA support with `cargo build --features cuda` when the CUDA
 toolkit is installed. `GRAPHMEM_EMBEDDINGS=off` disables embeddings entirely.
 `GRAPHMEM_EMBEDDING_MODEL`,
 `GRAPHMEM_EMBEDDING_REVISION`, `GRAPHMEM_EMBEDDING_CACHE_DIR`, and
