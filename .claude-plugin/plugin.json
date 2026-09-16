@@ -1,0 +1,13 @@
+{
+  "name": "graphmem",
+  "version": "0.1.0",
+  "description": "Durable project memory for coding agents. Recall and store engineering knowledge over a local MCP server.",
+  "author": {
+    "name": "Graphmem",
+    "url": "https://github.com/sonic182"
+  },
+  "homepage": "https://github.com/sonic182/graphmem",
+  "repository": "https://github.com/sonic182/graphmem",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "knowledge", "development"]
+}

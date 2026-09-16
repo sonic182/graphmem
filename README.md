@@ -77,7 +77,44 @@ Configure an MCP client to launch:
 
 See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
-## Codex plugin
+## Editor plugins
+
+Graphmem ships its skills and lifecycle hooks to Claude Code and Codex. Both
+flows need `gmem` on your `PATH`, and the hooks need `node`; without `node` the
+MCP server still works, but the agent does not receive the recall/store
+guidance.
+
+### Claude Code
+
+From a local checkout (development), build the binary and register it, then
+add the checkout itself as the marketplace:
+
+```sh
+cargo build
+claude mcp add gmem -- "$PWD/target/debug/gmem" mcp
+claude plugin marketplace add ./
+claude plugin install graphmem@graphmem
+```
+
+The marketplace source needs the `./` prefix. Re-run `claude plugin marketplace
+update graphmem` after changing the plugin manifest or hooks, and `claude mcp
+remove gmem` before re-adding it if you switch between the debug and installed
+binary.
+
+To install from GitHub instead:
+
+```sh
+cargo install --locked --git https://github.com/sonic182/graphmem
+claude mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
+claude plugin marketplace add sonic182/graphmem
+claude plugin install graphmem@graphmem
+```
+
+The plugin bundles the skills and the `SessionStart`/`SubagentStart` hooks. It
+does not bundle the MCP server: the `mcpServers` manifest field is unreliable
+in current Claude Code, so the MCP is registered explicitly above.
+
+### Codex
 
 From a local Graphmem checkout, install the binary and plugin with one command:
 
