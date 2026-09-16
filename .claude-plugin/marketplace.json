@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "graphmem",
+  "description": "Durable project memory for coding agents.",
+  "owner": {
+    "name": "Johanderson Mogollon",
+    "url": "https://github.com/sonic182"
+  },
+  "plugins": [
+    {
+      "name": "graphmem",
+      "description": "Recall and store durable engineering knowledge over a local MCP server.",
+      "source": "./plugin",
+      "category": "productivity"
+    }
+  ]
+}
