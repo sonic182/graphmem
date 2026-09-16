@@ -77,6 +77,43 @@ Configure an MCP client to launch:
 
 See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
+## Codex plugin
+
+From a local Graphmem checkout, install the binary and plugin with one command:
+
+```sh
+just install-codex-plugin
+```
+
+For a CUDA build, use:
+
+```sh
+just install-codex-plugin true
+```
+
+The CUDA build requires `nvcc` on your `PATH`.
+
+The recipe installs `gmem` and registers its MCP server only when `gmem` is
+not already configured; the optional `true` adds Cargo's `cuda` feature for that new
+install. It then adds the checkout as a Codex marketplace and installs
+`graphmem`. An existing `gmem` configuration is left unchanged. Open `/hooks`
+in Codex, review and trust the two Graphmem hooks, then start a new thread.
+
+To install the plugin from GitHub, install `gmem`, register it as an MCP
+server, and then install the plugin:
+
+```sh
+cargo install --locked --git https://github.com/sonic182/graphmem
+codex mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
+codex plugin marketplace add sonic182/graphmem
+codex plugin add graphmem@graphmem
+```
+
+The plugin uses Codex's `gmem mcp` server, so semantic calls reuse the same
+in-memory embedding model. The lifecycle hooks require `node` on your `PATH`;
+without it, the MCP server still works but Codex does not receive the
+recall/store guidance.
+
 ## Configuration
 
 Create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):

@@ -1,0 +1,28 @@
+{
+  "name": "graphmem",
+  "version": "0.1.0",
+  "description": "Durable project memory for coding agents.",
+  "author": {
+    "name": "Graphmem"
+  },
+  "homepage": "https://github.com/sonic182/graphmem",
+  "repository": "https://github.com/sonic182/graphmem",
+  "keywords": ["memory", "mcp", "knowledge", "development"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Graphmem",
+    "shortDescription": "Durable project memory",
+    "longDescription": "Recall and store durable engineering knowledge with a local Graphmem MCP server.",
+    "developerName": "Graphmem",
+    "category": "Productivity",
+    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "websiteURL": "https://github.com/sonic182/graphmem",
+    "defaultPrompt": [
+      "Recall relevant project knowledge before this task.",
+      "Remember this verified engineering decision.",
+      "Inspect Graphmem memories for this repository."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
