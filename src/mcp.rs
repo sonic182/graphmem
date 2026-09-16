@@ -298,9 +298,9 @@ impl MemoryServer {
 
     #[tool(
         name = "stats",
-        description = "Report read-only totals for both separate local stores: all scoped \
-             narrative memories and scopes, plus all unscoped graph entities and edges. This \
-             returns counts only; use recall for memory content and graph for relationship paths."
+        description = "Report read-only totals: scoped memory and scope counts, plus unscoped \
+             graph entity and edge counts. Counts only; use recall for content and graph for \
+             paths."
     )]
     fn stats(&self) -> Result<Json<StatsOutput>, CallToolResult> {
         let stats = self
@@ -389,14 +389,10 @@ impl ServerHandler for MemoryServer {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("gmem", "0.1.0"))
             .with_instructions(
-                "Graphmem has two separate local stores: scoped narrative memory and an entity \
-                 graph. The entity graph is unscoped. Use remember to store a memory, recall to \
-                 search memories, relate to store a graph relationship, graph to inspect \
-                 relationship paths, inspect to view a memory, forget to delete a memory, and \
-                 stats for store counts. Optional entities and relations on remember connect a \
-                 memory to the graph. Omitted scopes use the Git repository containing the \
+                "Graphmem has two separate local stores: scoped narrative memory and an \
+                 unscoped entity graph. Omitted scopes use the Git repository containing the \
                  server's startup working directory and include global memories during recall; \
-                 outside a Git repository, they use global. Pass global or \
+                 outside a Git repository they use global. Pass global or \
                  repo:/absolute/path to choose a scope.",
             )
     }

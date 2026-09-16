@@ -80,11 +80,10 @@ fn serves_memory_lifecycle_over_stdio() {
     let instructions = initialized["result"]["instructions"]
         .as_str()
         .expect("server instructions");
-    assert!(instructions.contains("Use remember to store a memory"));
     assert!(!instructions.contains("Do not store"));
     assert!(instructions.contains("startup working directory"));
     assert!(instructions.contains("two separate local stores"));
-    assert!(instructions.contains("entity graph is unscoped"));
+    assert!(instructions.contains("unscoped entity graph"));
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
@@ -131,7 +130,7 @@ fn serves_memory_lifecycle_over_stdio() {
         stats["description"]
             .as_str()
             .unwrap()
-            .contains("counts only")
+            .contains("Counts only")
     );
 
     let invalid = mcp.request(
