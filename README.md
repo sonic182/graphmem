@@ -112,13 +112,17 @@ worker_threads = 4
 and loaded on first use (the first `remember`, `relate`, recall, or `reembed`)
 and cached locally. `remember` stores its embeddings in the same transaction,
 so it fails and stores nothing if the model cannot load or embed.
-`batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE`, and the
-`--embedding-batch-size` flag overrides both for one `gmem` run, including
-`gmem mcp`.
+`batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE` and the
+`--embedding-batch-size` flag. Under the same precedence (env > flag > file),
+the environment wins over the flag and the flag wins over `config.toml`, for
+one `gmem` run including `gmem mcp`.
 
-Every `[retrieval]` key also reads a `GRAPHMEM_RETRIEVAL_*` environment variable,
-so values can be swept without editing the file. `seed_temperature` is the one
-that matters most: raising it flattens ranking toward returning the whole store.
+Every `[retrieval]` key also reads a `GRAPHMEM_RETRIEVAL_*` environment variable
+and a matching `--retrieval-*` flag (`--retrieval-damping`, etc.), so values can
+be swept without editing the file. Resolution is per field: **environment
+variable > command-line flag > `config.toml` > built-in default**. `gmem mcp`
+accepts the same flags. `seed_temperature` is the one that matters most: raising
+it flattens ranking toward returning the whole store.
 
 Logs are appended to `~/.graphmem/logs/graphmem.log` (or the corresponding
 `GRAPHMEM_HOME` directory):
