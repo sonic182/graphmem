@@ -176,6 +176,10 @@ impl MemoryService {
         Ok(MemoryDetails { memory, scopes })
     }
 
+    pub fn scopes_for(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Scope>>> {
+        Ok(self.database.scopes_by_memory(memory_ids)?)
+    }
+
     pub fn search(
         &mut self,
         query: &str,
@@ -498,7 +502,8 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
     }
     let entities = database.list_entities()?;
     let edges = database.list_all_edges()?;
-    fill_missing_vectors(database, embedder, &memories, &entities, &edges)?;
+    let (memory_vectors, entity_vectors, edge_vectors) =
+        fill_missing_vectors(database, embedder, &memories, &entities, &edges)?;
     let mut entity_nodes = HashMap::new();
     for (index, entity) in entities.iter().enumerate() {
         entity_nodes.insert(entity.id, memories.len() + index);
@@ -513,7 +518,15 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
     let memory_ids = memories.iter().map(|memory| memory.id).collect::<Vec<_>>();
     let mut memory_entities = database.entities_by_memory(&memory_ids)?;
     for (index, memory) in memories.iter().enumerate() {
-        let vector = memory_vector(database, embedder, memory.id, &memory.content)?;
+        let vector = match memory_vectors.get(&memory.id) {
+            Some(vector) => std::borrow::Cow::Borrowed(vector),
+            None => std::borrow::Cow::Owned(memory_vector(
+                database,
+                embedder,
+                memory.id,
+                &memory.content,
+            )?),
+        };
         memory_scores.push((index, dot_product(&query_vector, &vector)));
         for entity in memory_entities.remove(&memory.id).unwrap_or_default() {
             if let Some(&entity_node) = entity_nodes.get(&entity.id) {
@@ -524,7 +537,10 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
 
     for entity in &entities {
         let node = entity_nodes[&entity.id];
-        let vector = entity_vector(database, embedder, entity)?;
+        let vector = match entity_vectors.get(&entity.id) {
+            Some(vector) => std::borrow::Cow::Borrowed(vector),
+            None => std::borrow::Cow::Owned(entity_vector(database, embedder, entity)?),
+        };
         entity_scores.push((node, dot_product(&query_vector, &vector)));
         if text_mentions(query, &entity.canonical_name) {
             anchors.push((node, retrieval.entity_anchor_weight));
@@ -541,7 +557,12 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
         add_link(&mut adjacency, source_node, target_node);
         let source = &entities[source_node - memories.len()];
         let target = &entities[target_node - memories.len()];
-        let vector = edge_vector(database, embedder, &edge, source, target)?;
+        let vector = match edge_vectors.get(&edge.id) {
+            Some(vector) => std::borrow::Cow::Borrowed(vector),
+            None => {
+                std::borrow::Cow::Owned(edge_vector(database, embedder, &edge, source, target)?)
+            }
+        };
         edge_scores.push((edge_endpoints.len(), dot_product(&query_vector, &vector)));
         edge_endpoints.push((source_node, target_node));
     }
@@ -622,44 +643,48 @@ fn ensure_embedder<'a, E>(
 /// Embeds and stores, in one model call per kind, every given memory,
 /// entity, and edge that has no vector for the current model yet. Edges
 /// whose endpoints are not in `entities` are skipped.
+type VectorMap = HashMap<i64, Vec<f32>>;
+
 fn fill_missing_vectors<M: EmbeddingModel>(
     database: &Database,
     embedder: &M,
     memories: &[Memory],
     entities: &[Entity],
     edges: &[Edge],
-) -> std::result::Result<(), SemanticError> {
+) -> std::result::Result<(VectorMap, VectorMap, VectorMap), SemanticError> {
     let model = embedder.model_name();
     let revision = revision_key(embedder);
 
+    let memory_ids = memories.iter().map(|memory| memory.id).collect::<Vec<_>>();
+    let mut memory_vectors = database.memory_embeddings(&memory_ids, model, &revision)?;
     let mut pending = Vec::new();
     for memory in memories {
-        if database
-            .memory_embedding(memory.id, model, &revision)?
-            .is_none()
-        {
+        if !memory_vectors.contains_key(&memory.id) {
             pending.push((memory.id, memory.content.clone()));
         }
     }
     for ((id, _), vector) in pending.iter().zip(embed_pending(embedder, &pending)?) {
         database.store_memory_embedding(*id, model, &revision, &vector)?;
+        memory_vectors.insert(*id, vector);
     }
 
+    let entity_ids = entities.iter().map(|entity| entity.id).collect::<Vec<_>>();
+    let mut entity_vectors = database.entity_embeddings(&entity_ids, model, &revision)?;
     let mut pending = Vec::new();
     for entity in entities {
-        if database
-            .entity_embedding(entity.id, model, &revision)?
-            .is_none()
-        {
+        if !entity_vectors.contains_key(&entity.id) {
             pending.push((entity.id, entity_document(entity)));
         }
     }
     for ((id, _), vector) in pending.iter().zip(embed_pending(embedder, &pending)?) {
         database.store_entity_embedding(*id, model, &revision, &vector)?;
+        entity_vectors.insert(*id, vector);
     }
 
     let entities_by_id: HashMap<i64, &Entity> =
         entities.iter().map(|entity| (entity.id, entity)).collect();
+    let edge_ids = edges.iter().map(|edge| edge.id).collect::<Vec<_>>();
+    let mut edge_vectors = database.edge_embeddings(&edge_ids, model, &revision)?;
     let mut pending = Vec::new();
     for edge in edges {
         let (Some(source), Some(target)) = (
@@ -668,17 +693,15 @@ fn fill_missing_vectors<M: EmbeddingModel>(
         ) else {
             continue;
         };
-        if database
-            .edge_embedding(edge.id, model, &revision)?
-            .is_none()
-        {
+        if !edge_vectors.contains_key(&edge.id) {
             pending.push((edge.id, edge_document(edge, source, target)));
         }
     }
     for ((id, _), vector) in pending.iter().zip(embed_pending(embedder, &pending)?) {
         database.store_edge_embedding(*id, model, &revision, &vector)?;
+        edge_vectors.insert(*id, vector);
     }
-    Ok(())
+    Ok((memory_vectors, entity_vectors, edge_vectors))
 }
 
 fn embed_pending<M: EmbeddingModel>(

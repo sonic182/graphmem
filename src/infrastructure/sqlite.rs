@@ -525,6 +525,36 @@ impl Database {
         Ok(scopes)
     }
 
+    pub fn scopes_by_memory(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Scope>>> {
+        let mut grouped = HashMap::new();
+        if memory_ids.is_empty() {
+            return Ok(grouped);
+        }
+        let placeholders = (0..memory_ids.len())
+            .map(|index| format!("?{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT s.id, s.name, s.created_at, ms.memory_id
+             FROM scopes s
+             JOIN memory_scopes ms ON ms.scope_id = s.id
+             WHERE ms.memory_id IN ({placeholders}) ORDER BY ms.memory_id, s.name"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(memory_ids), |row| {
+                Ok((row.get::<_, i64>(3)?, scope_from_row(row)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (memory_id, scope) in rows {
+            grouped
+                .entry(memory_id)
+                .or_insert_with(Vec::new)
+                .push(scope);
+        }
+        Ok(grouped)
+    }
+
     pub fn list_memory_entities(&self, memory_id: i64) -> Result<Vec<Entity>> {
         let mut statement = self.connection.prepare(
             "SELECT e.id, e.kind, e.name, e.canonical_name, e.created_at, e.updated_at
@@ -579,6 +609,22 @@ impl Database {
             "memory_embeddings",
             "memory_id",
             memory_id,
+            model,
+            revision,
+        )
+    }
+
+    pub fn memory_embeddings(
+        &self,
+        memory_ids: &[i64],
+        model: &str,
+        revision: &str,
+    ) -> Result<HashMap<i64, Vec<f32>>> {
+        read_embeddings_batch(
+            &self.connection,
+            "memory_embeddings",
+            "memory_id",
+            memory_ids,
             model,
             revision,
         )
@@ -757,6 +803,22 @@ impl Database {
         )
     }
 
+    pub fn edge_embeddings(
+        &self,
+        edge_ids: &[i64],
+        model: &str,
+        revision: &str,
+    ) -> Result<HashMap<i64, Vec<f32>>> {
+        read_embeddings_batch(
+            &self.connection,
+            "edge_embeddings",
+            "edge_id",
+            edge_ids,
+            model,
+            revision,
+        )
+    }
+
     pub fn store_edge_embedding(
         &self,
         edge_id: i64,
@@ -786,6 +848,22 @@ impl Database {
             "entity_embeddings",
             "entity_id",
             entity_id,
+            model,
+            revision,
+        )
+    }
+
+    pub fn entity_embeddings(
+        &self,
+        entity_ids: &[i64],
+        model: &str,
+        revision: &str,
+    ) -> Result<HashMap<i64, Vec<f32>>> {
+        read_embeddings_batch(
+            &self.connection,
+            "entity_embeddings",
+            "entity_id",
+            entity_ids,
             model,
             revision,
         )
@@ -1255,6 +1333,49 @@ fn store_new_vectors<E: From<StorageError>>(
         write_embedding(connection, table, column, id, model, revision, vector)?;
     }
     Ok(())
+}
+
+fn read_embeddings_batch(
+    connection: &Connection,
+    table: &str,
+    id_column: &str,
+    ids: &[i64],
+    model: &str,
+    revision: &str,
+) -> Result<HashMap<i64, Vec<f32>>> {
+    let mut vectors = HashMap::new();
+    if ids.is_empty() {
+        return Ok(vectors);
+    }
+    let placeholders = (0..ids.len())
+        .map(|index| format!("?{}", index + 3))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT {id_column}, dimensions, vector FROM {table}
+         WHERE model = ?1 AND revision = ?2 AND {id_column} IN ({placeholders})"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let mut bound: Vec<Box<dyn rusqlite::ToSql>> =
+        vec![Box::new(model.to_string()), Box::new(revision.to_string())];
+    bound.extend(
+        ids.iter()
+            .map(|&id| Box::new(id) as Box<dyn rusqlite::ToSql>),
+    );
+    let params = bound.iter().map(|value| value.as_ref()).collect::<Vec<_>>();
+    let rows = statement
+        .query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (id, dimensions, bytes) in rows {
+        vectors.insert(id, decode_vector(&bytes, dimensions)?);
+    }
+    Ok(vectors)
 }
 
 fn read_embedding(

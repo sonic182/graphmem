@@ -4,10 +4,10 @@ use std::{
 };
 
 use graphmem::{
-    Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Relation, StoreStats,
+    Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
+    StoreStats,
     application::{
-        GraphDetails, GraphRequest, MemoryDetails, MemoryService, RelateRequest, RelationDetails,
-        RememberRequest,
+        GraphDetails, GraphRequest, MemoryService, RelateRequest, RelationDetails, RememberRequest,
     },
     infrastructure::repository::git_repository_root,
 };
@@ -260,7 +260,7 @@ impl MemoryServer {
         let details = service
             .show(memory.id)
             .map_err(|error| tool_error(error.to_string()))?;
-        Ok(Json(record(details, None)))
+        Ok(Json(record(details.memory, details.scopes, None)))
     }
 
     #[tool(
@@ -286,15 +286,22 @@ impl MemoryServer {
                 input.use_embeddings.unwrap_or(true),
             )
             .map_err(|error| tool_error(error.to_string()))?;
+        let memory_ids = results
+            .iter()
+            .map(|result| result.memory.id)
+            .collect::<Vec<_>>();
+        let mut scopes_by_memory = service
+            .scopes_for(&memory_ids)
+            .map_err(|error| tool_error(error.to_string()))?;
         let memories = results
             .into_iter()
             .map(|result| {
-                let details = service
-                    .show(result.memory.id)
-                    .map_err(|error| tool_error(error.to_string()))?;
-                Ok(record(details, Some(result.score)))
+                let scopes = scopes_by_memory
+                    .remove(&result.memory.id)
+                    .unwrap_or_default();
+                record(result.memory, scopes, Some(result.score))
             })
-            .collect::<Result<Vec<_>, CallToolResult>>()?;
+            .collect::<Vec<_>>();
         Ok(Json(RecallOutput { memories }))
     }
 
@@ -381,7 +388,7 @@ impl MemoryServer {
             .lock()?
             .show(id)
             .map_err(|error| tool_error(error.to_string()))?;
-        Ok(Json(record(details, None)))
+        Ok(Json(record(details.memory, details.scopes, None)))
     }
 }
 
@@ -400,17 +407,17 @@ impl ServerHandler for MemoryServer {
     }
 }
 
-fn record(details: MemoryDetails, score: Option<f64>) -> MemoryRecord {
+fn record(memory: Memory, scopes: Vec<Scope>, score: Option<f64>) -> MemoryRecord {
     MemoryRecord {
-        id: details.memory.id,
-        content: details.memory.content,
-        memory_type: details.memory.memory_type,
-        importance: details.memory.importance,
-        created_at: details.memory.created_at,
-        updated_at: details.memory.updated_at,
-        last_accessed_at: details.memory.last_accessed_at,
-        access_count: details.memory.access_count,
-        scopes: details.scopes.into_iter().map(|scope| scope.name).collect(),
+        id: memory.id,
+        content: memory.content,
+        memory_type: memory.memory_type,
+        importance: memory.importance,
+        created_at: memory.created_at,
+        updated_at: memory.updated_at,
+        last_accessed_at: memory.last_accessed_at,
+        access_count: memory.access_count,
+        scopes: scopes.into_iter().map(|scope| scope.name).collect(),
         score,
     }
 }
