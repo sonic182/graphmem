@@ -71,6 +71,8 @@ struct RememberInput {
     #[serde(default)]
     scopes: Vec<String>,
     /// Optional entities connected to this memory for graph-assisted recall.
+    /// Each is an object, not a bare name, e.g.
+    /// [{"kind": "module", "name": "auth"}, {"kind": "service", "name": "billing-api"}].
     #[serde(default)]
     entities: Vec<EntityInput>,
     /// Optional directed relations to store in the graph and link to this
@@ -102,9 +104,9 @@ struct RecallInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(inline)]
 struct EntityInput {
-    /// Type of entity.
+    /// Type of entity, e.g. "module", "repo", "service", "table", "person".
     kind: String,
-    /// Name of entity.
+    /// Name of entity, e.g. "billing-api".
     name: String,
 }
 
