@@ -95,6 +95,39 @@ MS MARCO DistilBERT baseline in every non-oracle setting. The lexical rows are
 unchanged because they do not use embeddings. As with the baseline, graph
 context substantially improves MiniLM over its `none` configuration.
 
+## all-MiniLM-L12-v2: 100 questions, shared corpus
+
+Run at commit `0db8dcf` with
+`GRAPHMEM_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L12-v2`, the same
+CUDA release configuration, RTX 4060, batch 16, corpus, graph extraction, and
+first 100 validation questions as the other runs. The complete sweep (11
+reembeds) took **217 s**.
+
+| dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|---|---|
+| HotpotQA | none | embeddings | 0.095 | 0.120 | 0.125 | 0.186 |
+| HotpotQA | none | fts-raw | 0.540 | 0.740 | 0.895 | 0.872 |
+| HotpotQA | none | fts-or | 0.550 | 0.745 | 0.895 | 0.885 |
+| HotpotQA | mentions | embeddings | 0.280 | 0.395 | 0.470 | 0.482 |
+| HotpotQA | spacy | embeddings | **0.325** | **0.470** | **0.570** | **0.546** |
+| 2Wiki | none | embeddings | 0.018 | 0.028 | 0.028 | 0.037 |
+| 2Wiki | none | fts-raw | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | none | fts-or | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | mentions | embeddings | 0.450 | 0.542 | 0.590 | 0.815 |
+| 2Wiki | spacy | embeddings | **0.593** | **0.657** | **0.667** | **0.952** |
+| 2Wiki | oracle | embeddings | 0.725 | 0.853 | 0.860 | 0.914 |
+| MuSiQue | none | embeddings | 0.010 | 0.020 | 0.025 | 0.021 |
+| MuSiQue | none | fts-raw | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | none | fts-or | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | mentions | embeddings | 0.230 | 0.280 | 0.305 | 0.432 |
+| MuSiQue | spacy | embeddings | **0.280** | **0.315** | **0.345** | **0.539** |
+| MuSiQue | oracle | embeddings | 0.400 | 0.420 | 0.455 | 0.759 |
+
+L12 is about twice as slow as L6 and lower on HotpotQA and MuSiQue. Its 2Wiki
+spaCy recall@2 improves from 0.557 to 0.593, but recall@5 falls to 0.657 and
+recall@10 to 0.667. L6 remains the better general-purpose MiniLM choice for
+this retrieval workload.
+
 ## Best non-oracle configuration (MS MARCO DistilBERT)
 
 | dataset | graph | recall@2 | recall@5 | recall@10 |
@@ -158,6 +191,7 @@ second OR baseline rather than an all-terms baseline.
 - The full 100-question sweep (3 datasets, all graphs/modes, 11 reembeds) took
   **175 s** on CUDA vs 72 s for the 50-question sweep.
 - The same 100-question CUDA sweep took **104 s** with all-MiniLM-L6-v2.
+- The same sweep took **217 s** with all-MiniLM-L12-v2.
 - All backends produce identical recall/MRR; the batching changes speed only.
 
 ## Notes
