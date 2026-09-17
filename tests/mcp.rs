@@ -93,6 +93,12 @@ fn serves_memory_lifecycle_over_stdio() {
             .iter()
             .all(|tool| { tool["inputSchema"].is_object() && tool["outputSchema"].is_object() })
     );
+    assert!(
+        listed_tools
+            .iter()
+            .all(|tool| !tool["inputSchema"].to_string().contains("\"$ref\"")),
+        "input schemas must inline nested types for tool providers that do not resolve $defs"
+    );
     let names = listed_tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())

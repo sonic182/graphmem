@@ -99,6 +99,7 @@ struct RecallInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct EntityInput {
     /// Type of entity.
     kind: String,
@@ -107,6 +108,7 @@ struct EntityInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 struct RelateInput {
     /// Entity the relation points from.
     source: EntityInput,
@@ -120,6 +122,7 @@ struct RelateInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(inline)]
 #[serde(rename_all = "snake_case")]
 enum GraphDirectionInput {
     Incoming,

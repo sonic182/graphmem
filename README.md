@@ -79,78 +79,9 @@ See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
 ## Editor plugins
 
-Graphmem ships its skills and lifecycle hooks to Claude Code and Codex. Both
-flows need `gmem` on your `PATH`, and the hooks need `node`; without `node` the
-MCP server still works, but the agent does not receive the recall/store
-guidance.
-
-### Claude Code
-
-From a local checkout, install the optimized binary from it and register it,
-then add the checkout itself as the marketplace:
-
-```sh
-cargo install --locked --path .
-claude mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
-claude plugin marketplace add ./
-claude plugin install graphmem@graphmem
-```
-
-Avoid registering `target/debug/gmem`: a debug build runs the embedding model
-far too slowly for everyday use. Re-run `cargo install --locked --path .` after
-pulling changes (the registered path stays the same), and `claude plugin
-marketplace update graphmem` after changing the plugin manifest or hooks. The
-marketplace source needs the `./` prefix.
-
-To install from GitHub instead:
-
-```sh
-cargo install --locked --git https://github.com/sonic182/graphmem
-claude mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
-claude plugin marketplace add sonic182/graphmem
-claude plugin install graphmem@graphmem
-```
-
-The plugin bundles the skills and the `SessionStart`/`SubagentStart` hooks. It
-does not bundle the MCP server: the `mcpServers` manifest field is unreliable
-in current Claude Code, so the MCP is registered explicitly above.
-
-### Codex
-
-From a local Graphmem checkout, install the binary and plugin with one command:
-
-```sh
-just install-codex-plugin
-```
-
-For a CUDA build, use:
-
-```sh
-just install-codex-plugin true
-```
-
-The CUDA build requires `nvcc` on your `PATH`.
-
-The recipe installs `gmem` and registers its MCP server only when `gmem` is
-not already configured; the optional `true` adds Cargo's `cuda` feature for that new
-install. It then adds the checkout as a Codex marketplace and installs
-`graphmem`. An existing `gmem` configuration is left unchanged. Open `/hooks`
-in Codex, review and trust the two Graphmem hooks, then start a new thread.
-
-To install the plugin from GitHub, install `gmem`, register it as an MCP
-server, and then install the plugin:
-
-```sh
-cargo install --locked --git https://github.com/sonic182/graphmem
-codex mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
-codex plugin marketplace add sonic182/graphmem
-codex plugin add graphmem@graphmem
-```
-
-The plugin uses Codex's `gmem mcp` server, so semantic calls reuse the same
-in-memory embedding model. The lifecycle hooks require `node` on your `PATH`;
-without it, the MCP server still works but Codex does not receive the
-recall/store guidance.
+Graphmem ships its skills, lifecycle hooks, and MCP configuration to Claude
+Code, Codex, and pi. See [docs/plugins.md](docs/plugins.md) for install
+instructions and what each plugin provides.
 
 ## Configuration
 
