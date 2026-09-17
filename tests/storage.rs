@@ -213,3 +213,15 @@ fn flush_clears_memory_scopes_and_graph() {
     drop(database);
     remove_database(&path);
 }
+
+#[test]
+fn migrations_apply_once_and_are_stable_across_reopen() {
+    let (database, path) = test_database();
+    assert_eq!(database.schema_version().unwrap(), 1);
+    drop(database);
+
+    let reopened = Database::open(&path).expect("database reopens");
+    assert_eq!(reopened.schema_version().unwrap(), 1);
+    drop(reopened);
+    remove_database(&path);
+}

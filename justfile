@@ -32,4 +32,7 @@ install-codex-plugin cuda="false":
 ra:
     rust-analyzer diagnostics .
 
+migrate package="graphmem":
+    cargo run -p {{package}} --quiet -- migrate
+
 verify: fmt-check check lint test

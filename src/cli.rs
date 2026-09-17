@@ -33,6 +33,7 @@ enum Command {
     Scopes,
     Reembed,
     Doctor,
+    Migrate,
     Mcp,
 }
 
@@ -181,6 +182,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             let service = MemoryService::open_default(batch_size)?;
             println!("database: {}", service.database_path().display());
             println!("status: healthy");
+        }
+        Command::Migrate => {
+            let service = MemoryService::open_default(batch_size)?;
+            println!("schema version: {}", service.schema_version()?);
         }
         Command::Mcp => crate::mcp::run(batch_size).await?,
     }

@@ -113,6 +113,10 @@ impl MemoryService {
         self.database.path()
     }
 
+    pub fn schema_version(&self) -> Result<i64> {
+        Ok(self.database.schema_version()?)
+    }
+
     pub fn stats(&self) -> Result<StoreStats> {
         Ok(self.database.stats()?)
     }
