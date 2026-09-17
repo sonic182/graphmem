@@ -10,32 +10,40 @@ use graphmem::{
 #[derive(Parser)]
 #[command(name = "gmem")]
 struct Cli {
-    /// Texts per embedding model call. Overrides GRAPHMEM_EMBEDDING_BATCH_SIZE
-    /// and `[embedding] batch_size` (default: 1 on CPU, 16 on CUDA).
+    /// Texts per embedding model call. Used when
+    /// GRAPHMEM_EMBEDDING_BATCH_SIZE is unset; overrides `[embedding] batch_size`
+    /// (default: 1 on CPU, 16 on CUDA).
     #[arg(
         long,
         global = true,
         value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
     )]
     embedding_batch_size: Option<usize>,
-    /// Memories kept as PageRank seeds. Overrides GRAPHMEM_RETRIEVAL_SEED_TOP_K
-    /// and `[retrieval] seed_top_k`.
-    #[arg(long, global = true)]
+    /// Memories kept as PageRank seeds. Used when GRAPHMEM_RETRIEVAL_SEED_TOP_K
+    /// is unset; overrides `[retrieval] seed_top_k`.
+    #[arg(
+        long,
+        global = true,
+        value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
+    )]
     retrieval_seed_top_k: Option<usize>,
-    /// Softmax temperature over the top-k seeds. Overrides
-    /// GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE and `[retrieval] seed_temperature`.
+    /// Softmax temperature over the top-k seeds. Used when
+    /// GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE is unset; overrides
+    /// `[retrieval] seed_temperature`.
     #[arg(long, global = true)]
     retrieval_seed_temperature: Option<f64>,
-    /// Share of seed mass kept on memories vs. the graph. Overrides
-    /// GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT and `[retrieval] memory_seed_weight`.
+    /// Share of seed mass kept on memories vs. the graph. Used when
+    /// GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT is unset; overrides
+    /// `[retrieval] memory_seed_weight`.
     #[arg(long, global = true)]
     retrieval_memory_seed_weight: Option<f64>,
-    /// Boost for entities named in the query. Overrides
-    /// GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT and `[retrieval] entity_anchor_weight`.
+    /// Boost for entities named in the query. Used when
+    /// GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT is unset; overrides
+    /// `[retrieval] entity_anchor_weight`.
     #[arg(long, global = true)]
     retrieval_entity_anchor_weight: Option<f64>,
-    /// Personalized PageRank damping. Overrides GRAPHMEM_RETRIEVAL_DAMPING and
-    /// `[retrieval] damping`.
+    /// Personalized PageRank damping. Used when GRAPHMEM_RETRIEVAL_DAMPING is
+    /// unset; overrides `[retrieval] damping`.
     #[arg(long, global = true)]
     retrieval_damping: Option<f64>,
     #[command(subcommand)]
