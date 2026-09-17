@@ -85,7 +85,6 @@ pub struct MemoryService {
     embedding_config: EmbeddingConfig,
     retrieval_config: RetrievalConfig,
     embedder: Option<Embedder>,
-    embedding_attempted: bool,
 }
 
 impl MemoryService {
@@ -107,7 +106,6 @@ impl MemoryService {
             retrieval_config: retrieval_config(data_dir)?,
             database,
             embedder: None,
-            embedding_attempted: false,
         })
     }
 
@@ -132,10 +130,10 @@ impl MemoryService {
             database,
             embedding_config,
             embedder,
-            embedding_attempted,
             ..
         } = self;
-        let embedder = ensure_embedder(embedding_config, embedder, embedding_attempted)?;
+        let config: &EmbeddingConfig = embedding_config;
+        let embedder = ensure_embedder(config, embedder, || Embedder::load(config))?;
         let revision = embedder.map(revision_key).unwrap_or_default();
         let mut embed = |documents: &[&str]| -> std::result::Result<_, SemanticError> {
             Ok(embedder.map_or(Ok(Vec::new()), |embedder| {
@@ -241,11 +239,11 @@ impl MemoryService {
             embedding_config,
             retrieval_config,
             embedder,
-            embedding_attempted,
         } = self;
-        let embedder = match ensure_embedder(embedding_config, embedder, embedding_attempted) {
+        let config: &EmbeddingConfig = embedding_config;
+        let embedder = match ensure_embedder(config, embedder, || Embedder::load(config)) {
             Ok(Some(embedder)) => embedder,
-            Ok(None) | Err(EmbeddingError::Unavailable) => return Ok(None),
+            Ok(None) => return Ok(None),
             Err(error) => return Err(error.into()),
         };
         semantic_results(database, embedder, retrieval_config, query, scopes, limit)
@@ -420,10 +418,10 @@ impl MemoryService {
             database,
             embedding_config,
             embedder,
-            embedding_attempted,
             ..
         } = self;
-        if let Some(embedder) = ensure_embedder(embedding_config, embedder, embedding_attempted)? {
+        let config: &EmbeddingConfig = embedding_config;
+        if let Some(embedder) = ensure_embedder(config, embedder, || Embedder::load(config))? {
             fill_missing_vectors(
                 database,
                 embedder,
@@ -599,22 +597,20 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
     Ok(Some(results))
 }
 
-/// Loads the embedding model on first use. `Ok(None)` means embeddings are
-/// disabled; a load that already failed in this process is not retried.
-fn ensure_embedder<'a>(
+/// Loads the model on first use. `Ok(None)` means embeddings are disabled.
+/// A failed load is not cached, so the next call retries it: a transient
+/// network or disk failure does not disable embeddings for the rest of the
+/// process. A successful load is reused for the lifetime of the service.
+fn ensure_embedder<'a, E>(
     config: &EmbeddingConfig,
-    slot: &'a mut Option<Embedder>,
-    attempted: &mut bool,
-) -> std::result::Result<Option<&'a Embedder>, EmbeddingError> {
+    slot: &'a mut Option<E>,
+    load: impl Fn() -> std::result::Result<E, EmbeddingError>,
+) -> std::result::Result<Option<&'a E>, EmbeddingError> {
     if !config.enabled {
         return Ok(None);
     }
     if slot.is_none() {
-        if *attempted {
-            return Err(EmbeddingError::Unavailable);
-        }
-        *attempted = true;
-        *slot = Some(Embedder::load(config)?);
+        *slot = Some(load()?);
     }
     Ok(slot.as_ref())
 }
@@ -694,7 +690,10 @@ fn embed_pending<M: EmbeddingModel>(
         .collect::<Vec<_>>();
     let vectors = embedder.embed_documents(&documents)?;
     if vectors.len() != documents.len() {
-        return Err(EmbeddingError::EmptyEmbedding);
+        return Err(EmbeddingError::VectorCount {
+            expected: documents.len(),
+            actual: vectors.len(),
+        });
     }
     Ok(vectors)
 }
@@ -809,7 +808,8 @@ mod tests {
     };
 
     use super::{
-        MemoryService, SemanticError, fill_missing_vectors, revision_key, semantic_results,
+        MemoryService, SemanticError, ensure_embedder, fill_missing_vectors, revision_key,
+        semantic_results,
     };
 
     /// Counts `embed_documents` calls; vectors come from `FakeEmbedder`.
@@ -976,6 +976,55 @@ mod tests {
         fs::remove_dir_all(root).expect("test database is removed");
     }
 
+    #[test]
+    fn ensure_embedder_retries_a_failed_load_and_reuses_a_successful_one() {
+        let config = EmbeddingConfig {
+            enabled: true,
+            model: "test-model".to_owned(),
+            revision: "main".to_owned(),
+            cache_dir: std::path::PathBuf::from("unused"),
+            backend: "cpu".to_owned(),
+            batch_size: None,
+        };
+        let attempts = Cell::new(0);
+        let load = || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                Err(EmbeddingError::Backend("transient failure".to_owned()))
+            } else {
+                Ok(7u32)
+            }
+        };
+
+        let mut slot: Option<u32> = None;
+        assert!(ensure_embedder(&config, &mut slot, load).is_err());
+        assert!(
+            slot.is_none(),
+            "a failed load must not poison the slot for the rest of the process"
+        );
+        assert_eq!(
+            ensure_embedder(&config, &mut slot, load).unwrap(),
+            Some(&7u32),
+            "the next call retries the load"
+        );
+        assert_eq!(attempts.get(), 2);
+        assert!(ensure_embedder(&config, &mut slot, load).is_ok());
+        assert_eq!(attempts.get(), 2, "a loaded model is not reloaded");
+
+        let disabled = EmbeddingConfig {
+            enabled: false,
+            ..config
+        };
+        let mut slot: Option<u32> = None;
+        assert!(
+            ensure_embedder(&disabled, &mut slot, || {
+                panic!("a disabled embedder must not load")
+            })
+            .unwrap()
+            .is_none()
+        );
+    }
+
     struct FakeEmbedder;
 
     impl EmbeddingModel for FakeEmbedder {
@@ -1024,7 +1073,6 @@ mod tests {
                 batch_size: None,
             },
             embedder: None,
-            embedding_attempted: false,
         };
         // Stored directly: `remember` would load (and try to download) the model.
         service
@@ -1049,7 +1097,6 @@ mod tests {
             .expect("lexical recall succeeds");
 
         assert_eq!(results.len(), 1);
-        assert!(!service.embedding_attempted);
         assert!(service.embedder.is_none());
         fs::remove_dir_all(root).expect("test data directory is removed");
     }

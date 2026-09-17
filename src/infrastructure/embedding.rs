@@ -28,8 +28,8 @@ pub enum EmbeddingError {
     Backend(String),
     #[error("unsupported embedding model architecture: {0:?}")]
     Architecture(Option<String>),
-    #[error("embedding model failed to load earlier in this process; restart it to retry")]
-    Unavailable,
+    #[error("embedding model returned {actual} vectors for {expected} documents")]
+    VectorCount { expected: usize, actual: usize },
 }
 
 #[derive(Deserialize)]

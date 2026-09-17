@@ -77,7 +77,13 @@ impl Database {
     fn open_path(path: &Path) -> Result<Self> {
         let path = path.to_path_buf();
         let mut connection = Connection::open(&path)?;
-        connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        // `remember` embeds inside its transaction, so a concurrent writer can
+        // briefly find the database locked; wait instead of failing immediately.
+        connection.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA busy_timeout = 5000;",
+        )?;
         ensure_schema(&mut connection)?;
         Ok(Self { connection, path })
     }

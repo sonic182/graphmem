@@ -21,7 +21,7 @@ That reachability is the reason to attach entities. A memory stored without them
 
 Before investigating or changing code for every substantive task, call `recall` exactly once with `limit: 3` to `5` and a concise query containing the concrete component, symbol, error, or decision. Embeddings plus graph context are the default, so natural language and paraphrases are useful. Skip this only for direct no-code or logistical requests, or when Graphmem is unavailable.
 
-Set `use_embeddings: false` only when you need an exact-token lookup, such as a literal symbol, error string, or file path; in that mode the query is lexical: words, quoted phrases, and `prefix*` terms match if any of them does, and BM25 ranks memories that share more of them first; an uppercase `AND`, `OR`, or `NOT` switches to exact FTS5 syntax (use `AND` to require every word).
+Set `use_embeddings: false` only when you need an exact-token lookup, such as a literal symbol, error string, or file path; in that mode the query is lexical: words, quoted phrases, and `prefix*` terms match if any of them does, and BM25 ranks memories that share more of them first; an uppercase `AND`, `OR`, `NOT`, or `NEAR` switches to exact FTS5 syntax (use `AND` to require every word).
 
 Read the result critically. `recall` always returns its best candidates, even when the store holds nothing relevant, and scores are relative within one query rather than an absolute measure of relevance. Treat a result whose score is far below the top one, or whose content does not actually address the task, as "nothing known" and continue from the code.
 
