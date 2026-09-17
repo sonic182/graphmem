@@ -1,0 +1,14 @@
+{
+  "name": "graphmem",
+  "version": "0.1.1",
+  "description": "Durable project memory for coding agents: skill, session guidance, and the gmem MCP server.",
+  "keywords": ["pi-package", "mcp", "memory", "knowledge", "development"],
+  "license": "MIT",
+  "homepage": "https://github.com/sonic182/graphmem",
+  "repository": "https://github.com/sonic182/graphmem",
+  "pi": {
+    "skills": ["./plugin/skills"],
+    "extensions": ["./plugin/pi/extensions"],
+    "mcp": "./plugin/pi/mcp.json"
+  }
+}

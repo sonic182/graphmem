@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gmem": {
+      "command": "gmem",
+      "args": ["mcp"],
+      "lifecycle": "lazy",
+      "directTools": true,
+      "toolPrefix": "none"
+    }
+  }
+}

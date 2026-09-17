@@ -79,10 +79,10 @@ See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
 ## Editor plugins
 
-Graphmem ships its skills and lifecycle hooks to Claude Code and Codex. Both
-flows need `gmem` on your `PATH`, and the hooks need `node`; without `node` the
-MCP server still works, but the agent does not receive the recall/store
-guidance.
+Graphmem ships its skills and lifecycle hooks to Claude Code, Codex, and pi.
+All flows need `gmem` on your `PATH`; the Claude and Codex hooks also need
+`node`. Without the guidance layer the MCP server still works, but the agent
+does not receive the recall/store guidance.
 
 ### Claude Code
 
@@ -151,6 +151,34 @@ The plugin uses Codex's `gmem mcp` server, so semantic calls reuse the same
 in-memory embedding model. The lifecycle hooks require `node` on your `PATH`;
 without it, the MCP server still works but Codex does not receive the
 recall/store guidance.
+
+### pi
+
+pi has no built-in MCP support, so this package pairs with
+[`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter). It bundles the
+same skill, a session-start guidance extension, and the `gmem mcp` server
+config, so there is no separate MCP registration step.
+
+From a local checkout:
+
+```sh
+cargo install --locked --path .
+pi install npm:pi-mcp-adapter   # once, if you do not already use it
+pi install ./
+```
+
+From GitHub:
+
+```sh
+cargo install --locked --git https://github.com/sonic182/graphmem
+pi install npm:pi-mcp-adapter
+pi install git:github.com/sonic182/graphmem
+```
+
+The package registers `gmem mcp` lazily with direct tools and injects the
+recall/store guidance before the first turn. Restart pi after installing, or
+run `/reload`. Use `pi list` to confirm the package and `pi remove <source>`
+(the same source you installed) to uninstall it.
 
 ## Configuration
 
