@@ -6,7 +6,7 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
-const DEFAULT_MODEL: &str = "sentence-transformers/msmarco-distilbert-cos-v5";
+const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
 const DEFAULT_REVISION: &str = "main";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,7 +221,12 @@ fn env_number<T: std::str::FromStr>(name: &str) -> Result<Option<T>, ConfigError
 mod tests {
     use std::{env, fs};
 
-    use super::embedding_config;
+    use super::{DEFAULT_MODEL, embedding_config};
+
+    #[test]
+    fn default_model_is_all_minilm() {
+        assert_eq!(DEFAULT_MODEL, "sentence-transformers/all-MiniLM-L6-v2");
+    }
 
     #[test]
     fn environment_overrides_file_configuration() {

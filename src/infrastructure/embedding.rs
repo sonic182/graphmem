@@ -2,7 +2,7 @@ use std::fs;
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
-use candle_transformers::models::{distilbert, qwen3};
+use candle_transformers::models::{bert, distilbert, qwen3};
 use hf_hub::{Repo, RepoType, api::sync::ApiBuilder};
 use serde::Deserialize;
 use thiserror::Error;
@@ -43,6 +43,7 @@ struct MaxLengthProbe {
 }
 
 enum Backbone {
+    Bert(bert::BertModel),
     Qwen3(qwen3::Model),
     DistilBert(distilbert::DistilBertModel),
 }
@@ -130,6 +131,13 @@ impl Embedder {
                 };
                 Backbone::DistilBert(distilbert::DistilBertModel::load(weights, &model_config)?)
             }
+            Some("bert") => {
+                let model_config = serde_json::from_slice::<bert::Config>(&config_bytes)?;
+                let weights = unsafe {
+                    VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)?
+                };
+                Backbone::Bert(bert::BertModel::load(weights, &model_config)?)
+            }
             Some(_) => return Err(EmbeddingError::Architecture(model_type)),
         };
         // Padded batches pay off on a GPU; on CPU the padding costs more than
@@ -159,7 +167,7 @@ impl Embedder {
             Backbone::Qwen3(_) => self.embed_document(&format!(
                 "Instruct: Given a memory request, retrieve the most relevant durable memory passages and relationship facts.\nQuery: {query}"
             )),
-            Backbone::DistilBert(_) => self.embed_document(query),
+            Backbone::Bert(_) | Backbone::DistilBert(_) => self.embed_document(query),
         }
     }
 
@@ -181,6 +189,7 @@ impl Embedder {
                         vectors.push(self.embed_qwen3(model, document)?);
                     }
                 }
+                Backbone::Bert(model) => vectors.extend(self.embed_bert(model, chunk)?),
                 Backbone::DistilBert(model) => vectors.extend(self.embed_distilbert(model, chunk)?),
             }
         }
@@ -211,6 +220,45 @@ impl Embedder {
             .to_dtype(DType::F32)?
             .to_vec1::<f32>()?;
         normalize(vector)
+    }
+
+    fn embed_bert(
+        &self,
+        model: &bert::BertModel,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let rows = texts
+            .iter()
+            .map(|text| self.token_ids(text))
+            .collect::<Result<Vec<_>, _>>()?;
+        let batch = rows.len();
+        let length = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut ids = Vec::with_capacity(batch * length);
+        let mut attention = Vec::with_capacity(batch * length);
+        let mut real = Vec::with_capacity(batch * length);
+        for row in &rows {
+            for position in 0..length {
+                let token = row.get(position);
+                ids.push(token.copied().unwrap_or(0));
+                attention.push(u8::from(token.is_some()));
+                real.push(if token.is_some() { 1f32 } else { 0f32 });
+            }
+        }
+        let input = Tensor::from_vec(ids, (batch, length), &self.device)?;
+        let token_types = Tensor::zeros((batch, length), DType::U32, &self.device)?;
+        let attention = Tensor::from_vec(attention, (batch, length), &self.device)?;
+        let real = Tensor::from_vec(real, (batch, length, 1), &self.device)?;
+        let pooled = model
+            .forward(&input, &token_types, Some(&attention))?
+            .to_dtype(DType::F32)?
+            .broadcast_mul(&real)?
+            .sum(1)?
+            .broadcast_div(&real.sum(1)?)?;
+        pooled
+            .to_vec2::<f32>()?
+            .into_iter()
+            .map(normalize)
+            .collect()
     }
 
     /// Right-pads the chunk, masks the padding out of attention, and
@@ -329,9 +377,10 @@ mod tests {
     /// repository's `.data/models` cache used by the eval script.
     #[test]
     #[ignore = "downloads and runs the real embedding model"]
-    fn embed_documents_matches_one_at_a_time_embedding() {
+    fn all_minilm_batch_matches_one_at_a_time_embedding() {
         let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".data");
         let mut config = embedding_config(&data_dir).unwrap();
+        config.model = "sentence-transformers/all-MiniLM-L6-v2".to_owned();
         config.backend = "cpu".to_owned();
         config.batch_size = Some(3);
         let embedder = Embedder::load(&config).unwrap();
@@ -344,6 +393,7 @@ mod tests {
         let batched = embedder.embed_documents(&documents).unwrap();
         assert_eq!(batched.len(), documents.len());
         for (document, vector) in documents.iter().zip(&batched) {
+            assert_eq!(vector.len(), 384);
             let single = embedder.embed_document(document).unwrap();
             let cosine: f32 = single.iter().zip(vector).map(|(a, b)| a * b).sum();
             assert!(cosine > 0.999, "{document}: cosine {cosine}");
