@@ -6,7 +6,7 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
-const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
+const DEFAULT_MODEL: &str = "sentence-transformers/msmarco-MiniLM-L6-cos-v5";
 const DEFAULT_REVISION: &str = "main";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,8 +224,11 @@ mod tests {
     use super::{DEFAULT_MODEL, embedding_config};
 
     #[test]
-    fn default_model_is_all_minilm() {
-        assert_eq!(DEFAULT_MODEL, "sentence-transformers/all-MiniLM-L6-v2");
+    fn default_model_is_msmarco_minilm_l6_cos() {
+        assert_eq!(
+            DEFAULT_MODEL,
+            "sentence-transformers/msmarco-MiniLM-L6-cos-v5"
+        );
     }
 
     #[test]

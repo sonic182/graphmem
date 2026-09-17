@@ -155,7 +155,7 @@ still-failing records are retried (everything else is already current and
 skipped per the idempotency check above).
 
 **Typical migration**, after selecting the persistent model in `config.toml`
-(the default is `sentence-transformers/all-MiniLM-L6-v2`):
+(the default is `sentence-transformers/msmarco-MiniLM-L6-cos-v5`):
 
 ```sh
 gmem reembed

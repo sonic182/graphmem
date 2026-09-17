@@ -10,7 +10,7 @@ remains available as a lexical fallback and as a per-request comparison mode.
 - Local SQLite storage; no hosted service required.
 - Scoped memories (`global` or `repo:/absolute/path`) with scope isolation.
 - Verified entities and directed relations attached atomically to memories.
-- Local `sentence-transformers/all-MiniLM-L6-v2` embeddings through Candle.
+- Local `sentence-transformers/msmarco-MiniLM-L6-cos-v5` embeddings through Candle.
 - CUDA, CPU, or automatic backend selection.
 - MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`,
   `inspect`, and `forget` tools.
@@ -91,7 +91,7 @@ Create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
 [embedding]
 enabled = true
 backend = "auto"       # auto, cpu, or cuda
-model = "sentence-transformers/all-MiniLM-L6-v2"
+model = "sentence-transformers/msmarco-MiniLM-L6-cos-v5"
 revision = "main"
 cache_dir = "/home/user/.graphmem/models"
 # batch_size = 16      # texts per model call; default 1 on CPU, 16 on CUDA
