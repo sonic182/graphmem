@@ -41,7 +41,7 @@ for project-specific knowledge. If scopes are omitted, the server derives the
 repository scope from its working directory; outside a Git repository it uses
 `global`. Explicit scopes must be `global` or an absolute `repo:` path.
 
-Embeddings default to `sentence-transformers/msmarco-distilbert-cos-v5` through Candle. The model is
+Embeddings default to `sentence-transformers/msmarco-MiniLM-L6-cos-v5` through Candle. The model is
 downloaded and loaded on first use (the first `remember`, `relate`, or
 `recall`) and cached under `models/` in the Graphmem data directory. Content is silently truncated to the model's
 `max_position_embeddings` (512 tokens for the default model) before

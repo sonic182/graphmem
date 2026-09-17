@@ -15,7 +15,7 @@ interpretation, see [conclusions.md](conclusions.md).
   deduplicated, in one scope; each question ranks the whole corpus, as
   HippoRAG evaluates. (`per-question` keeps each question's own paragraphs,
   where recall@10 is ~1 and nothing is discriminated.)
-- **Model:** `sentence-transformers/msmarco-distilbert-cos-v5`.
+- **Baseline model:** `sentence-transformers/msmarco-distilbert-cos-v5`.
 - **Binary:** release `gmem` built with `--features cuda`,
   `GRAPHMEM_EMBEDDING_BACKEND=auto` → CUDA (RTX 4060), batch 16. The
   50-question run reproduces the earlier CPU batch-1 numbers exactly, so the
@@ -40,7 +40,7 @@ Modes:
 - `fts-raw`: `use_embeddings=false` with the raw question.
 - `fts-or`: `use_embeddings=false` with the question's words OR-joined.
 
-## 100 questions, shared corpus
+## MS MARCO DistilBERT: 100 questions, shared corpus
 
 | dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
 |---|---|---|---|---|---|---|
@@ -62,7 +62,137 @@ Modes:
 | MuSiQue | spacy | embeddings | **0.605** | **0.735** | **0.855** | **0.891** |
 | MuSiQue | oracle | embeddings | 0.765 | 0.855 | 0.885 | 0.930 |
 
-## Best non-oracle configuration
+## all-MiniLM-L6-v2: 100 questions, shared corpus
+
+Run at commit `0db8dcf` with
+`GRAPHMEM_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2`, the same
+CUDA release configuration, RTX 4060, batch 16, corpus, graph extraction, and first
+100 validation questions as the DistilBERT baseline above. The complete sweep
+(11 reembeds) took **104 s**.
+
+| dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|---|---|
+| HotpotQA | none | embeddings | 0.155 | 0.215 | 0.250 | 0.300 |
+| HotpotQA | none | fts-raw | 0.540 | 0.740 | 0.895 | 0.872 |
+| HotpotQA | none | fts-or | 0.550 | 0.745 | 0.895 | 0.885 |
+| HotpotQA | mentions | embeddings | 0.345 | 0.485 | 0.620 | 0.571 |
+| HotpotQA | spacy | embeddings | **0.380** | **0.525** | **0.695** | **0.639** |
+| 2Wiki | none | embeddings | 0.033 | 0.048 | 0.048 | 0.065 |
+| 2Wiki | none | fts-raw | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | none | fts-or | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | mentions | embeddings | 0.453 | 0.580 | 0.660 | 0.806 |
+| 2Wiki | spacy | embeddings | **0.557** | **0.657** | **0.688** | **0.924** |
+| 2Wiki | oracle | embeddings | 0.682 | 0.863 | 0.885 | 0.882 |
+| MuSiQue | none | embeddings | 0.065 | 0.090 | 0.100 | 0.129 |
+| MuSiQue | none | fts-raw | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | none | fts-or | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | mentions | embeddings | 0.295 | 0.355 | 0.395 | 0.510 |
+| MuSiQue | spacy | embeddings | **0.305** | **0.380** | **0.425** | **0.558** |
+| MuSiQue | oracle | embeddings | 0.460 | 0.560 | 0.705 | 0.733 |
+
+MiniLM is faster for this sweep but its embedding recall is lower than the
+MS MARCO DistilBERT baseline in every non-oracle setting. The lexical rows are
+unchanged because they do not use embeddings. As with the baseline, graph
+context substantially improves MiniLM over its `none` configuration.
+
+## all-MiniLM-L12-v2: 100 questions, shared corpus
+
+Run at commit `0db8dcf` with
+`GRAPHMEM_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L12-v2`, the same
+CUDA release configuration, RTX 4060, batch 16, corpus, graph extraction, and
+first 100 validation questions as the other runs. The complete sweep (11
+reembeds) took **217 s**.
+
+| dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|---|---|
+| HotpotQA | none | embeddings | 0.095 | 0.120 | 0.125 | 0.186 |
+| HotpotQA | none | fts-raw | 0.540 | 0.740 | 0.895 | 0.872 |
+| HotpotQA | none | fts-or | 0.550 | 0.745 | 0.895 | 0.885 |
+| HotpotQA | mentions | embeddings | 0.280 | 0.395 | 0.470 | 0.482 |
+| HotpotQA | spacy | embeddings | **0.325** | **0.470** | **0.570** | **0.546** |
+| 2Wiki | none | embeddings | 0.018 | 0.028 | 0.028 | 0.037 |
+| 2Wiki | none | fts-raw | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | none | fts-or | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | mentions | embeddings | 0.450 | 0.542 | 0.590 | 0.815 |
+| 2Wiki | spacy | embeddings | **0.593** | **0.657** | **0.667** | **0.952** |
+| 2Wiki | oracle | embeddings | 0.725 | 0.853 | 0.860 | 0.914 |
+| MuSiQue | none | embeddings | 0.010 | 0.020 | 0.025 | 0.021 |
+| MuSiQue | none | fts-raw | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | none | fts-or | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | mentions | embeddings | 0.230 | 0.280 | 0.305 | 0.432 |
+| MuSiQue | spacy | embeddings | **0.280** | **0.315** | **0.345** | **0.539** |
+| MuSiQue | oracle | embeddings | 0.400 | 0.420 | 0.455 | 0.759 |
+
+L12 is about twice as slow as L6 and lower on HotpotQA and MuSiQue. Its 2Wiki
+spaCy recall@2 improves from 0.557 to 0.593, but recall@5 falls to 0.657 and
+recall@10 to 0.667. L6 remains the better general-purpose MiniLM choice for
+this retrieval workload.
+
+## msmarco-MiniLM-L6-cos-v5: 100 questions, shared corpus
+
+Run at commit `0db8dcf` with
+`GRAPHMEM_EMBEDDING_MODEL=sentence-transformers/msmarco-MiniLM-L6-cos-v5`,
+the same CUDA release configuration, RTX 4060, batch 16, corpus, graph
+extraction, and first 100 validation questions as the other runs. The complete
+sweep (11 reembeds) took **112 s**.
+
+| dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|---|---|
+| HotpotQA | none | embeddings | 0.525 | 0.685 | 0.805 | 0.850 |
+| HotpotQA | none | fts-raw | 0.540 | 0.740 | 0.895 | 0.872 |
+| HotpotQA | none | fts-or | 0.550 | 0.745 | 0.895 | 0.885 |
+| HotpotQA | mentions | embeddings | 0.570 | **0.795** | **0.910** | 0.850 |
+| HotpotQA | spacy | embeddings | **0.570** | 0.755 | 0.880 | **0.864** |
+| 2Wiki | none | embeddings | 0.603 | 0.680 | 0.725 | 0.970 |
+| 2Wiki | none | fts-raw | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | none | fts-or | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | mentions | embeddings | **0.730** | **0.910** | **0.973** | 0.985 |
+| 2Wiki | spacy | embeddings | 0.710 | 0.830 | 0.902 | **0.995** |
+| 2Wiki | oracle | embeddings | 0.828 | 0.958 | 0.968 | **0.995** |
+| MuSiQue | none | embeddings | 0.470 | 0.535 | 0.620 | 0.874 |
+| MuSiQue | none | fts-raw | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | none | fts-or | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | mentions | embeddings | 0.555 | 0.650 | 0.695 | 0.886 |
+| MuSiQue | spacy | embeddings | **0.605** | **0.750** | **0.850** | **0.891** |
+| MuSiQue | oracle | embeddings | 0.755 | 0.830 | 0.850 | 0.920 |
+
+This MS MARCO-tuned L6 model is close to the DistilBERT baseline while being
+much faster. `mentions` is best at HotpotQA and 2Wiki recall, while spaCy is
+best on MuSiQue and produces the highest 2Wiki MRR.
+
+## msmarco-MiniLM-L12-cos-v5: 100 questions, shared corpus
+
+Run at commit `0db8dcf` with
+`GRAPHMEM_EMBEDDING_MODEL=sentence-transformers/msmarco-MiniLM-L12-cos-v5`,
+the same CUDA release configuration, RTX 4060, batch 16, corpus, graph
+extraction, and first 100 validation questions as the other runs. The complete
+sweep (11 reembeds) took **197 s**.
+
+| dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|---|---|
+| HotpotQA | none | embeddings | 0.565 | 0.690 | 0.800 | 0.830 |
+| HotpotQA | none | fts-raw | 0.540 | 0.740 | 0.895 | 0.872 |
+| HotpotQA | none | fts-or | 0.550 | 0.745 | 0.895 | 0.885 |
+| HotpotQA | mentions | embeddings | 0.570 | **0.785** | **0.915** | 0.840 |
+| HotpotQA | spacy | embeddings | **0.585** | 0.745 | 0.890 | **0.848** |
+| 2Wiki | none | embeddings | 0.575 | 0.680 | 0.703 | 0.967 |
+| 2Wiki | none | fts-raw | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | none | fts-or | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | mentions | embeddings | **0.700** | **0.915** | **0.965** | 0.983 |
+| 2Wiki | spacy | embeddings | 0.677 | 0.835 | 0.912 | **0.995** |
+| 2Wiki | oracle | embeddings | 0.820 | 0.963 | 0.968 | **0.995** |
+| MuSiQue | none | embeddings | 0.475 | 0.545 | 0.600 | 0.885 |
+| MuSiQue | none | fts-raw | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | none | fts-or | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | mentions | embeddings | 0.555 | 0.680 | 0.700 | 0.898 |
+| MuSiQue | spacy | embeddings | **0.590** | **0.765** | **0.845** | **0.899** |
+| MuSiQue | oracle | embeddings | 0.765 | 0.845 | 0.865 | 0.935 |
+
+L12 improves selected results over L6 (HotpotQA no-graph recall@2 and
+MuSiQue MRR), but it is 1.8x slower with no consistent graph-assisted recall
+gain. L6-cos is the better default for this workload.
+
+## Best non-oracle configuration (MS MARCO DistilBERT)
 
 | dataset | graph | recall@2 | recall@5 | recall@10 |
 |---|---|---|---|---|
@@ -124,6 +254,10 @@ second OR baseline rather than an all-terms baseline.
   batching saves there. CUDA defaults to batch 16.
 - The full 100-question sweep (3 datasets, all graphs/modes, 11 reembeds) took
   **175 s** on CUDA vs 72 s for the 50-question sweep.
+- The same 100-question CUDA sweep took **104 s** with all-MiniLM-L6-v2.
+- The same sweep took **217 s** with all-MiniLM-L12-v2.
+- The same sweep took **112 s** with msmarco-MiniLM-L6-cos-v5.
+- The same sweep took **197 s** with msmarco-MiniLM-L12-cos-v5.
 - All backends produce identical recall/MRR; the batching changes speed only.
 
 ## Notes
