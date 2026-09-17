@@ -1,14 +1,15 @@
 # Sugerencias de mejora
 
-Ideas para subir los números de `conclusiones.md`, sin tocar el enfoque base
-(grafo de entidades + embeddings + PageRank), que ya quedó validado en los
-tres datasets.
+Ideas para subir los números de [evals_results.md](evals_results.md), sin
+tocar el enfoque base (grafo de entidades + embeddings + PageRank), que ya
+quedó validado en los tres datasets.
 
 ## Modelo de embeddings
 
 - **Probar un modelo orientado a retrieval multi-hop o más grande.**
   `msmarco-distilbert-cos-v5` es genérico y, sin grafo, queda flojo o mixto
-  frente a BM25 (sección 2 de `conclusiones.md`). El propio Qwen3 que ya
+  frente a BM25 (ver los modos sin grafo en
+  [evals_results.md](evals_results.md)). El propio Qwen3 que ya
   soporta `embedding.rs` es candidato, o algún modelo de la familia
   `bge`/`gte` entrenado para QA multi-salto.
 - **Instrucción específica en `embed_query`.** Ya se usa un prefijo
@@ -24,7 +25,8 @@ tres datasets.
   de frecuencia del script de evaluación (`--spacy-max-df`/`--spacy-min-df`).
   Hoy una entidad frecuente se descarta por completo; pesarla por IDF podría
   rescatar señal sin la sobrecarga de PageRank ruidoso que causó el fallback
-  al tope de frecuencia (ver "Filtrado del grafo spaCy" en `conclusiones.md`).
+  al tope de frecuencia (ver [conclusions.md](conclusions.md) y
+  [evals_results.md](evals_results.md)).
 
 ## Extracción de relaciones (sin LLM)
 
