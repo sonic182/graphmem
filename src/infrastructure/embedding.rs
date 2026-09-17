@@ -371,7 +371,7 @@ mod tests {
     use std::path::Path;
 
     use super::{Embedder, qwen_embedding_weight_name};
-    use crate::infrastructure::config::embedding_config;
+    use crate::infrastructure::config::{ConfigOverrides, embedding_config};
 
     /// Loads the configured model from `GRAPHMEM_EMBEDDING_CACHE_DIR`, or the
     /// repository's `.data/models` cache used by the eval script.
@@ -379,7 +379,7 @@ mod tests {
     #[ignore = "downloads and runs the real embedding model"]
     fn all_minilm_batch_matches_one_at_a_time_embedding() {
         let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".data");
-        let mut config = embedding_config(&data_dir).unwrap();
+        let mut config = embedding_config(&data_dir, &ConfigOverrides::default()).unwrap();
         config.model = "sentence-transformers/all-MiniLM-L6-v2".to_owned();
         config.backend = "cpu".to_owned();
         config.batch_size = Some(3);

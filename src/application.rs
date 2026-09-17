@@ -7,8 +7,8 @@ use crate::{
     SearchResult, StorageError, StoreStats,
     domain::{edge_document, entity_document, personalized_pagerank, text_mentions},
     infrastructure::config::{
-        ConfigError, EmbeddingConfig, RetrievalConfig, embedding_config, retrieval_config,
-        validate_batch_size,
+        ConfigError, ConfigOverrides, EmbeddingConfig, RetrievalConfig, embedding_config,
+        retrieval_config,
     },
     infrastructure::embedding::{Embedder, EmbeddingError, EmbeddingModel},
     infrastructure::sqlite::VectorSink,
@@ -88,22 +88,17 @@ pub struct MemoryService {
 }
 
 impl MemoryService {
-    /// Opens the default store. `batch_size` overrides the configured
-    /// embedding batch size (the CLI's `--embedding-batch-size`).
-    pub fn open_default(batch_size: Option<usize>) -> Result<Self> {
+    /// Opens the default store. Command-line overrides take priority over
+    /// `config.toml` and built-in defaults, but not over environment variables.
+    pub fn open_default(overrides: ConfigOverrides) -> Result<Self> {
         let database = Database::open_default()?;
         let data_dir = database.path().parent().ok_or(StorageError::Invalid {
             field: "database path",
             message: "has no parent directory",
         })?;
-        let mut embedding_config = embedding_config(data_dir)?;
-        if let Some(batch_size) = batch_size {
-            validate_batch_size(batch_size)?;
-            embedding_config.batch_size = Some(batch_size);
-        }
         Ok(Self {
-            embedding_config,
-            retrieval_config: retrieval_config(data_dir)?,
+            embedding_config: embedding_config(data_dir, &overrides)?,
+            retrieval_config: retrieval_config(data_dir, &overrides)?,
             database,
             embedder: None,
         })

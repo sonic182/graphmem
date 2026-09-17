@@ -41,6 +41,24 @@ impl Default for RetrievalConfig {
     }
 }
 
+/// Per-field command-line overrides. `None` means "not passed", so the file
+/// or built-in default still applies. Resolution order is env > CLI > file >
+/// default.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RetrievalOverrides {
+    pub seed_top_k: Option<usize>,
+    pub seed_temperature: Option<f64>,
+    pub memory_seed_weight: Option<f64>,
+    pub entity_anchor_weight: Option<f64>,
+    pub damping: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConfigOverrides {
+    pub embedding_batch_size: Option<usize>,
+    pub retrieval: RetrievalOverrides,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub worker_threads: usize,
@@ -95,9 +113,14 @@ fn read_file_config(data_dir: &Path) -> Result<FileConfig, ConfigError> {
     }
 }
 
-pub fn embedding_config(data_dir: &Path) -> Result<EmbeddingConfig, ConfigError> {
+pub fn embedding_config(
+    data_dir: &Path,
+    overrides: &ConfigOverrides,
+) -> Result<EmbeddingConfig, ConfigError> {
     let embedding = read_file_config(data_dir)?.embedding.unwrap_or_default();
-    let batch_size = env_number("GRAPHMEM_EMBEDDING_BATCH_SIZE")?.or(embedding.batch_size);
+    let batch_size = env_number("GRAPHMEM_EMBEDDING_BATCH_SIZE")?
+        .or(overrides.embedding_batch_size)
+        .or(embedding.batch_size);
     if let Some(batch_size) = batch_size {
         validate_batch_size(batch_size)?;
     }
@@ -133,23 +156,32 @@ pub fn validate_batch_size(batch_size: usize) -> Result<(), ConfigError> {
     Ok(())
 }
 
-pub fn retrieval_config(data_dir: &Path) -> Result<RetrievalConfig, ConfigError> {
+pub fn retrieval_config(
+    data_dir: &Path,
+    overrides: &ConfigOverrides,
+) -> Result<RetrievalConfig, ConfigError> {
     let file = read_file_config(data_dir)?.retrieval.unwrap_or_default();
+    let cli = &overrides.retrieval;
     let defaults = RetrievalConfig::default();
     let config = RetrievalConfig {
         seed_top_k: env_number("GRAPHMEM_RETRIEVAL_SEED_TOP_K")?
+            .or(cli.seed_top_k)
             .or(file.seed_top_k)
             .unwrap_or(defaults.seed_top_k),
         seed_temperature: env_number("GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE")?
+            .or(cli.seed_temperature)
             .or(file.seed_temperature)
             .unwrap_or(defaults.seed_temperature),
         memory_seed_weight: env_number("GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT")?
+            .or(cli.memory_seed_weight)
             .or(file.memory_seed_weight)
             .unwrap_or(defaults.memory_seed_weight),
         entity_anchor_weight: env_number("GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT")?
+            .or(cli.entity_anchor_weight)
             .or(file.entity_anchor_weight)
             .unwrap_or(defaults.entity_anchor_weight),
         damping: env_number("GRAPHMEM_RETRIEVAL_DAMPING")?
+            .or(cli.damping)
             .or(file.damping)
             .unwrap_or(defaults.damping),
     };
@@ -221,7 +253,9 @@ fn env_number<T: std::str::FromStr>(name: &str) -> Result<Option<T>, ConfigError
 mod tests {
     use std::{env, fs};
 
-    use super::{DEFAULT_MODEL, embedding_config};
+    use super::{
+        ConfigOverrides, DEFAULT_MODEL, RetrievalOverrides, embedding_config, retrieval_config,
+    };
 
     #[test]
     fn default_model_is_msmarco_minilm_l6_cos() {
@@ -241,7 +275,7 @@ mod tests {
         )
         .unwrap();
         unsafe { env::set_var("GRAPHMEM_EMBEDDING_MODEL", "environment-model") };
-        let config = embedding_config(&root).unwrap();
+        let config = embedding_config(&root, &ConfigOverrides::default()).unwrap();
         unsafe { env::remove_var("GRAPHMEM_EMBEDDING_MODEL") };
         assert_eq!(config.model, "environment-model");
         assert_eq!(config.revision, "file-revision");
@@ -256,14 +290,69 @@ mod tests {
         let root = env::temp_dir().join(format!("graphmem-batch-config-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("config.toml"), "[embedding]\nbatch_size = 8\n").unwrap();
-        assert_eq!(embedding_config(&root).unwrap().batch_size, Some(8));
+        assert_eq!(
+            embedding_config(&root, &ConfigOverrides::default())
+                .unwrap()
+                .batch_size,
+            Some(8)
+        );
+        let cli = ConfigOverrides {
+            embedding_batch_size: Some(16),
+            ..ConfigOverrides::default()
+        };
+        assert_eq!(embedding_config(&root, &cli).unwrap().batch_size, Some(16));
         unsafe { env::set_var("GRAPHMEM_EMBEDDING_BATCH_SIZE", "32") };
-        let from_environment = embedding_config(&root).map(|config| config.batch_size);
+        let from_environment = embedding_config(&root, &cli).map(|config| config.batch_size);
         unsafe { env::set_var("GRAPHMEM_EMBEDDING_BATCH_SIZE", "0") };
-        let zero = embedding_config(&root);
+        let zero = embedding_config(&root, &ConfigOverrides::default());
         unsafe { env::remove_var("GRAPHMEM_EMBEDDING_BATCH_SIZE") };
         assert_eq!(from_environment.unwrap(), Some(32));
         assert!(zero.is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retrieval_overrides_follow_environment_then_cli_then_file() {
+        let root =
+            env::temp_dir().join(format!("graphmem-retrieval-config-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "[retrieval]\ndamping = 0.6\nmemory_seed_weight = 0.4\n",
+        )
+        .unwrap();
+        let cli = ConfigOverrides {
+            retrieval: RetrievalOverrides {
+                damping: Some(0.7),
+                seed_top_k: Some(5),
+                ..RetrievalOverrides::default()
+            },
+            ..ConfigOverrides::default()
+        };
+
+        // CLI beats the file; a field only the CLI sets beats the default; a
+        // field only the file sets survives a partial CLI override.
+        let config = retrieval_config(&root, &cli).unwrap();
+        assert_eq!(config.damping, 0.7);
+        assert_eq!(config.seed_top_k, 5);
+        assert_eq!(config.memory_seed_weight, 0.4);
+        assert_eq!(config.seed_temperature, 0.05);
+
+        // The environment wins over the CLI.
+        unsafe { env::set_var("GRAPHMEM_RETRIEVAL_DAMPING", "0.9") };
+        let config = retrieval_config(&root, &cli).unwrap();
+        unsafe { env::remove_var("GRAPHMEM_RETRIEVAL_DAMPING") };
+        assert_eq!(config.damping, 0.9);
+
+        // CLI values are validated like any other source.
+        let invalid = ConfigOverrides {
+            retrieval: RetrievalOverrides {
+                damping: Some(1.5),
+                ..RetrievalOverrides::default()
+            },
+            ..ConfigOverrides::default()
+        };
+        assert!(retrieval_config(&root, &invalid).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -9,6 +9,7 @@ use graphmem::{
     application::{
         GraphDetails, GraphRequest, MemoryService, RelateRequest, RelationDetails, RememberRequest,
     },
+    infrastructure::config::ConfigOverrides,
     infrastructure::repository::git_repository_root,
 };
 use rmcp::schemars::JsonSchema;
@@ -20,8 +21,8 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-pub async fn run(batch_size: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
-    let server = MemoryServer::new(batch_size)?;
+pub async fn run(overrides: ConfigOverrides) -> Result<(), Box<dyn std::error::Error>> {
+    let server = MemoryServer::new(overrides)?;
     let service = server.serve(rmcp::transport::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -33,9 +34,9 @@ pub struct MemoryServer {
 }
 
 impl MemoryServer {
-    fn new(batch_size: Option<usize>) -> Result<Self, graphmem::application::ApplicationError> {
+    fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
         Ok(Self {
-            memory: Mutex::new(MemoryService::open_default(batch_size)?),
+            memory: Mutex::new(MemoryService::open_default(overrides)?),
             default_scope: current_scope(),
         })
     }

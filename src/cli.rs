@@ -4,19 +4,48 @@ use clap::{Args, Parser, Subcommand};
 use graphmem::{
     EntityReference, GraphDirection, Memory, Scope, SearchResult,
     application::{GraphDetails, GraphRequest, MemoryDetails, MemoryService, RememberRequest},
+    infrastructure::config::{ConfigOverrides, RetrievalOverrides},
 };
 
 #[derive(Parser)]
 #[command(name = "gmem")]
 struct Cli {
-    /// Texts per embedding model call. Overrides GRAPHMEM_EMBEDDING_BATCH_SIZE
-    /// and `[embedding] batch_size` (default: 1 on CPU, 16 on CUDA).
+    /// Texts per embedding model call. Used when
+    /// GRAPHMEM_EMBEDDING_BATCH_SIZE is unset; overrides `[embedding] batch_size`
+    /// (default: 1 on CPU, 16 on CUDA).
     #[arg(
         long,
         global = true,
         value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
     )]
     embedding_batch_size: Option<usize>,
+    /// Memories kept as PageRank seeds. Used when GRAPHMEM_RETRIEVAL_SEED_TOP_K
+    /// is unset; overrides `[retrieval] seed_top_k`.
+    #[arg(
+        long,
+        global = true,
+        value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
+    )]
+    retrieval_seed_top_k: Option<usize>,
+    /// Softmax temperature over the top-k seeds. Used when
+    /// GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE is unset; overrides
+    /// `[retrieval] seed_temperature`.
+    #[arg(long, global = true)]
+    retrieval_seed_temperature: Option<f64>,
+    /// Share of seed mass kept on memories vs. the graph. Used when
+    /// GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT is unset; overrides
+    /// `[retrieval] memory_seed_weight`.
+    #[arg(long, global = true)]
+    retrieval_memory_seed_weight: Option<f64>,
+    /// Boost for entities named in the query. Used when
+    /// GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT is unset; overrides
+    /// `[retrieval] entity_anchor_weight`.
+    #[arg(long, global = true)]
+    retrieval_entity_anchor_weight: Option<f64>,
+    /// Personalized PageRank damping. Used when GRAPHMEM_RETRIEVAL_DAMPING is
+    /// unset; overrides `[retrieval] damping`.
+    #[arg(long, global = true)]
+    retrieval_damping: Option<f64>,
     #[command(subcommand)]
     command: Command,
 }
@@ -85,10 +114,19 @@ struct FlushArgs {
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let batch_size = cli.embedding_batch_size;
+    let overrides = ConfigOverrides {
+        embedding_batch_size: cli.embedding_batch_size,
+        retrieval: RetrievalOverrides {
+            seed_top_k: cli.retrieval_seed_top_k,
+            seed_temperature: cli.retrieval_seed_temperature,
+            memory_seed_weight: cli.retrieval_memory_seed_weight,
+            entity_anchor_weight: cli.retrieval_entity_anchor_weight,
+            damping: cli.retrieval_damping,
+        },
+    };
     match cli.command {
         Command::Remember(args) => {
-            let mut service = MemoryService::open_default(batch_size)?;
+            let mut service = MemoryService::open_default(overrides)?;
             let memory = service.remember(RememberRequest {
                 content: args.content,
                 memory_type: args.memory_type,
@@ -100,15 +138,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             println!("remembered: {}", memory.id);
         }
         Command::List(args) => {
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             print_memories(service.list(args.scope.as_deref(), args.limit)?);
         }
         Command::Show { id } => {
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             print_memory_details(service.show(id)?);
         }
         Command::Search(args) => {
-            let mut service = MemoryService::open_default(batch_size)?;
+            let mut service = MemoryService::open_default(overrides)?;
             let results = if args.scopes.is_empty() {
                 service.search(&args.query, None, args.limit)?
             } else {
@@ -134,7 +172,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     .into());
                 }
             };
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             let details = service.graph(GraphRequest {
                 entity: EntityReference {
                     kind: args.kind,
@@ -147,7 +185,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             print_graph_details(details);
         }
         Command::Forget { id } => {
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             service.forget(id)?;
             println!("forgot: {id}");
         }
@@ -155,16 +193,16 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             if !args.yes {
                 return Err(std::io::Error::other("refusing to flush; rerun with --yes").into());
             }
-            let mut service = MemoryService::open_default(batch_size)?;
+            let mut service = MemoryService::open_default(overrides)?;
             service.flush()?;
             println!("flushed all memories and graph data");
         }
         Command::Scopes => {
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             print_scopes(service.scopes()?);
         }
         Command::Reembed => {
-            let mut service = MemoryService::open_default(batch_size)?;
+            let mut service = MemoryService::open_default(overrides)?;
             let stats = service.reembed_all()?;
             println!(
                 "reembedded {} memories, {} entities, {} edges under the current embedding model",
@@ -179,15 +217,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             }
         }
         Command::Doctor => {
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             println!("database: {}", service.database_path().display());
             println!("status: healthy");
         }
         Command::Migrate => {
-            let service = MemoryService::open_default(batch_size)?;
+            let service = MemoryService::open_default(overrides)?;
             println!("schema version: {}", service.schema_version()?);
         }
-        Command::Mcp => crate::mcp::run(batch_size).await?,
+        Command::Mcp => crate::mcp::run(overrides).await?,
     }
     Ok(())
 }

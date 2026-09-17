@@ -66,8 +66,12 @@ toolkit is installed. `GRAPHMEM_EMBEDDINGS=off` disables embeddings entirely.
 `GRAPHMEM_EMBEDDING_BATCH_SIZE` override the remaining model settings.
 `batch_size` is how many texts go through the model per call. It defaults to
 `1` on CPU, where padded batches are slower, and `16` on CUDA;
-`gmem --embedding-batch-size <n> mcp` overrides it for one server. If loading or inference fails, recall reports the
-failure on stderr and falls back to lexical ranking.
+`gmem --embedding-batch-size <n> mcp` overrides it for one server, but
+`GRAPHMEM_EMBEDDING_BATCH_SIZE` still wins over the flag. The `[retrieval]`
+keys accept the same `--retrieval-*` flags and `GRAPHMEM_RETRIEVAL_*`
+environment variables; see [cli.md](cli.md) for the exact precedence. If
+loading or inference fails, recall reports the failure on stderr and falls
+back to lexical ranking.
 
 Switching `model` (or `GRAPHMEM_EMBEDDING_MODEL`) does not convert existing
 embeddings — different models produce incompatible vectors, so a switch means

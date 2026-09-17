@@ -15,12 +15,13 @@ struct Mcp {
 }
 
 impl Mcp {
-    fn start(home: &Path) -> Self {
+    fn start(home: &Path, extra_args: &[&str]) -> Self {
         fs::create_dir_all(home).expect("MCP test home is created");
         fs::write(home.join("config.toml"), "[embedding]\nenabled = false\n")
             .expect("MCP test embeddings are disabled");
         let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
+            .args(extra_args)
             .env("GRAPHMEM_HOME", home)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -172,9 +173,47 @@ fn memory_lifecycle_works_across_cli_processes() {
 }
 
 #[test]
+fn retrieval_overrides_apply_to_cli_and_mcp() {
+    let data_dir = data_dir();
+
+    // Global flags are accepted before and after the subcommand.
+    assert!(
+        run(&data_dir, &["--retrieval-damping", "0.7", "list"])
+            .status
+            .success()
+    );
+    assert!(
+        run(&data_dir, &["list", "--retrieval-damping", "0.7"])
+            .status
+            .success()
+    );
+
+    // Out-of-range values and a zero seed count are rejected.
+    let invalid_damping = run(&data_dir, &["list", "--retrieval-damping", "1.5"]);
+    assert!(!invalid_damping.status.success());
+    assert!(String::from_utf8_lossy(&invalid_damping.stderr).contains("damping"));
+    assert!(
+        !run(&data_dir, &["list", "--retrieval-seed-top-k", "0"])
+            .status
+            .success()
+    );
+
+    // `gmem mcp` accepts the same global flags.
+    let mut mcp = Mcp::start(&data_dir, &["--retrieval-damping", "0.7"]);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    drop(mcp);
+
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}
+
+#[test]
 fn graph_command_inspects_entities_seeded_via_mcp() {
     let data_dir = data_dir();
-    let mut mcp = Mcp::start(&data_dir);
+    let mut mcp = Mcp::start(&data_dir, &[]);
     mcp.request(
         1,
         "initialize",

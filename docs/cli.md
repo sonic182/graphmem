@@ -13,9 +13,27 @@ long-running CLI process to keep in sync with disk state.
 
 ## Global options
 
-| Flag | Default | Notes |
+| Flag | Overrides | Notes |
 | --- | --- | --- |
-| `--embedding-batch-size <n>` | `GRAPHMEM_EMBEDDING_BATCH_SIZE`, then `[embedding] batch_size`, then 1 on CPU / 16 on CUDA | Texts per embedding model call. Must be at least 1. Accepted before or after the subcommand, and applies to `gmem mcp` too. |
+| `--embedding-batch-size <n>` | `GRAPHMEM_EMBEDDING_BATCH_SIZE`, then `[embedding] batch_size` | Texts per embedding model call. Defaults to 1 on CPU, 16 on CUDA. Must be at least 1. |
+| `--retrieval-seed-top-k <n>` | `GRAPHMEM_RETRIEVAL_SEED_TOP_K`, then `[retrieval] seed_top_k` | Memories kept as PageRank seeds. Must be at least 1. |
+| `--retrieval-seed-temperature <f>` | `GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE`, then `[retrieval] seed_temperature` | Softmax temperature over the top-k seeds; lower sharpens. Must be in `(0, 1]`. |
+| `--retrieval-memory-seed-weight <f>` | `GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT`, then `[retrieval] memory_seed_weight` | Share of seed mass kept on memories vs. the graph. Must be in `[0, 1]`. |
+| `--retrieval-entity-anchor-weight <f>` | `GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT`, then `[retrieval] entity_anchor_weight` | Boost for entities named in the query. Must be in `[0, 1]`. |
+| `--retrieval-damping <f>` | `GRAPHMEM_RETRIEVAL_DAMPING`, then `[retrieval] damping` | Personalized PageRank damping. Must be in `(0, 1)`. |
+
+All six are accepted before or after the subcommand, and apply to `gmem mcp`
+too. Resolution is **per field**, highest priority first:
+
+```
+environment variable  >  command-line flag  >  config.toml  >  built-in default
+```
+
+So `--retrieval-damping 0.7` wins over `[retrieval] damping` in
+`config.toml`, but `GRAPHMEM_RETRIEVAL_DAMPING=0.9` in the environment wins
+over both. `--help` shows the same overrides column. Values from every
+source are validated the same way, so an out-of-range flag is rejected
+before recall runs.
 
 ## `gmem remember <content>`
 
