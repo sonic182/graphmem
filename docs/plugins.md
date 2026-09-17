@@ -11,7 +11,7 @@ the recall/store guidance.
 | --- | --- | --- |
 | Claude Code | skill + `SessionStart`/`SubagentStart` hooks | explicit (`claude mcp add`) |
 | Codex | skill + lifecycle hooks | explicit (`codex mcp add`, or the `just` recipe) |
-| pi | skill + session-start guidance extension + MCP server config | bundled (`pi-mcp-adapter`) |
+| pi | skill + session-start guidance extension | shared MCP config (`pi-mcp-adapter`) |
 
 ## Claude Code
 
@@ -83,32 +83,43 @@ recall/store guidance.
 
 ## pi
 
-pi has no built-in MCP support, so this package pairs with
-[`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter). The package
-bundles the skill, a session-start guidance extension, and the `gmem mcp`
-server config, so there is no separate MCP registration step.
-
-From a local checkout:
+pi has no built-in MCP support, so install
+[`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) and configure
+`gmem mcp` once in pi's shared MCP config. The Graphmem package itself only
+adds its skill and session-start guidance.
 
 ```sh
 cargo install --locked --path .
 pi install npm:pi-mcp-adapter   # once, if you do not already use it
 pi install ./
+mkdir -p ~/.config/mcp
 ```
 
-From GitHub:
+Create `~/.config/mcp/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "gmem": {
+      "command": "~/.cargo/bin/gmem",
+      "args": ["mcp"],
+      "lifecycle": "lazy",
+      "directTools": true,
+      "toolPrefix": "none"
+    }
+  }
+}
+```
+
+For GitHub installation, replace the first command with:
 
 ```sh
 cargo install --locked --git https://github.com/sonic182/graphmem
-pi install npm:pi-mcp-adapter
 pi install git:github.com/sonic182/graphmem
 ```
 
-The package registers `gmem mcp` lazily with direct tools and injects the
-recall/store guidance before the first turn. Restart pi after installing, or
-run `/reload`.
-
-`pi -e <source>` loads the skill and the guidance but not the MCP server: the
-adapter only loads MCP servers from packages listed in settings, so use
-`pi install` when you want the tools. Use `pi list` to confirm the package and
-`pi remove <source>` (the same source you installed) to uninstall it.
+Restart pi after installing or changing the config, or run `/reload` then
+`/mcp reconnect gmem`. `pi -e <source>` still loads the skill and guidance for
+quick testing, but MCP setup remains in the shared config. Use `pi list` to
+confirm the package and `pi remove <source>` (the same source you installed)
+to uninstall it.
