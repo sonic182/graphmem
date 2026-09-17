@@ -110,15 +110,24 @@ def progress_step(total: int) -> int:
     return max(1, total // 10)
 
 
-def load_examples(dataset: str, limit: int) -> list[dict]:
-    """Return up to `limit` examples as {question, paragraphs, gold} dicts."""
+def load_examples(dataset: str, offset: int, limit: int) -> list[dict]:
+    """Return up to `limit` examples, skipping the first `offset` usable ones.
+
+    The offset lets a sweep tune on one slice of questions and validate the
+    winner on a disjoint slice.
+    """
     examples = []
+    skipped = 0
     with (DATA_DIR / DATASET_FILES[dataset]).open() as lines:
         for line in lines:
             row = json.loads(line)
             example = parse_row(dataset, row)
-            if example["gold"]:
-                examples.append(example)
+            if not example["gold"]:
+                continue
+            if skipped < offset:
+                skipped += 1
+                continue
+            examples.append(example)
             if len(examples) == limit:
                 break
     return examples
@@ -525,6 +534,12 @@ def main() -> None:
         help="questions per dataset (default: 100)",
     )
     parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="skip the first N usable questions per dataset, for a disjoint holdout slice (default: 0)",
+    )
+    parser.add_argument(
         "--bin",
         help="gmem binary (default: target/release/gmem, then target/debug/gmem or PATH)",
     )
@@ -594,7 +609,7 @@ def main() -> None:
     rows = []
     try:
         for dataset in args.datasets:
-            examples = load_examples(dataset, args.questions)
+            examples = load_examples(dataset, args.offset, args.questions)
             units, oracle = build_corpus(dataset, examples, args.corpus)
             lookups = {"oracle": oracle, "spacy": {}}
             if "spacy" in args.graphs:
