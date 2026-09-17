@@ -144,6 +144,22 @@ pub fn personalized_pagerank(
     rank
 }
 
+/// Text embedded for an entity. Changing it requires bumping
+/// `DOCUMENT_FORMAT` in `application.rs`.
+pub fn entity_document(entity: &Entity) -> String {
+    format!("{} {}", entity.kind, entity.name)
+}
+
+/// Text embedded for an edge; same versioning rule as `entity_document`.
+pub fn edge_document(edge: &Edge, source: &Entity, target: &Entity) -> String {
+    format!(
+        "{} {} {}",
+        source.name,
+        edge.relation.replace('_', " "),
+        target.name
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{personalized_pagerank, text_mentions};

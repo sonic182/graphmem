@@ -20,8 +20,8 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let server = MemoryServer::new()?;
+pub async fn run(batch_size: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    let server = MemoryServer::new(batch_size)?;
     let service = server.serve(rmcp::transport::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -33,9 +33,9 @@ pub struct MemoryServer {
 }
 
 impl MemoryServer {
-    fn new() -> Result<Self, graphmem::application::ApplicationError> {
+    fn new(batch_size: Option<usize>) -> Result<Self, graphmem::application::ApplicationError> {
         Ok(Self {
-            memory: Mutex::new(MemoryService::open_default()?),
+            memory: Mutex::new(MemoryService::open_default(batch_size)?),
             default_scope: current_scope(),
         })
     }
@@ -81,7 +81,9 @@ struct RememberInput {
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct RecallInput {
     /// What to retrieve. Natural language works; with use_embeddings false this
-    /// is an FTS5 query where whitespace means AND.
+    /// is lexical: words, "quoted phrases", and prefix* terms match if any of
+    /// them does, ranked by BM25; an uppercase AND, OR, NOT, or NEAR switches
+    /// to exact FTS5 syntax.
     query: String,
     /// Where to search: global or repo:/absolute/path. Omit to search the
     /// server's default scope and global memories.

@@ -135,6 +135,11 @@ fn memory_lifecycle_works_across_cli_processes() {
     let doctor = stdout(run(&data_dir, &["doctor"]));
     assert!(doctor.contains("status: healthy"));
 
+    let batched = run(&data_dir, &["--embedding-batch-size", "4", "list"]);
+    assert!(batched.status.success());
+    let zero_batch = run(&data_dir, &["list", "--embedding-batch-size", "0"]);
+    assert!(!zero_batch.status.success());
+
     let reembed_disabled = run(&data_dir, &["reembed"]);
     assert!(!reembed_disabled.status.success());
     assert!(String::from_utf8_lossy(&reembed_disabled.stderr).contains("embeddings are disabled"));

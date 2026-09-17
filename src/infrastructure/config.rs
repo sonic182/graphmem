@@ -16,6 +16,8 @@ pub struct EmbeddingConfig {
     pub revision: String,
     pub cache_dir: PathBuf,
     pub backend: String,
+    /// Texts per model call; `None` lets the embedder pick one for its device.
+    pub batch_size: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,6 +70,7 @@ struct FileEmbeddingConfig {
     revision: Option<String>,
     cache_dir: Option<PathBuf>,
     backend: Option<String>,
+    batch_size: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -94,6 +97,10 @@ fn read_file_config(data_dir: &Path) -> Result<FileConfig, ConfigError> {
 
 pub fn embedding_config(data_dir: &Path) -> Result<EmbeddingConfig, ConfigError> {
     let embedding = read_file_config(data_dir)?.embedding.unwrap_or_default();
+    let batch_size = env_number("GRAPHMEM_EMBEDDING_BATCH_SIZE")?.or(embedding.batch_size);
+    if let Some(batch_size) = batch_size {
+        validate_batch_size(batch_size)?;
+    }
     Ok(EmbeddingConfig {
         enabled: env::var("GRAPHMEM_EMBEDDINGS")
             .ok()
@@ -113,7 +120,17 @@ pub fn embedding_config(data_dir: &Path) -> Result<EmbeddingConfig, ConfigError>
         backend: env_value("GRAPHMEM_EMBEDDING_BACKEND")
             .or(embedding.backend)
             .unwrap_or_else(|| "auto".to_owned()),
+        batch_size,
     })
+}
+
+pub fn validate_batch_size(batch_size: usize) -> Result<(), ConfigError> {
+    if batch_size == 0 {
+        return Err(ConfigError::Invalid(
+            "embedding.batch_size must be at least 1".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn retrieval_config(data_dir: &Path) -> Result<RetrievalConfig, ConfigError> {
@@ -221,7 +238,24 @@ mod tests {
         assert_eq!(config.model, "environment-model");
         assert_eq!(config.revision, "file-revision");
         assert_eq!(config.backend, "cpu");
+        assert_eq!(config.batch_size, None);
         assert_eq!(super::runtime_config(&root).unwrap().worker_threads, 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn batch_size_prefers_environment_and_rejects_zero() {
+        let root = env::temp_dir().join(format!("graphmem-batch-config-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.toml"), "[embedding]\nbatch_size = 8\n").unwrap();
+        assert_eq!(embedding_config(&root).unwrap().batch_size, Some(8));
+        unsafe { env::set_var("GRAPHMEM_EMBEDDING_BATCH_SIZE", "32") };
+        let from_environment = embedding_config(&root).map(|config| config.batch_size);
+        unsafe { env::set_var("GRAPHMEM_EMBEDDING_BATCH_SIZE", "0") };
+        let zero = embedding_config(&root);
+        unsafe { env::remove_var("GRAPHMEM_EMBEDDING_BATCH_SIZE") };
+        assert_eq!(from_environment.unwrap(), Some(32));
+        assert!(zero.is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

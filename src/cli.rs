@@ -9,6 +9,14 @@ use graphmem::{
 #[derive(Parser)]
 #[command(name = "gmem")]
 struct Cli {
+    /// Texts per embedding model call. Overrides GRAPHMEM_EMBEDDING_BATCH_SIZE
+    /// and `[embedding] batch_size` (default: 1 on CPU, 16 on CUDA).
+    #[arg(
+        long,
+        global = true,
+        value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
+    )]
+    embedding_batch_size: Option<usize>,
     #[command(subcommand)]
     command: Command,
 }
@@ -75,9 +83,11 @@ struct FlushArgs {
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    let batch_size = cli.embedding_batch_size;
+    match cli.command {
         Command::Remember(args) => {
-            let mut service = MemoryService::open_default()?;
+            let mut service = MemoryService::open_default(batch_size)?;
             let memory = service.remember(RememberRequest {
                 content: args.content,
                 memory_type: args.memory_type,
@@ -89,15 +99,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             println!("remembered: {}", memory.id);
         }
         Command::List(args) => {
-            let service = MemoryService::open_default()?;
+            let service = MemoryService::open_default(batch_size)?;
             print_memories(service.list(args.scope.as_deref(), args.limit)?);
         }
         Command::Show { id } => {
-            let service = MemoryService::open_default()?;
+            let service = MemoryService::open_default(batch_size)?;
             print_memory_details(service.show(id)?);
         }
         Command::Search(args) => {
-            let mut service = MemoryService::open_default()?;
+            let mut service = MemoryService::open_default(batch_size)?;
             let results = if args.scopes.is_empty() {
                 service.search(&args.query, None, args.limit)?
             } else {
@@ -123,7 +133,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     .into());
                 }
             };
-            let service = MemoryService::open_default()?;
+            let service = MemoryService::open_default(batch_size)?;
             let details = service.graph(GraphRequest {
                 entity: EntityReference {
                     kind: args.kind,
@@ -136,7 +146,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             print_graph_details(details);
         }
         Command::Forget { id } => {
-            let service = MemoryService::open_default()?;
+            let service = MemoryService::open_default(batch_size)?;
             service.forget(id)?;
             println!("forgot: {id}");
         }
@@ -144,16 +154,16 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             if !args.yes {
                 return Err(std::io::Error::other("refusing to flush; rerun with --yes").into());
             }
-            let mut service = MemoryService::open_default()?;
+            let mut service = MemoryService::open_default(batch_size)?;
             service.flush()?;
             println!("flushed all memories and graph data");
         }
         Command::Scopes => {
-            let service = MemoryService::open_default()?;
+            let service = MemoryService::open_default(batch_size)?;
             print_scopes(service.scopes()?);
         }
         Command::Reembed => {
-            let mut service = MemoryService::open_default()?;
+            let mut service = MemoryService::open_default(batch_size)?;
             let stats = service.reembed_all()?;
             println!(
                 "reembedded {} memories, {} entities, {} edges under the current embedding model",
@@ -168,11 +178,11 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             }
         }
         Command::Doctor => {
-            let service = MemoryService::open_default()?;
+            let service = MemoryService::open_default(batch_size)?;
             println!("database: {}", service.database_path().display());
             println!("status: healthy");
         }
-        Command::Mcp => crate::mcp::run().await?,
+        Command::Mcp => crate::mcp::run(batch_size).await?,
     }
     Ok(())
 }
