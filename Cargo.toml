@@ -7,15 +7,19 @@ autobins = false
 [features]
 default = []
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+# Experimental: candle's open WGPU PR (#3379), for Vulkan GPUs such as AMD iGPUs.
+# The fork enables tracing's `release_max_level_off`, so release builds with this
+# feature write no gmem log events.
+wgpu = ["candle-core/wgpu", "candle-nn/wgpu", "candle-transformers/wgpu"]
 
 [[bin]]
 name = "gmem"
 path = "src/main.rs"
 
 [dependencies]
-candle-core = "0.11"
-candle-nn = "0.11"
-candle-transformers = "0.11"
+candle-core = { git = "https://github.com/KimHenrikOtte/candle", rev = "25e83d57cad096fd5f8f1c5d57ba4813597f98cb" }
+candle-nn = { git = "https://github.com/KimHenrikOtte/candle", rev = "25e83d57cad096fd5f8f1c5d57ba4813597f98cb" }
+candle-transformers = { git = "https://github.com/KimHenrikOtte/candle", rev = "25e83d57cad096fd5f8f1c5d57ba4813597f98cb" }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 hf-hub = "0.4"
