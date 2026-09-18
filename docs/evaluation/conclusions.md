@@ -1,7 +1,7 @@
 # Conclusions
 
 Summary of the retrieval-quality work. Numbers are in
-[evals_results.md](evals_results.md).
+[results.md](results.md).
 
 ## What works
 

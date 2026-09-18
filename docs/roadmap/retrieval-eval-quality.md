@@ -1,7 +1,7 @@
 # graphmem retrieval — medir calidad, no solo comportamiento
 
 Hoy no hay forma de saber si un cambio de retrieval (tocar un default en
-`[retrieval]`, o más adelante CatRAG vs HippoRAG 2, ver `graph_tune.md`)
+`[retrieval]`, o más adelante CatRAG vs HippoRAG 2, ver `graph-tune.md`)
 mejora o empeora los resultados en general. Solo hay tests puntuales.
 
 ## Lo que existe hoy

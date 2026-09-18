@@ -2,10 +2,7 @@
 
 [![CI](https://github.com/sonic182/graphmem/actions/workflows/ci.yml/badge.svg)](https://github.com/sonic182/graphmem/actions/workflows/ci.yml)
 
-Graphmem is a local memory service for agents and developer tools. It stores
-scoped narrative memories alongside an entity graph, then combines semantic
-embeddings, graph context, and Personalized PageRank for recall. SQLite FTS5
-remains available as a lexical fallback and as a per-request comparison mode.
+Graphmem is a local memory service for agents and developer tools. It stores scoped narrative memories alongside an entity graph, then combines semantic embeddings, graph context, and Personalized PageRank for recall — the non-trained retrieval approach of [HippoRAG 2](https://proceedings.mlr.press/v267/gutierrez25a.html) (Gutiérrez et al., ICML 2025). SQLite FTS5 remains available as a lexical fallback and as a per-request comparison mode.
 
 ## Highlights
 
@@ -14,8 +11,7 @@ remains available as a lexical fallback and as a per-request comparison mode.
 - Verified entities and directed relations attached atomically to memories.
 - Local `sentence-transformers/msmarco-MiniLM-L6-cos-v5` embeddings through Candle.
 - CUDA, CPU, or automatic backend selection.
-- MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`,
-  `inspect`, and `forget` tools.
+- MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`, `inspect`, and `forget` tools.
 - `recall` accepts `use_embeddings: false` to force lexical FTS5 ranking.
 
 ## Install
@@ -25,7 +21,25 @@ cargo install --locked --path .                                  # from a checko
 cargo install --locked --git https://github.com/sonic182/graphmem # latest from GitHub
 ```
 
-This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md).
+This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md). `git` must also be on your `PATH` for repository-scoped memory: `gmem` runs `git rev-parse --show-toplevel` to derive the current repository, and falls back to `global` when it cannot.
+
+## Use it with your coding agent
+
+The binary works with any MCP client, but the Claude Code and Codex plugins also install a skill and lifecycle hooks, so your agent recalls relevant context before a task and records durable decisions after it — without being asked each time. Each plugin bundles its own MCP server config, so there is no separate `mcp add` step. After `cargo install`:
+
+```sh
+# Claude Code
+claude plugin marketplace add sonic182/graphmem
+claude plugin install graphmem@graphmem
+```
+
+```sh
+# Codex
+codex plugin marketplace add sonic182/graphmem
+codex plugin add graphmem@graphmem
+```
+
+pi has no native MCP support and needs a one-time adapter; see [docs/plugins.md](docs/plugins.md) for pi and the full details.
 
 ## Build
 
@@ -38,8 +52,8 @@ cargo build
 With CUDA support (and a working CUDA toolkit):
 
 ```sh
-./debug_build.sh       # cargo build --features cuda
-./build.sh              # cargo build --release --features cuda
+cargo build --features cuda
+cargo build --release --features cuda
 ```
 
 The binary is `target/debug/gmem` or `target/release/gmem`.
@@ -55,11 +69,9 @@ gmem reembed
 gmem mcp
 ```
 
-The default data directory is `~/.graphmem`. Set `GRAPHMEM_HOME` to use a
-separate store, for example `~/.graphmem-dev`.
+The default data directory is `~/.graphmem`. Set `GRAPHMEM_HOME` to use a separate store, for example `~/.graphmem-dev`.
 
-See [docs/cli.md](docs/cli.md) for the complete command reference, including
-`gmem reembed` (the embedding-model migration command).
+See [docs/cli.md](docs/cli.md) for the complete command reference, including `gmem reembed` (the embedding-model migration command).
 
 ## MCP
 
@@ -90,16 +102,9 @@ Use the absolute path to the binary; `~/.cargo/bin/gmem` is where `cargo install
 
 See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
-## Editor plugins
-
-Graphmem ships its skills, lifecycle hooks, and MCP server to Claude Code and
-Codex, and its skill and session-start guidance to pi. See
-[docs/plugins.md](docs/plugins.md) for install instructions and what each
-plugin provides.
-
 ## Configuration
 
-Create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
+Configuration is optional — the values below are the built-in defaults and Graphmem runs fine without a config file. To change any of them, create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
 
 ```toml
 [embedding]
@@ -121,25 +126,11 @@ damping = 0.5
 worker_threads = 4
 ```
 
-`backend = "auto"` selects CUDA when available and otherwise uses CPU.
-`GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded
-and loaded on first use (the first `remember`, `relate`, recall, or `reembed`)
-and cached locally. `remember` stores its embeddings in the same transaction,
-so it fails and stores nothing if the model cannot load or embed.
-`batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE` and the
-`--embedding-batch-size` flag. Under the same precedence (env > flag > file),
-the environment wins over the flag and the flag wins over `config.toml`, for
-one `gmem` run including `gmem mcp`.
+`backend = "auto"` selects CUDA when available and otherwise uses CPU. `GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded and loaded on first use (the first `remember`, `relate`, recall, or `reembed`) and cached locally. `remember` stores its embeddings in the same transaction, so it fails and stores nothing if the model cannot load or embed. `batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE` and the `--embedding-batch-size` flag. Under the same precedence (env > flag > file), the environment wins over the flag and the flag wins over `config.toml`, for one `gmem` run including `gmem mcp`.
 
-Every `[retrieval]` key also reads a `GRAPHMEM_RETRIEVAL_*` environment variable
-and a matching `--retrieval-*` flag (`--retrieval-damping`, etc.), so values can
-be swept without editing the file. Resolution is per field: **environment
-variable > command-line flag > `config.toml` > built-in default**. `gmem mcp`
-accepts the same flags. `seed_temperature` is the one that matters most: raising
-it flattens ranking toward returning the whole store.
+Every `[retrieval]` key also reads a `GRAPHMEM_RETRIEVAL_*` environment variable and a matching `--retrieval-*` flag (`--retrieval-damping`, etc.), so values can be swept without editing the file. Resolution is per field: **environment variable > command-line flag > `config.toml` > built-in default**. `gmem mcp` accepts the same flags. `seed_temperature` is the one that matters most: raising it flattens ranking toward returning the whole store.
 
-Logs are appended to `~/.graphmem/logs/graphmem.log` (or the corresponding
-`GRAPHMEM_HOME` directory):
+Logs are appended to `~/.graphmem/logs/graphmem.log` (or the corresponding `GRAPHMEM_HOME` directory):
 
 ```sh
 tail -f ~/.graphmem/logs/graphmem.log
@@ -151,9 +142,7 @@ tail -f ~/.graphmem/logs/graphmem.log
 just verify
 ```
 
-This runs formatting checks, compilation, Clippy, and the test suite. More
-background is available in [Project_doc.md](Project_doc.md) and
-[docs/schema-evolution.md](docs/schema-evolution.md).
+This runs formatting checks, compilation, Clippy, and the test suite. More background is available in [docs/design.md](docs/design.md) and [docs/schema-evolution.md](docs/schema-evolution.md).
 
 ## License
 
