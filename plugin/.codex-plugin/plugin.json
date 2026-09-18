@@ -10,6 +10,7 @@
   "keywords": ["memory", "mcp", "knowledge", "development"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Graphmem",
     "shortDescription": "Durable project memory",
