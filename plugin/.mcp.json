@@ -1,0 +1,6 @@
+{
+  "gmem": {
+    "command": "gmem",
+    "args": ["mcp"]
+  }
+}
