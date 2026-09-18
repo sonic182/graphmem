@@ -4,8 +4,10 @@
 
 Graphmem is a local memory service for agents and developer tools. It stores
 scoped narrative memories alongside an entity graph, then combines semantic
-embeddings, graph context, and Personalized PageRank for recall. SQLite FTS5
-remains available as a lexical fallback and as a per-request comparison mode.
+embeddings, graph context, and Personalized PageRank for recall — the
+non-trained retrieval approach of [HippoRAG 2](https://proceedings.mlr.press/v267/gutierrez25a.html)
+(Gutiérrez et al., ICML 2025). SQLite FTS5 remains available as a lexical
+fallback and as a per-request comparison mode.
 
 ## Highlights
 
@@ -152,7 +154,7 @@ just verify
 ```
 
 This runs formatting checks, compilation, Clippy, and the test suite. More
-background is available in [Project_doc.md](Project_doc.md) and
+background is available in [docs/design.md](docs/design.md) and
 [docs/schema-evolution.md](docs/schema-evolution.md).
 
 ## License

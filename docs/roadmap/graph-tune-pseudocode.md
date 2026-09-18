@@ -1,6 +1,6 @@
 # Pseudocódigo de los algoritmos de referencia
 
-Companion de [`graph_tune.md`](./graph_tune.md). Esto es pseudocódigo de
+Companion de [`graph-tune.md`](./graph-tune.md). Esto es pseudocódigo de
 **intención** — qué dicen los papers que hay que hacer, no cómo está (ni
 estará necesariamente) implementado en Rust dentro de graphmem. Los
 parámetros por defecto citados (`damping`, `λ`, `ε`, `N_seed`, `K_edge`,
@@ -161,9 +161,9 @@ function WEIGHTED_PPR(adjacency, seed_dist, weight_overlay, damping, iterations)
 **Nota para graphmem (Fase 2 planeada):** `NER(query)` ya existe como
 `text_mentions` literal. `WEIGHTED_PPR` es exactamente el
 `edge_weight_overlay: Option<&HashMap<(usize, usize), f64>>` descrito en
-`graph_tune.md`; cuando el overlay está vacío, `WEIGHTED_PPR` colapsa a la
+`graph-tune.md`; cuando el overlay está vacío, `WEIGHTED_PPR` colapsa a la
 `PPR` uniforme de Fase 1. `edge_scorer` es el trait `EdgeScorer` de
-`graph_tune.md`, con tres implementaciones posibles, todas detrás de la
+`graph-tune.md`, con tres implementaciones posibles, todas detrás de la
 misma interfaz — nada en `RETRIEVE_CATRAG`/`WEIGHTED_PPR` cambia al pasar de
 una a otra:
 
