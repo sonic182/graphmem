@@ -104,7 +104,7 @@ See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
 ## Configuration
 
-Create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
+Configuration is optional — the values below are the built-in defaults and Graphmem runs fine without a config file. To change any of them, create `~/.graphmem/config.toml` (or `$GRAPHMEM_HOME/config.toml`):
 
 ```toml
 [embedding]
