@@ -38,8 +38,10 @@ For example, a successful `remember` response contains `"id": 1`.
 
 Use `global` for reusable knowledge and `repo:/absolute/path/to/repository`
 for project-specific knowledge. If scopes are omitted, the server derives the
-repository scope from its working directory; outside a Git repository it uses
-`global`. Explicit scopes must be `global` or an absolute `repo:` path.
+repository scope from its working directory by running `git rev-parse
+--show-toplevel`; it falls back to `global` when that fails, including when the
+`git` binary is not on `PATH` or the directory is not a Git repository. Explicit
+scopes must be `global` or an absolute `repo:` path.
 
 Embeddings default to `sentence-transformers/msmarco-MiniLM-L6-cos-v5` through Candle. The model is
 downloaded and loaded on first use (the first `remember`, `relate`, or

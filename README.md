@@ -21,7 +21,7 @@ cargo install --locked --path .                                  # from a checko
 cargo install --locked --git https://github.com/sonic182/graphmem # latest from GitHub
 ```
 
-This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md).
+This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md). `git` must also be on your `PATH` for repository-scoped memory: `gmem` runs `git rev-parse --show-toplevel` to derive the current repository, and falls back to `global` when it cannot.
 
 ## Build
 
