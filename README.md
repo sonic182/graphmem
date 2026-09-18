@@ -23,6 +23,24 @@ cargo install --locked --git https://github.com/sonic182/graphmem # latest from 
 
 This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md). `git` must also be on your `PATH` for repository-scoped memory: `gmem` runs `git rev-parse --show-toplevel` to derive the current repository, and falls back to `global` when it cannot.
 
+## Use it with your coding agent
+
+The binary works with any MCP client, but the Claude Code and Codex plugins also install a skill and lifecycle hooks, so your agent recalls relevant context before a task and records durable decisions after it — without being asked each time. Each plugin bundles its own MCP server config, so there is no separate `mcp add` step. After `cargo install`:
+
+```sh
+# Claude Code
+claude plugin marketplace add sonic182/graphmem
+claude plugin install graphmem@graphmem
+```
+
+```sh
+# Codex
+codex plugin marketplace add sonic182/graphmem
+codex plugin add graphmem@graphmem
+```
+
+pi has no native MCP support and needs a one-time adapter; see [docs/plugins.md](docs/plugins.md) for pi and the full details.
+
 ## Build
 
 Stable Rust is required. CPU builds need no extra feature:
@@ -83,10 +101,6 @@ Use the absolute path to the binary; `~/.cargo/bin/gmem` is where `cargo install
 ```
 
 See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
-
-## Editor plugins
-
-Graphmem ships its skills, lifecycle hooks, and MCP server to Claude Code and Codex, and its skill and session-start guidance to pi. See [docs/plugins.md](docs/plugins.md) for install instructions and what each plugin provides.
 
 ## Configuration
 
