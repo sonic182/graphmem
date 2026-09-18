@@ -34,8 +34,8 @@ cargo build
 With CUDA support (and a working CUDA toolkit):
 
 ```sh
-./debug_build.sh       # cargo build --features cuda
-./build.sh              # cargo build --release --features cuda
+cargo build --features cuda
+cargo build --release --features cuda
 ```
 
 The binary is `target/debug/gmem` or `target/release/gmem`.
