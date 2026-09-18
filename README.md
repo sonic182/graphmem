@@ -1,5 +1,7 @@
 # Graphmem
 
+[![CI](https://github.com/sonic182/graphmem/actions/workflows/ci.yml/badge.svg)](https://github.com/sonic182/graphmem/actions/workflows/ci.yml)
+
 Graphmem is a local memory service for agents and developer tools. It stores
 scoped narrative memories alongside an entity graph, then combines semantic
 embeddings, graph context, and Personalized PageRank for recall. SQLite FTS5
@@ -15,6 +17,15 @@ remains available as a lexical fallback and as a per-request comparison mode.
 - MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`,
   `inspect`, and `forget` tools.
 - `recall` accepts `use_embeddings: false` to force lexical FTS5 ranking.
+
+## Install
+
+```sh
+cargo install --locked --path .                                  # from a checkout
+cargo install --locked --git https://github.com/sonic182/graphmem # latest from GitHub
+```
+
+This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md).
 
 ## Build
 
@@ -58,12 +69,14 @@ Configure an MCP client to launch:
 {
   "mcpServers": {
     "graphmem": {
-      "command": "/absolute/path/to/gmem",
+      "command": "~/.cargo/bin/gmem",
       "args": ["mcp"]
     }
   }
 }
 ```
+
+Use the absolute path to the binary; `~/.cargo/bin/gmem` is where `cargo install` puts it.
 
 `recall` uses embeddings by default. For a lexical comparison, pass:
 
@@ -79,9 +92,10 @@ See [docs/mcp.md](docs/mcp.md) for the complete tool contract.
 
 ## Editor plugins
 
-Graphmem ships its skills, lifecycle hooks, and MCP configuration to Claude
-Code, Codex, and pi. See [docs/plugins.md](docs/plugins.md) for install
-instructions and what each plugin provides.
+Graphmem ships its skills, lifecycle hooks, and MCP server to Claude Code and
+Codex, and its skill and session-start guidance to pi. See
+[docs/plugins.md](docs/plugins.md) for install instructions and what each
+plugin provides.
 
 ## Configuration
 
@@ -140,3 +154,7 @@ just verify
 This runs formatting checks, compilation, Clippy, and the test suite. More
 background is available in [Project_doc.md](Project_doc.md) and
 [docs/schema-evolution.md](docs/schema-evolution.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
