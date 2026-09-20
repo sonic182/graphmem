@@ -41,7 +41,7 @@ codex plugin add graphmem@graphmem
 
 ```sh
 # OpenCode
-opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#main --global
+opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
 pi has no native MCP support and needs a one-time adapter; see [docs/plugins.md](docs/plugins.md) for pi and the full details.

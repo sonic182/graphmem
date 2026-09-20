@@ -100,7 +100,7 @@ Install the optimized binary from GitHub, then install the plugin directly from 
 cargo install --locked --git https://github.com/sonic182/graphmem
 
 # install the Graphmem plugin (skill + guidance + MCP server)
-opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#main --global
+opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
 The plugin provides three things: the `graphmem-mcp-for-dev` skill (registered through `skills.paths`), the recall/store guidance injected into the system prompt and preserved across compaction, and the `gmem mcp` server registered through the plugin `config` hook. An existing user-defined `gmem` MCP entry is left unchanged. Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand, which has known cache/path-resolution issues.
