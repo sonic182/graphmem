@@ -25,7 +25,7 @@ This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your
 
 ## Use it with your coding agent
 
-The binary works with any MCP client, but the Claude Code and Codex plugins also install a skill and lifecycle hooks, so your agent recalls relevant context before a task and records durable decisions after it — without being asked each time. Each plugin bundles its own MCP server config, so there is no separate `mcp add` step. After `cargo install`:
+The binary works with any MCP client, but the Claude Code, Codex, and OpenCode plugins also install a skill and lifecycle guidance, so your agent recalls relevant context before a task and records durable decisions after it — without being asked each time. Each plugin bundles its own MCP server config, so there is no separate `mcp add` step. After `cargo install`:
 
 ```sh
 # Claude Code
@@ -37,6 +37,11 @@ claude plugin install graphmem@graphmem
 # Codex
 codex plugin marketplace add sonic182/graphmem
 codex plugin add graphmem@graphmem
+```
+
+```sh
+# OpenCode
+opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#main --global
 ```
 
 pi has no native MCP support and needs a one-time adapter; see [docs/plugins.md](docs/plugins.md) for pi and the full details.
@@ -55,6 +60,8 @@ With CUDA support (and a working CUDA toolkit):
 cargo build --features cuda
 cargo build --release --features cuda
 ```
+
+On GPUs older than Ampere (compute capability below 8.0, such as GTX 16xx and RTX 20xx), recent toolkits (CUDA 12.9 and 13.x) fail to build: `candle-kernels` 0.11 redefines `__hmax_nan`/`__hmin_nan`, which those headers now provide (`nvcc` fails in `src/compatibility.cuh`). This is tracked upstream in [huggingface/candle#3737](https://github.com/huggingface/candle/issues/3737). Make sure `nvcc` is on `PATH` (on Arch/Manjaro, `/opt/cuda/bin`).
 
 The binary is `target/debug/gmem` or `target/release/gmem`.
 

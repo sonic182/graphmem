@@ -2,8 +2,13 @@
   "name": "graphmem",
   "version": "0.1.1",
   "description": "Durable project memory for coding agents: skill and session guidance for gmem.",
-  "keywords": ["pi-package", "mcp", "memory", "knowledge", "development"],
+  "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development"],
   "license": "MIT",
+  "type": "module",
+  "main": "./plugin/opencode/index.ts",
+  "exports": {
+    "./server": "./plugin/opencode/index.ts"
+  },
   "homepage": "https://github.com/sonic182/graphmem",
   "repository": "https://github.com/sonic182/graphmem",
   "pi": {
