@@ -87,7 +87,7 @@ fn serves_memory_lifecycle_over_stdio() {
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
-    assert_eq!(listed_tools.len(), 7);
+    assert_eq!(listed_tools.len(), 8);
     assert!(
         listed_tools
             .iter()
@@ -106,7 +106,7 @@ fn serves_memory_lifecycle_over_stdio() {
     assert_eq!(
         names,
         [
-            "forget", "graph", "inspect", "recall", "relate", "remember", "stats"
+            "forget", "graph", "inspect", "recall", "relate", "remember", "stats", "update"
         ]
     );
     let recall = listed_tools
@@ -597,4 +597,301 @@ fn stats_reports_both_stores_without_mutating_them() {
     );
     drop(mcp);
     fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn update_revises_a_memory_in_place() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-update-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let remembered = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{
+            "content":"deploy from the release branch",
+            "memory_type":"convention",
+            "scopes":["global"]
+        }}),
+    );
+    let id = remembered["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("remembered id");
+
+    let updated = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"update","arguments":{
+            "id":id,
+            "content":"deploy from tags, not the release branch",
+            "memory_type":"decision"
+        }}),
+    );
+    let record = &updated["result"]["structuredContent"];
+    assert_eq!(record["id"], id);
+    assert_eq!(
+        record["content"],
+        "deploy from tags, not the release branch"
+    );
+    assert_eq!(record["memory_type"], "decision");
+    assert_eq!(record["scopes"], json!(["global"]), "scopes are untouched");
+
+    // Omitted fields keep their stored value.
+    let importance_only = mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"update","arguments":{"id":id,"importance":0.8}}),
+    );
+    let record = &importance_only["result"]["structuredContent"];
+    assert_eq!(
+        record["content"],
+        "deploy from tags, not the release branch"
+    );
+    assert_eq!(record["memory_type"], "decision");
+    assert_eq!(record["importance"], 0.8);
+
+    // The revision replaces the original rather than adding a second memory.
+    let stats = mcp.request(5, "tools/call", json!({"name":"stats","arguments":{}}));
+    assert_eq!(stats["result"]["structuredContent"]["memories"], 1);
+
+    let missing = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"update","arguments":{"id":id + 999,"content":"nothing here"}}),
+    );
+    assert_eq!(missing["result"]["isError"], true);
+
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn recall_filters_by_memory_type() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-type-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    for (id, memory_type) in [(2, "decision"), (3, "convention")] {
+        mcp.request(
+            id,
+            "tools/call",
+            json!({"name":"remember","arguments":{
+                "content":format!("release process {memory_type}"),
+                "memory_type":memory_type,
+                "scopes":["global"]
+            }}),
+        );
+    }
+
+    let unfiltered = mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"release process","use_embeddings":false}}),
+    );
+    assert_eq!(
+        unfiltered["result"]["structuredContent"]["memories"]
+            .as_array()
+            .expect("memories")
+            .len(),
+        2
+    );
+
+    let filtered = mcp.request(
+        5,
+        "tools/call",
+        json!({"name":"recall","arguments":{
+            "query":"release process",
+            "use_embeddings":false,
+            "memory_type":"DECISION"
+        }}),
+    );
+    let memories = filtered["result"]["structuredContent"]["memories"]
+        .as_array()
+        .expect("filtered memories");
+    assert_eq!(memories.len(), 1, "matching ignores case");
+    assert_eq!(memories[0]["memory_type"], "decision");
+
+    let unknown = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"recall","arguments":{
+            "query":"release process",
+            "use_embeddings":false,
+            "memory_type":"incident"
+        }}),
+    );
+    assert!(
+        unknown["result"]["structuredContent"]["memories"]
+            .as_array()
+            .expect("memories")
+            .is_empty()
+    );
+
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-scope-guard-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let home = root.join("home");
+    let (first, second) = (root.join("first"), root.join("second"));
+    for repository in [&first, &second] {
+        fs::create_dir_all(repository).expect("test repository is created");
+        assert!(
+            Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(repository)
+                .status()
+                .expect("git is available")
+                .success()
+        );
+    }
+
+    // Store one memory in the first repository's scope, and one global.
+    let mut mcp = Mcp::start_in(&home, &first);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let private = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"first repository secret"}}),
+    );
+    let private_id = private["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("private id");
+    let shared = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"shared note","scopes":["global"]}}),
+    );
+    let shared_id = shared["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("shared id");
+    drop(mcp);
+
+    // A server started in the second repository shares the store, so the ids
+    // are guessable; every id-addressed tool must still refuse the first
+    // repository's memory.
+    let mut mcp = Mcp::start_in(&home, &second);
+    mcp.request(
+        4,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    for (id, tool, arguments) in [
+        (5, "inspect", json!({"id": private_id})),
+        (
+            6,
+            "update",
+            json!({"id": private_id, "content": "overwritten from the second repository"}),
+        ),
+        (7, "forget", json!({"id": private_id})),
+    ] {
+        let response = mcp.request(id, "tools/call", json!({"name":tool,"arguments":arguments}));
+        assert_eq!(
+            response["result"]["isError"], true,
+            "{tool} reached another repository's memory"
+        );
+    }
+
+    // Global memories stay reachable from either repository.
+    let inspected = mcp.request(
+        8,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":shared_id}}),
+    );
+    assert_eq!(
+        inspected["result"]["structuredContent"]["content"],
+        "shared note"
+    );
+
+    // Naming the other repository explicitly is allowed, as it is for remember
+    // and recall: the guard stops a guessed id, not a declared target.
+    let first_scope = format!(
+        "repo:{}",
+        first
+            .canonicalize()
+            .expect("repository path is canonical")
+            .display()
+    );
+    let targeted = mcp.request(
+        9,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":private_id,"scopes":[first_scope]}}),
+    );
+    assert_eq!(
+        targeted["result"]["structuredContent"]["content"],
+        "first repository secret"
+    );
+    let revised = mcp.request(
+        10,
+        "tools/call",
+        json!({"name":"update","arguments":{
+            "id":private_id,
+            "content":"first repository secret, revised from elsewhere",
+            "scopes":[first_scope]
+        }}),
+    );
+    assert_eq!(
+        revised["result"]["structuredContent"]["content"],
+        "first repository secret, revised from elsewhere"
+    );
+    let invalid = mcp.request(
+        11,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":private_id,"scopes":["not-a-scope"]}}),
+    );
+    assert_eq!(invalid["result"]["isError"], true);
+    drop(mcp);
+
+    // The refused calls left the memory alone.
+    let mut mcp = Mcp::start_in(&home, &first);
+    mcp.request(
+        12,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let intact = mcp.request(
+        13,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":private_id}}),
+    );
+    assert_eq!(
+        intact["result"]["structuredContent"]["content"],
+        "first repository secret, revised from elsewhere",
+        "the unscoped calls changed nothing; only the explicitly scoped update did"
+    );
+    drop(mcp);
+    fs::remove_dir_all(root).expect("MCP test data is removed");
 }

@@ -6,7 +6,7 @@ one JSON object per line on stdin/stdout, responses matched by request id.
 No third-party dependencies.
 
 Examples:
-  mcp_smoke.py                          full remember/recall/inspect/forget smoke test
+  mcp_smoke.py                          full remember/recall/inspect/update/forget smoke test
   mcp_smoke.py --embeddings             same, but exercises the real embedding model
   mcp_smoke.py -v                       print every request/response
   mcp_smoke.py call recall '{"query":"x","use_embeddings":false}'
@@ -147,7 +147,16 @@ def run_smoke(mcp, verbose):
 
     tools = mcp.request("tools/list", {})
     names = sorted(tool["name"] for tool in tools["result"]["tools"])
-    assert names == ["forget", "graph", "inspect", "recall", "relate", "remember", "stats"], names
+    assert names == [
+        "forget",
+        "graph",
+        "inspect",
+        "recall",
+        "relate",
+        "remember",
+        "stats",
+        "update",
+    ], names
     if verbose:
         dump("tools/list", tools)
 
@@ -173,12 +182,28 @@ def run_smoke(mcp, verbose):
     if verbose:
         dump("inspect", inspected)
 
+    updated = mcp.request(
+        "tools/call",
+        {
+            "name": "update",
+            "arguments": {"id": memory_id, "content": "mcp_smoke revised memory"},
+        },
+    )
+    revised = updated["result"]["structuredContent"]
+    assert revised["content"] == "mcp_smoke revised memory", updated
+    assert revised["memory_type"] == "observation", "omitted fields are kept"
+    if verbose:
+        dump("update", updated)
+
     forgotten = mcp.request("tools/call", {"name": "forget", "arguments": {"id": memory_id}})
     assert forgotten["result"]["structuredContent"]["forgotten"] is True, forgotten
     if verbose:
         dump("forget", forgotten)
 
-    print(f"OK: initialize, tools/list ({len(names)} tools), remember, recall, inspect, forget (memory id {memory_id})")
+    print(
+        f"OK: initialize, tools/list ({len(names)} tools), remember, recall, inspect, "
+        f"update, forget (memory id {memory_id})"
+    )
 
 
 def main():

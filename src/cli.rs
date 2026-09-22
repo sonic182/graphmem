@@ -143,7 +143,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::Show { id } => {
             let service = MemoryService::open_default(overrides)?;
-            print_memory_details(service.show(id)?);
+            print_memory_details(service.show(id, None)?);
         }
         Command::Search(args) => {
             let mut service = MemoryService::open_default(overrides)?;
@@ -186,7 +186,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::Forget { id } => {
             let service = MemoryService::open_default(overrides)?;
-            service.forget(id)?;
+            service.forget(id, None)?;
             println!("forgot: {id}");
         }
         Command::Flush(args) => {

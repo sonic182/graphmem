@@ -99,6 +99,12 @@ struct RecallInput {
     /// embeddings.
     #[serde(default)]
     use_embeddings: Option<bool>,
+    /// Optional filter on the memory's category, applied before ranking.
+    /// Matching ignores case. Use the value stored by remember, such as
+    /// decision, convention, constraint, incident, or observation; a category
+    /// nothing was stored under returns no memories.
+    #[serde(default)]
+    memory_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -154,6 +160,33 @@ struct GraphInput {
 struct IdInput {
     /// Memory id, as returned by recall or remember.
     id: i64,
+    /// Where to look for the memory: global or repo:/absolute/path. Omit to
+    /// use the server's default scope. Global memories are reachable from any
+    /// scope. Pass the target repository explicitly when it differs from the
+    /// one the server started in, as remember and recall accept it.
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct UpdateInput {
+    /// Memory id, as returned by recall or remember.
+    id: i64,
+    /// Replacement content. Omit to keep the stored content.
+    #[serde(default)]
+    content: Option<String>,
+    /// Replacement category. Omit to keep the stored one.
+    #[serde(default)]
+    memory_type: Option<String>,
+    /// Replacement importance from 0.0 to 1.0. Omit to keep the stored one.
+    #[serde(default)]
+    importance: Option<f64>,
+    /// Where to look for the memory: global or repo:/absolute/path. Omit to
+    /// use the server's default scope. Global memories are reachable from any
+    /// scope. Pass the target repository explicitly when it differs from the
+    /// one the server started in, as remember and recall accept it.
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -264,7 +297,7 @@ impl MemoryServer {
             })
             .map_err(|error| tool_error(error.to_string()))?;
         let details = service
-            .show(memory.id)
+            .show(memory.id, None)
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
@@ -290,6 +323,7 @@ impl MemoryServer {
                 &scopes,
                 input.limit.unwrap_or(10),
                 input.use_embeddings.unwrap_or(true),
+                input.memory_type.as_deref(),
             )
             .map_err(|error| tool_error(error.to_string()))?;
         let memory_ids = results
@@ -366,14 +400,21 @@ impl MemoryServer {
         Ok(Json(graph_output(details)))
     }
 
-    #[tool(name = "forget", description = "Permanently delete one memory by id.")]
+    #[tool(
+        name = "forget",
+        description = "Permanently delete one memory by id. The id must name a memory in the \
+             given scopes, in global, or with no scope at all; omitted scopes use the server's \
+             default scope. Pass the repository explicitly to reach a memory outside it."
+    )]
     fn forget(
         &self,
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
         let id = input.id;
+        validate_scopes(&input.scopes)?;
+        let scopes = self.scopes(input.scopes);
         self.lock()?
-            .forget(id)
+            .forget(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(ForgetOutput {
             id,
@@ -382,17 +423,55 @@ impl MemoryServer {
     }
 
     #[tool(
+        name = "update",
+        description = "Revise one memory in place by id. Fields you pass replace the stored \
+             ones; fields you omit are kept. Prefer this over storing a second memory when a \
+             decision or convention has changed. Scopes, entities, and relations are left \
+             untouched; changed content is re-embedded in the same transaction, so a failed \
+             embedding changes nothing. The id must name a memory in the given scopes, in \
+             global, or with no scope at all; omitted scopes use the server's default scope. \
+             Pass the repository explicitly to reach a memory outside it."
+    )]
+    fn update(
+        &self,
+        Parameters(input): Parameters<UpdateInput>,
+    ) -> Result<Json<MemoryRecord>, CallToolResult> {
+        let id = input.id;
+        validate_scopes(&input.scopes)?;
+        let scopes = self.scopes(input.scopes);
+        let mut service = self.lock()?;
+        service
+            .update(
+                id,
+                input.content,
+                input.memory_type,
+                input.importance,
+                Some(&scopes),
+            )
+            .map_err(|error| tool_error(error.to_string()))?;
+        let details = service
+            .show(id, None)
+            .map_err(|error| tool_error(error.to_string()))?;
+        Ok(Json(record(details.memory, details.scopes, None)))
+    }
+
+    #[tool(
         name = "inspect",
-        description = "Return one memory by id, including its content, metadata, and scopes."
+        description = "Return one memory by id, including its content, metadata, and scopes. \
+             The id must name a memory in the given scopes, in global, or with no scope at all; \
+             omitted scopes use the server's default scope. Pass the repository explicitly to \
+             reach a memory outside it."
     )]
     fn inspect(
         &self,
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
+        validate_scopes(&input.scopes)?;
+        let scopes = self.scopes(input.scopes);
         let details = self
             .lock()?
-            .show(id)
+            .show(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
