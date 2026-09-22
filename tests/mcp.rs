@@ -752,7 +752,7 @@ fn recall_filters_by_memory_type() {
 }
 
 #[test]
-fn id_addressed_tools_cannot_reach_another_repositorys_memory() {
+fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is valid")
@@ -835,23 +835,62 @@ fn id_addressed_tools_cannot_reach_another_repositorys_memory() {
         inspected["result"]["structuredContent"]["content"],
         "shared note"
     );
+
+    // Naming the other repository explicitly is allowed, as it is for remember
+    // and recall: the guard stops a guessed id, not a declared target.
+    let first_scope = format!(
+        "repo:{}",
+        first
+            .canonicalize()
+            .expect("repository path is canonical")
+            .display()
+    );
+    let targeted = mcp.request(
+        9,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":private_id,"scopes":[first_scope]}}),
+    );
+    assert_eq!(
+        targeted["result"]["structuredContent"]["content"],
+        "first repository secret"
+    );
+    let revised = mcp.request(
+        10,
+        "tools/call",
+        json!({"name":"update","arguments":{
+            "id":private_id,
+            "content":"first repository secret, revised from elsewhere",
+            "scopes":[first_scope]
+        }}),
+    );
+    assert_eq!(
+        revised["result"]["structuredContent"]["content"],
+        "first repository secret, revised from elsewhere"
+    );
+    let invalid = mcp.request(
+        11,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":private_id,"scopes":["not-a-scope"]}}),
+    );
+    assert_eq!(invalid["result"]["isError"], true);
     drop(mcp);
 
-    // The refused calls changed nothing.
+    // The refused calls left the memory alone.
     let mut mcp = Mcp::start_in(&home, &first);
     mcp.request(
-        9,
+        12,
         "initialize",
         json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
     );
     let intact = mcp.request(
-        10,
+        13,
         "tools/call",
         json!({"name":"inspect","arguments":{"id":private_id}}),
     );
     assert_eq!(
         intact["result"]["structuredContent"]["content"],
-        "first repository secret"
+        "first repository secret, revised from elsewhere",
+        "the unscoped calls changed nothing; only the explicitly scoped update did"
     );
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP test data is removed");

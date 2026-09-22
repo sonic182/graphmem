@@ -160,6 +160,12 @@ struct GraphInput {
 struct IdInput {
     /// Memory id, as returned by recall or remember.
     id: i64,
+    /// Where to look for the memory: global or repo:/absolute/path. Omit to
+    /// use the server's default scope. Global memories are reachable from any
+    /// scope. Pass the target repository explicitly when it differs from the
+    /// one the server started in, as remember and recall accept it.
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -175,6 +181,12 @@ struct UpdateInput {
     /// Replacement importance from 0.0 to 1.0. Omit to keep the stored one.
     #[serde(default)]
     importance: Option<f64>,
+    /// Where to look for the memory: global or repo:/absolute/path. Omit to
+    /// use the server's default scope. Global memories are reachable from any
+    /// scope. Pass the target repository explicitly when it differs from the
+    /// one the server started in, as remember and recall accept it.
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -388,13 +400,19 @@ impl MemoryServer {
         Ok(Json(graph_output(details)))
     }
 
-    #[tool(name = "forget", description = "Permanently delete one memory by id.")]
+    #[tool(
+        name = "forget",
+        description = "Permanently delete one memory by id. The id must name a memory in the \
+             given scopes, in global, or with no scope at all; omitted scopes use the server's \
+             default scope. Pass the repository explicitly to reach a memory outside it."
+    )]
     fn forget(
         &self,
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
         let id = input.id;
-        let scopes = self.scopes(Vec::new());
+        validate_scopes(&input.scopes)?;
+        let scopes = self.scopes(input.scopes);
         self.lock()?
             .forget(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
@@ -410,14 +428,17 @@ impl MemoryServer {
              ones; fields you omit are kept. Prefer this over storing a second memory when a \
              decision or convention has changed. Scopes, entities, and relations are left \
              untouched; changed content is re-embedded in the same transaction, so a failed \
-             embedding changes nothing."
+             embedding changes nothing. The id must name a memory in the given scopes, in \
+             global, or with no scope at all; omitted scopes use the server's default scope. \
+             Pass the repository explicitly to reach a memory outside it."
     )]
     fn update(
         &self,
         Parameters(input): Parameters<UpdateInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
-        let scopes = self.scopes(Vec::new());
+        validate_scopes(&input.scopes)?;
+        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         service
             .update(
@@ -436,14 +457,18 @@ impl MemoryServer {
 
     #[tool(
         name = "inspect",
-        description = "Return one memory by id, including its content, metadata, and scopes."
+        description = "Return one memory by id, including its content, metadata, and scopes. \
+             The id must name a memory in the given scopes, in global, or with no scope at all; \
+             omitted scopes use the server's default scope. Pass the repository explicitly to \
+             reach a memory outside it."
     )]
     fn inspect(
         &self,
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
-        let scopes = self.scopes(Vec::new());
+        validate_scopes(&input.scopes)?;
+        let scopes = self.scopes(input.scopes);
         let details = self
             .lock()?
             .show(id, Some(&scopes))

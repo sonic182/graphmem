@@ -27,8 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one in the server's own repository scope, and report `memory not found`
   otherwise. Ids are allocated across the whole store, so before this an agent
   in one repository could read, overwrite, or delete another repository's
-  memory by guessing an id, despite recall's scope isolation. The `gmem` CLI
-  stays unrestricted.
+  memory by guessing an id, despite recall's scope isolation. The three tools
+  take the same optional `scopes` argument as `remember` and `recall`, so a
+  repository other than the server's startup one stays reachable by naming it
+  explicitly. The `gmem` CLI stays unrestricted.
 - The **What** / **Why** / **Where** / **Learned** shape for durable saves,
   documented in the `graphmem-mcp-for-dev` skill and in the session guidance
   the Claude Code, OpenCode, and pi plugins inject.

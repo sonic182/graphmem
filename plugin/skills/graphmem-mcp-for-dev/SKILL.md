@@ -102,4 +102,6 @@ Narrow a recall with `memory_type` when you want only one category, such as `dec
 
 ## Correct or remove memory safely
 
+`inspect`, `update`, and `forget` take the same `scopes` argument as `remember` and `recall`, and default to the server's startup repository plus global. When you recalled a memory from another repository by passing `repo:/absolute/path/to/repository`, pass that same scope to inspect, revise, or remove it; without it the id is treated as out of scope and reported as not found, so a stale or guessed id cannot reach another repository's memory.
+
 Use `inspect` to confirm a memory's content and ID before `update` or `forget`. `forget` permanently deletes a single narrative memory; do not use it to remove graph entities or relationships. Reserve `forget` for entries that were erroneous or must be removed; for a decision that simply changed, `update` it.
