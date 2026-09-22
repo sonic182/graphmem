@@ -187,6 +187,10 @@ fn serves_memory_lifecycle_over_stdio() {
         remembered["result"]["structuredContent"]["scopes"],
         json!(["global"])
     );
+    assert_eq!(
+        remembered["result"]["structuredContent"]["warnings"],
+        json!([])
+    );
     let graph = mcp.request(
         9,
         "tools/call",
@@ -212,6 +216,14 @@ fn serves_memory_lifecycle_over_stdio() {
     assert_eq!(
         recalled["result"]["structuredContent"]["memories"][0]["id"],
         id
+    );
+    assert_eq!(
+        recalled["result"]["structuredContent"]["warnings"],
+        json!([])
+    );
+    assert_eq!(
+        recalled["result"]["structuredContent"]["memories"][0]["warnings"],
+        json!([])
     );
 
     let inspected = mcp.request(
@@ -373,6 +385,10 @@ fn relates_normalized_entities_and_traverses_bounded_paths() {
     assert_eq!(
         api_to_sqlite["result"]["structuredContent"]["source"]["canonical_name"],
         "api"
+    );
+    assert_eq!(
+        api_to_sqlite["result"]["structuredContent"]["warnings"],
+        json!([])
     );
     let repeated = mcp.request(
         3,

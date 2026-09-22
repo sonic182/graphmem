@@ -214,14 +214,12 @@ struct MemoryRecord {
     score: Option<f64>,
     /// Set when an embedding had to truncate its input to the model's token
     /// limit, so content past the limit did not affect ranking.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct RecallOutput {
     memories: Vec<MemoryRecord>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
 }
 
@@ -265,7 +263,6 @@ struct RelationOutput {
     source: EntityRecord,
     edge: EdgeRecord,
     target: EntityRecord,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
 }
 

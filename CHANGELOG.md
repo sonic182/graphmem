@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP responses now always include `warnings` as an array, including `[]` when
+  no embedding input was truncated. This keeps emitted `remember`, `recall`,
+  and `relate` responses consistent with their required output schemas.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added

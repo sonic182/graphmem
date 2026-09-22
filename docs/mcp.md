@@ -77,7 +77,7 @@ name the active model (or report embeddings disabled), and the
 cache once present; `max_tokens` is null when embeddings are disabled).
 Truncation is logged as
 a warning and reported back in the `warnings` field of the `remember`,
-`recall`, and `relate` responses (omitted when nothing was truncated). To
+`recall`, and `relate` responses (an empty array when nothing was truncated). To
 disable embeddings and retain SQLite
 FTS5 lexical ranking, use either:
 
