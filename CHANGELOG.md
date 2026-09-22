@@ -67,3 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
+
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/sonic182/graphmem/releases/tag/0.2.0
+[0.1.1]: https://github.com/sonic182/graphmem/releases/tag/0.1.1
