@@ -1,6 +1,6 @@
 {
   "name": "graphmem",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Durable project memory for coding agents.",
   "author": {
     "name": "Graphmem"
