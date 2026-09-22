@@ -7,10 +7,10 @@ use graphmem::{
     Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
     StoreStats,
     application::{
-        EmbeddingSummary, GraphDetails, GraphRequest, MemoryService, RelateRequest,
-        RelationDetails, RememberRequest,
+        GraphDetails, GraphRequest, MemoryService, RelateRequest, RelationDetails, RememberRequest,
     },
-    infrastructure::config::ConfigOverrides,
+    infrastructure::config::{ConfigOverrides, EmbeddingConfig},
+    infrastructure::embedding::embedding_details,
     infrastructure::repository::git_repository_root,
 };
 use rmcp::schemars::JsonSchema;
@@ -37,13 +37,13 @@ pub async fn run(overrides: ConfigOverrides) -> Result<(), Box<dyn std::error::E
 pub struct MemoryServer {
     memory: Mutex<MemoryService>,
     default_scope: String,
-    embedding: EmbeddingSummary,
+    embedding: EmbeddingConfig,
 }
 
 impl MemoryServer {
     fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
         let service = MemoryService::open_default(overrides)?;
-        let embedding = service.embedding_summary();
+        let embedding = service.embedding_config().clone();
         Ok(Self {
             memory: Mutex::new(service),
             default_scope: current_scope(),
@@ -304,19 +304,20 @@ impl MemoryServer {
         validate_scopes(&input.scopes)?;
         let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
-        let memory = service
-            .remember(RememberRequest {
-                content: input.content,
-                memory_type: input
-                    .memory_type
-                    .unwrap_or_else(|| "observation".to_owned()),
-                importance: input.importance.unwrap_or(0.0),
-                scopes,
-                entities: input.entities.into_iter().map(entity_reference).collect(),
-                relations: input.relations.into_iter().map(relation).collect(),
-            })
-            .map_err(|error| tool_error(error.to_string()))?;
+        let stored = service.remember(RememberRequest {
+            content: input.content,
+            memory_type: input
+                .memory_type
+                .unwrap_or_else(|| "observation".to_owned()),
+            importance: input.importance.unwrap_or(0.0),
+            scopes,
+            entities: input.entities.into_iter().map(entity_reference).collect(),
+            relations: input.relations.into_iter().map(relation).collect(),
+        });
+        // drained before the error propagates, so a failed call cannot leave a
+        // stale flag that warns on the next successful one
         let warning = service.take_embedding_warning();
+        let memory = stored.map_err(|error| tool_error(error.to_string()))?;
         let details = service
             .show(memory.id, None)
             .map_err(|error| tool_error(error.to_string()))?;
@@ -341,16 +342,15 @@ impl MemoryServer {
         validate_scopes(&input.scopes)?;
         let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
-        let results = service
-            .search_scopes_with_embeddings(
-                &input.query,
-                &scopes,
-                input.limit.unwrap_or(10),
-                input.use_embeddings.unwrap_or(true),
-                input.memory_type.as_deref(),
-            )
-            .map_err(|error| tool_error(error.to_string()))?;
+        let found = service.search_scopes_with_embeddings(
+            &input.query,
+            &scopes,
+            input.limit.unwrap_or(10),
+            input.use_embeddings.unwrap_or(true),
+            input.memory_type.as_deref(),
+        );
         let warning = service.take_embedding_warning();
+        let results = found.map_err(|error| tool_error(error.to_string()))?;
         let memory_ids = results
             .iter()
             .map(|result| result.memory.id)
@@ -399,15 +399,14 @@ impl MemoryServer {
         Parameters(input): Parameters<RelateInput>,
     ) -> Result<Json<RelationOutput>, CallToolResult> {
         let mut service = self.lock()?;
-        let details = service
-            .relate(RelateRequest {
-                source: entity_reference(input.source),
-                relation: input.relation,
-                target: entity_reference(input.target),
-                metadata: input.metadata,
-            })
-            .map_err(|error| tool_error(error.to_string()))?;
+        let related = service.relate(RelateRequest {
+            source: entity_reference(input.source),
+            relation: input.relation,
+            target: entity_reference(input.target),
+            metadata: input.metadata,
+        });
         let warning = service.take_embedding_warning();
+        let details = related.map_err(|error| tool_error(error.to_string()))?;
         let mut output = relation_output(details);
         output.warnings = warning.into_iter().collect();
         Ok(Json(output))
@@ -508,7 +507,7 @@ impl MemoryServer {
     }
 }
 
-#[tool_handler(name = "gmem", version = "0.1.0")]
+#[tool_handler(name = "gmem")]
 impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
@@ -517,7 +516,7 @@ impl ServerHandler for MemoryServer {
                 .enable_resources()
                 .build(),
         )
-        .with_server_info(Implementation::new("gmem", "0.1.0"))
+        .with_server_info(Implementation::new("gmem", env!("CARGO_PKG_VERSION")))
         .with_instructions(format!(
             "Graphmem has two separate local stores: scoped narrative memory and an \
                  unscoped entity graph. Omitted scopes use the Git repository containing the \
@@ -547,18 +546,19 @@ impl ServerHandler for MemoryServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ReadResourceResponse, McpError>> + MaybeSendFuture + '_ {
-        // the config.json fetch blocks the async worker on first read;
-        // move to spawn_blocking if resource reads ever share a busy runtime.
-        std::future::ready(self.read_embedding_resource(&request.uri))
+        self.read_embedding_resource(request.uri)
     }
 }
 
 const EMBEDDING_RESOURCE_URI: &str = "gmem://embedding";
 
 impl MemoryServer {
-    fn read_embedding_resource(
+    /// Reads the model's `config.json` off the async worker and without the
+    /// service lock: the fetch can reach the network on a cold cache, and every
+    /// tool call would otherwise wait behind it.
+    async fn read_embedding_resource(
         &self,
-        uri: &str,
+        uri: String,
     ) -> std::result::Result<ReadResourceResponse, McpError> {
         if uri != EMBEDDING_RESOURCE_URI {
             return Err(McpError::invalid_params(
@@ -566,11 +566,10 @@ impl MemoryServer {
                 None,
             ));
         }
-        let details = self
-            .memory
-            .lock()
-            .map_err(|_| McpError::internal_error("memory service lock is poisoned", None))?
-            .embedding_details()
+        let config = self.embedding.clone();
+        let details = tokio::task::spawn_blocking(move || embedding_details(&config))
+            .await
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         let body = serde_json::to_string_pretty(&serde_json::json!({
             "enabled": details.enabled,
@@ -589,7 +588,7 @@ impl MemoryServer {
 /// Tells an MCP client which model ranks recall and how long input is handled,
 /// so it can interpret `warnings` and prefer lexical search when it needs
 /// content past the model's token limit.
-fn embedding_note(embedding: &EmbeddingSummary) -> String {
+fn embedding_note(embedding: &EmbeddingConfig) -> String {
     if embedding.enabled {
         format!(
             "Recall embeds memories, entities, and relations with {}; input longer than the \
@@ -755,24 +754,29 @@ fn current_scope() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::embedding_note;
-    use graphmem::application::EmbeddingSummary;
+    use graphmem::infrastructure::config::EmbeddingConfig;
+
+    fn config(enabled: bool, model: &str) -> EmbeddingConfig {
+        EmbeddingConfig {
+            enabled,
+            model: model.to_owned(),
+            revision: "main".to_owned(),
+            cache_dir: PathBuf::from("/nonexistent"),
+            backend: "cpu".to_owned(),
+            batch_size: None,
+        }
+    }
 
     #[test]
     fn embedding_note_names_the_model_and_truncation_behavior() {
-        let enabled = EmbeddingSummary {
-            enabled: true,
-            model: "sentence-transformers/all-MiniLM-L6-v2".to_owned(),
-        };
-        let note = embedding_note(&enabled);
+        let note = embedding_note(&config(true, "sentence-transformers/all-MiniLM-L6-v2"));
         assert!(note.contains("all-MiniLM-L6-v2"));
         assert!(note.contains("warnings"));
         assert!(note.contains("use_embeddings false"));
 
-        let disabled = EmbeddingSummary {
-            enabled: false,
-            model: "ignored".to_owned(),
-        };
-        assert!(embedding_note(&disabled).contains("FTS5"));
+        assert!(embedding_note(&config(false, "ignored")).contains("FTS5"));
     }
 }

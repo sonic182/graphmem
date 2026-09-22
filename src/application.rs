@@ -10,9 +10,7 @@ use crate::{
         ConfigError, ConfigOverrides, EmbeddingConfig, RetrievalConfig, embedding_config,
         retrieval_config,
     },
-    infrastructure::embedding::{
-        Embedder, EmbeddingDetails, EmbeddingError, EmbeddingModel, embedding_details,
-    },
+    infrastructure::embedding::{Embedder, EmbeddingError, EmbeddingModel},
     infrastructure::sqlite::VectorSink,
 };
 
@@ -80,14 +78,6 @@ pub struct ReembedStats {
     pub entities: usize,
     pub edges: usize,
     pub failures: Vec<String>,
-}
-
-/// The embedding configuration the service is running with, without loading
-/// the model. Surfaced to MCP clients so they know which model ranks their
-/// recall and that long input is truncated before embedding.
-pub struct EmbeddingSummary {
-    pub enabled: bool,
-    pub model: String,
 }
 
 pub struct MemoryService {
@@ -200,18 +190,10 @@ impl MemoryService {
         Ok(self.database.scopes_by_memory(memory_ids)?)
     }
 
-    pub fn embedding_summary(&self) -> EmbeddingSummary {
-        EmbeddingSummary {
-            enabled: self.embedding_config.enabled,
-            model: self.embedding_config.model.clone(),
-        }
-    }
-
-    /// Live embedding metadata, including the model's exact token limit read
-    /// from its `config.json`. Fetches only that file (from cache after the
-    /// model has been used once); reports no limit when embeddings are off.
-    pub fn embedding_details(&self) -> std::result::Result<EmbeddingDetails, EmbeddingError> {
-        embedding_details(&self.embedding_config)
+    /// The embedding configuration the service runs with, so a caller can read
+    /// its metadata without loading the model or holding the service.
+    pub fn embedding_config(&self) -> &EmbeddingConfig {
+        &self.embedding_config
     }
 
     /// Returns and clears any truncation notice accumulated by embedding calls
