@@ -190,6 +190,22 @@ impl MemoryService {
         Ok(self.database.scopes_by_memory(memory_ids)?)
     }
 
+    /// The embedding configuration the service runs with, so a caller can read
+    /// its metadata without loading the model or holding the service.
+    pub fn embedding_config(&self) -> &EmbeddingConfig {
+        &self.embedding_config
+    }
+
+    /// Returns and clears any truncation notice accumulated by embedding calls
+    /// since the previous call. Embeddings ignore content past the model's
+    /// `max_position_embeddings`; callers surface this so a long memory is not
+    /// mistaken for fully embedded.
+    pub fn take_embedding_warning(&self) -> Option<String> {
+        self.embedder
+            .as_ref()
+            .and_then(Embedder::take_truncation_warning)
+    }
+
     pub fn search(
         &mut self,
         query: &str,

@@ -23,6 +23,8 @@ Before investigating or changing code for every substantive task, call `recall` 
 
 Set `use_embeddings: false` only when you need an exact-token lookup, such as a literal symbol, error string, or file path; in that mode the query is lexical: words, quoted phrases, and `prefix*` terms match if any of them does, and BM25 ranks memories that share more of them first; an uppercase `AND`, `OR`, `NOT`, or `NEAR` switches to exact FTS5 syntax (use `AND` to require every word).
 
+A `remember`, `recall`, or `relate` response can include a `warnings` field when an input was longer than the embedding model's token limit and was truncated before embedding. That content did not affect ranking; use `recall` with `use_embeddings: false` to search the full text lexically, or split the memory so each part fits. Read the `gmem://embedding` resource for the active model, revision, and its exact `max_tokens` limit.
+
 Read the result critically. `recall` always returns its best candidates, even when the store holds nothing relevant, and scores are relative within one query rather than an absolute measure of relevance. Treat a result whose score is far below the top one, or whose content does not actually address the task, as "nothing known" and continue from the code.
 
 Do not repeatedly recall the same context within a task. Use `stats` only to diagnose the local store, not as a routine step.

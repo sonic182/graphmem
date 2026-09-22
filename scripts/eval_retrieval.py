@@ -150,7 +150,7 @@ def parse_row(dataset: str, row: dict) -> dict:
                 r"#(\d+)", lambda m: answers[int(m.group(1)) - 1], step["question"]
             )
             answers.append(step["answer"])
-            # ponytail: steps phrased as plain questions (no ">>") have no triple; skipped
+            # steps phrased as plain questions (no ">>") have no triple; skipped
             if " >> " in question and step["paragraph_support_idx"] is not None:
                 subject, relation = question.split(" >> ", 1)
                 triples.append(
@@ -281,7 +281,7 @@ def refine_spacy_graph(
     for key in paragraphs:
         if key in cache:
             frequency.update({canon(name).lower() for name in cache[key]["entities"]})
-    # ponytail: flat document-frequency cap; IDF-weighted seeds in gmem would be the real fix
+    # flat document-frequency cap; IDF-weighted seeds in gmem would be the real fix
     limit = max(2, int(max_df * len(paragraphs))) if max_df > 0 else len(paragraphs)
 
     def keep(name: str) -> bool:
@@ -320,7 +320,7 @@ def graph_arguments(
     """Entities/relations to attach to one paragraph for the given graph."""
     if graph == "mentions":
         title, text = example["titles"][index], example["texts"][index]
-        # ponytail: substring match on the bare title; short titles over-link
+        # substring match on the bare title; short titles over-link
         others = {t for t in example["titles"] if t != title and base_title(t) in text}
         return {
             "entities": [entity(title)],

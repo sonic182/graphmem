@@ -1,9 +1,13 @@
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::{bert, distilbert, qwen3};
-use hf_hub::{Repo, RepoType, api::sync::ApiBuilder};
+use hf_hub::{
+    Repo, RepoType,
+    api::sync::{ApiBuilder, ApiRepo},
+};
 use serde::Deserialize;
 use thiserror::Error;
 use tokenizers::{Tokenizer, TruncationDirection, TruncationParams};
@@ -53,6 +57,8 @@ pub struct Embedder {
     tokenizer: Tokenizer,
     device: Device,
     batch_size: usize,
+    truncation_limit: Option<usize>,
+    truncated: AtomicBool,
     pub model_name: String,
     pub revision: String,
 }
@@ -77,15 +83,7 @@ impl Embedder {
     pub fn load(config: &EmbeddingConfig) -> Result<Self, EmbeddingError> {
         let (device, backend) = select_device(&config.backend)?;
         tracing::info!(model = %config.model, revision = %config.revision, backend, "checking local embedding model cache");
-        let api = ApiBuilder::new()
-            .with_cache_dir(config.cache_dir.clone())
-            .with_progress(false)
-            .build()?;
-        let repository = api.repo(Repo::with_revision(
-            config.model.clone(),
-            RepoType::Model,
-            config.revision.clone(),
-        ));
+        let repository = model_repository(config)?;
         if cached_model_files(config) {
             tracing::info!(model = %config.model, revision = %config.revision, "loading model from cache");
         } else {
@@ -99,9 +97,9 @@ impl Embedder {
         let model_type = serde_json::from_slice::<ModelTypeProbe>(&config_bytes)?.model_type;
         let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
-        if let Some(max_length) =
-            serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings
-        {
+        let truncation_limit =
+            serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings;
+        if let Some(max_length) = truncation_limit {
             tokenizer
                 .with_truncation(Some(TruncationParams {
                     max_length,
@@ -151,6 +149,8 @@ impl Embedder {
             tokenizer,
             device,
             batch_size,
+            truncation_limit,
+            truncated: AtomicBool::new(false),
             model_name: config.model.clone(),
             revision: config.revision.clone(),
         };
@@ -182,7 +182,7 @@ impl Embedder {
         let mut vectors = Vec::with_capacity(documents.len());
         for chunk in documents.chunks(self.batch_size) {
             match &self.backbone {
-                // ponytail: Qwen3 runs one text at a time; candle 0.11's
+                // Qwen3 runs one text at a time; candle 0.11's
                 // causal_mask cannot build a b>1 mask and has no padding mask.
                 Backbone::Qwen3(model) => {
                     for document in chunk {
@@ -201,11 +201,31 @@ impl Embedder {
             .tokenizer
             .encode(text, true)
             .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
+        if !encoding.get_overflowing().is_empty() {
+            self.truncated.store(true, Ordering::Relaxed);
+            tracing::warn!(
+                model = %self.model_name,
+                max_tokens = self.truncation_limit.unwrap_or(0),
+                "embedding input exceeded the model's token limit and was truncated; content past the limit does not affect its embedding"
+            );
+        }
         let ids = encoding.get_ids();
         if ids.is_empty() {
             return Err(EmbeddingError::EmptyEmbedding);
         }
         Ok(ids.to_vec())
+    }
+
+    /// Returns and clears the truncation notice for recent embedding calls.
+    pub fn take_truncation_warning(&self) -> Option<String> {
+        if !self.truncated.swap(false, Ordering::Relaxed) {
+            return None;
+        }
+        let limit = self.truncation_limit.unwrap_or(0);
+        Some(format!(
+            "one or more embedding inputs exceeded the model's {limit}-token limit and were \
+             truncated; content beyond the first {limit} tokens does not affect embeddings"
+        ))
     }
 
     fn embed_qwen3(&self, model: &qwen3::Model, text: &str) -> Result<Vec<f32>, EmbeddingError> {
@@ -311,6 +331,46 @@ fn normalize(vector: Vec<f32>) -> Result<Vec<f32>, EmbeddingError> {
     Ok(vector.into_iter().map(|value| value / norm).collect())
 }
 
+fn model_repository(config: &EmbeddingConfig) -> Result<ApiRepo, EmbeddingError> {
+    let api = ApiBuilder::new()
+        .with_cache_dir(config.cache_dir.clone())
+        .with_progress(false)
+        .build()?;
+    Ok(api.repo(Repo::with_revision(
+        config.model.clone(),
+        RepoType::Model,
+        config.revision.clone(),
+    )))
+}
+
+/// The active embedding configuration with the exact token limit read from
+/// the checkpoint's `config.json`. Reading this fetches (or reads from the
+/// local cache) only `config.json`, not the model weights.
+pub struct EmbeddingDetails {
+    pub enabled: bool,
+    pub model: String,
+    pub revision: String,
+    pub max_tokens: Option<usize>,
+}
+
+pub fn embedding_details(config: &EmbeddingConfig) -> Result<EmbeddingDetails, EmbeddingError> {
+    let mut details = EmbeddingDetails {
+        enabled: config.enabled,
+        model: config.model.clone(),
+        revision: config.revision.clone(),
+        max_tokens: None,
+    };
+    if !config.enabled {
+        return Ok(details);
+    }
+    let repository = model_repository(config)?;
+    let config_path = repository.get("config.json")?;
+    let config_bytes = std::fs::read(config_path)?;
+    details.max_tokens =
+        serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings;
+    Ok(details)
+}
+
 fn cached_model_files(config: &EmbeddingConfig) -> bool {
     let repository = config
         .cache_dir
@@ -370,8 +430,10 @@ impl EmbeddingModel for Embedder {
 mod tests {
     use std::path::Path;
 
-    use super::{Embedder, qwen_embedding_weight_name};
-    use crate::infrastructure::config::{ConfigOverrides, embedding_config};
+    use std::path::PathBuf;
+
+    use super::{Embedder, embedding_details, qwen_embedding_weight_name};
+    use crate::infrastructure::config::{ConfigOverrides, EmbeddingConfig, embedding_config};
 
     /// Loads the configured model from `GRAPHMEM_EMBEDDING_CACHE_DIR`, or the
     /// repository's `.data/models` cache used by the eval script.
@@ -398,6 +460,30 @@ mod tests {
             let cosine: f32 = single.iter().zip(vector).map(|(a, b)| a * b).sum();
             assert!(cosine > 0.999, "{document}: cosine {cosine}");
         }
+        assert!(embedder.take_truncation_warning().is_none());
+        let long = "token ".repeat(600);
+        embedder.embed_document(&long).unwrap();
+        let warning = embedder
+            .take_truncation_warning()
+            .expect("long input warns about truncation");
+        assert!(warning.contains("512"), "{warning}");
+        assert!(embedder.take_truncation_warning().is_none());
+    }
+
+    #[test]
+    fn disabled_embeddings_report_no_token_limit_without_fetching() {
+        let config = EmbeddingConfig {
+            enabled: false,
+            model: "some/model".to_owned(),
+            revision: "main".to_owned(),
+            cache_dir: PathBuf::from("/nonexistent"),
+            backend: "cpu".to_owned(),
+            batch_size: None,
+        };
+        let details = embedding_details(&config).unwrap();
+        assert!(!details.enabled);
+        assert_eq!(details.model, "some/model");
+        assert_eq!(details.max_tokens, None);
     }
 
     #[test]

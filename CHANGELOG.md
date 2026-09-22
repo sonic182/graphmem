@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-22
+
+### Added
+
+- `warnings` field on the `remember`, `recall`, and `relate` responses, set
+  when an input was longer than the embedding model's token limit and was
+  truncated before embedding. Truncation was silent before, so an agent could
+  store a long memory and never learn that only its first tokens affect
+  ranking. The field is omitted when nothing was truncated, and each truncated
+  document is also logged as a warning.
+- `gmem://embedding` MCP resource, returning the active model, revision, and
+  the exact `max_tokens` read from the checkpoint's `config.json`. Only that
+  file is fetched, from the local cache once the model has been used, and
+  `max_tokens` is null when embeddings are disabled.
+- The `initialize` instructions now name the active embedding model, or report
+  that embeddings are disabled and recall is lexical.
+
 ## [0.2.0] - 2026-09-22
 
 ### Added
@@ -53,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/sonic182/graphmem/releases/tag/v0.2.0
-[0.1.1]: https://github.com/sonic182/graphmem/commits/master
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/sonic182/graphmem/releases/tag/0.3.0
+[0.2.0]: https://github.com/sonic182/graphmem/releases/tag/0.2.0
+[0.1.1]: https://github.com/sonic182/graphmem/releases/tag/0.1.1

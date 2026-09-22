@@ -83,7 +83,7 @@ def extract(doc: Doc, title: str) -> tuple[list[str], list[list[str]]]:
             entities.setdefault(name.lower(), name)
 
     def name_of(token: Token) -> str | None:
-        # ponytail: heuristic coreference; in Wikipedia a pronoun subject is usually the title
+        # heuristic coreference; in Wikipedia a pronoun subject is usually the title
         if token.dep_ in SUBJECTS and token.lower_ in PRONOUNS:
             return title
         span = next((span for span in spans if span.start <= token.i < span.end), None)
