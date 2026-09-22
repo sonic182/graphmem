@@ -750,3 +750,109 @@ fn recall_filters_by_memory_type() {
     drop(mcp);
     fs::remove_dir_all(home).expect("MCP test data is removed");
 }
+
+#[test]
+fn id_addressed_tools_cannot_reach_another_repositorys_memory() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-scope-guard-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let home = root.join("home");
+    let (first, second) = (root.join("first"), root.join("second"));
+    for repository in [&first, &second] {
+        fs::create_dir_all(repository).expect("test repository is created");
+        assert!(
+            Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(repository)
+                .status()
+                .expect("git is available")
+                .success()
+        );
+    }
+
+    // Store one memory in the first repository's scope, and one global.
+    let mut mcp = Mcp::start_in(&home, &first);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let private = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"first repository secret"}}),
+    );
+    let private_id = private["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("private id");
+    let shared = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"shared note","scopes":["global"]}}),
+    );
+    let shared_id = shared["result"]["structuredContent"]["id"]
+        .as_i64()
+        .expect("shared id");
+    drop(mcp);
+
+    // A server started in the second repository shares the store, so the ids
+    // are guessable; every id-addressed tool must still refuse the first
+    // repository's memory.
+    let mut mcp = Mcp::start_in(&home, &second);
+    mcp.request(
+        4,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    for (id, tool, arguments) in [
+        (5, "inspect", json!({"id": private_id})),
+        (
+            6,
+            "update",
+            json!({"id": private_id, "content": "overwritten from the second repository"}),
+        ),
+        (7, "forget", json!({"id": private_id})),
+    ] {
+        let response = mcp.request(id, "tools/call", json!({"name":tool,"arguments":arguments}));
+        assert_eq!(
+            response["result"]["isError"], true,
+            "{tool} reached another repository's memory"
+        );
+    }
+
+    // Global memories stay reachable from either repository.
+    let inspected = mcp.request(
+        8,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":shared_id}}),
+    );
+    assert_eq!(
+        inspected["result"]["structuredContent"]["content"],
+        "shared note"
+    );
+    drop(mcp);
+
+    // The refused calls changed nothing.
+    let mut mcp = Mcp::start_in(&home, &first);
+    mcp.request(
+        9,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let intact = mcp.request(
+        10,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":private_id}}),
+    );
+    assert_eq!(
+        intact["result"]["structuredContent"]["content"],
+        "first repository secret"
+    );
+    drop(mcp);
+    fs::remove_dir_all(root).expect("MCP test data is removed");
+}

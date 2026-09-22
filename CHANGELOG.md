@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `memory_type` filter on `recall`, applied before ranking and matched without
   regard to case. A filtered-out memory neither seeds nor propagates graph
   rank, and the filter works on both the semantic and the lexical path.
+- Scope enforcement on the id-addressed tools. `inspect`, `update`, and
+  `forget` now reach only a memory that has no scopes, a `global` memory, or
+  one in the server's own repository scope, and report `memory not found`
+  otherwise. Ids are allocated across the whole store, so before this an agent
+  in one repository could read, overwrite, or delete another repository's
+  memory by guessing an id, despite recall's scope isolation. The `gmem` CLI
+  stays unrestricted.
 - The **What** / **Why** / **Where** / **Learned** shape for durable saves,
   documented in the `graphmem-mcp-for-dev` skill and in the session guidance
   the Claude Code, OpenCode, and pi plugins inject.
@@ -32,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `update` instead of storing a duplicate, and names the `memory_type`
   vocabulary (`decision`, `convention`, `constraint`, `incident`,
   `observation`) that the new recall filter matches on.
+- An update that changes only `memory_type` or `importance` no longer loads the
+  embedding model and no longer discards the stored vector. Neither field is
+  part of the embedded document, so such a change used to fail when the model
+  was unavailable, and drop a still-valid vector when embeddings were disabled.
 - `Database::update_memory` is now a wrapper over `update_memory_with_vector`,
   mirroring how `remember_with_graph` wraps `remember_with_graph_and_vectors`.
 

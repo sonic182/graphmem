@@ -210,6 +210,41 @@ impl Database {
         Ok(stored.memory)
     }
 
+    /// Whether the memory is reachable from `scopes`, using the same
+    /// membership rule recall applies: a memory with no scopes at all, a
+    /// `global` memory, or one attached to a listed scope. Operations that
+    /// take a bare id go through this so a caller in one repository cannot
+    /// reach another repository's memory by guessing a globally allocated id.
+    pub fn memory_in_scopes(&self, id: i64, scopes: &[String]) -> Result<bool> {
+        let scopes = normalized_scopes(scopes)?;
+        let placeholders = (0..scopes.len())
+            .map(|index| format!("?{}", index + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT EXISTS (
+                 SELECT 1 FROM memories m
+                 WHERE m.id = ?1
+                   AND (NOT EXISTS (
+                       SELECT 1 FROM memory_scopes ms WHERE ms.memory_id = m.id
+                   ) OR EXISTS (
+                       SELECT 1 FROM memory_scopes ms
+                       JOIN scopes s ON s.id = ms.scope_id
+                       WHERE ms.memory_id = m.id
+                         AND (s.name = 'global' OR s.name IN ({placeholders}))
+                   ))
+             )"
+        );
+        let mut values = vec![rusqlite::types::Value::Integer(id)];
+        values.extend(scopes.into_iter().map(rusqlite::types::Value::Text));
+        Ok(self
+            .connection
+            .query_row(&sql, rusqlite::params_from_iter(values), |row| {
+                row.get::<_, i64>(0)
+            })?
+            == 1)
+    }
+
     pub fn get_memory(&self, id: i64) -> Result<Option<Memory>> {
         self.connection
             .query_row(
@@ -233,10 +268,11 @@ impl Database {
         self.update_memory_with_vector::<StorageError>(id, content, memory_type, importance, None)
     }
 
-    /// Replaces a memory's fields and, when `vectors` is given, its embedding.
-    /// Everything commits together, so a failed embedding changes nothing.
-    /// Without a sink the stale vector is dropped instead, and recall embeds
-    /// the new content on its next semantic pass.
+    /// Replaces a memory's fields and, when the content changed and `vectors`
+    /// is given, its embedding. Everything commits together, so a failed
+    /// embedding changes nothing. Without a sink the stale vector is dropped
+    /// instead, and recall embeds the new content on its next semantic pass.
+    /// A metadata-only change keeps the existing vector and never embeds.
     pub fn update_memory_with_vector<E: From<StorageError>>(
         &mut self,
         id: i64,
@@ -251,7 +287,16 @@ impl Database {
 
         let timestamp = now_millis()?;
         let transaction = self.connection.transaction().map_err(StorageError::from)?;
-        let changed = transaction
+        let stored: Option<String> = transaction
+            .query_row("SELECT content FROM memories WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(StorageError::from)?;
+        let Some(stored) = stored else {
+            return Ok(false);
+        };
+        transaction
             .execute(
                 "UPDATE memories
                  SET content = ?2, memory_type = ?3, importance = ?4, updated_at = ?5
@@ -259,8 +304,11 @@ impl Database {
                 params![id, content, memory_type.trim(), importance, timestamp],
             )
             .map_err(StorageError::from)?;
-        if changed != 1 {
-            return Ok(false);
+        // memory_type and importance are not part of the embedded document, so
+        // a metadata-only update keeps the vector it already has.
+        if stored == content {
+            transaction.commit().map_err(StorageError::from)?;
+            return Ok(true);
         }
         transaction
             .execute("DELETE FROM memory_embeddings WHERE memory_id = ?1", [id])

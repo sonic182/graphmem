@@ -162,13 +162,28 @@ impl MemoryService {
         }
     }
 
-    pub fn show(&self, id: i64) -> Result<MemoryDetails> {
+    /// `scopes` restricts the memory to one reachable from them, as recall
+    /// does; `None` reaches any memory, which is what the human CLI wants.
+    pub fn show(&self, id: i64, scopes: Option<&[String]>) -> Result<MemoryDetails> {
+        self.ensure_in_scopes(id, scopes)?;
         let memory = self
             .database
             .get_memory(id)?
             .ok_or(ApplicationError::NotFound("memory"))?;
         let scopes = self.database.list_memory_scopes(id)?;
         Ok(MemoryDetails { memory, scopes })
+    }
+
+    /// The one guard every id-addressed operation routes through. A memory
+    /// outside `scopes` reports `NotFound` rather than a distinct refusal, so
+    /// a caller in another repository cannot probe for ids that exist.
+    fn ensure_in_scopes(&self, id: i64, scopes: Option<&[String]>) -> Result<()> {
+        match scopes {
+            Some(scopes) if !self.database.memory_in_scopes(id, scopes)? => {
+                Err(ApplicationError::NotFound("memory"))
+            }
+            _ => Ok(()),
+        }
     }
 
     pub fn scopes_for(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Scope>>> {
@@ -399,21 +414,42 @@ impl MemoryService {
     /// Replaces the fields that are `Some` and keeps the rest. Changed content
     /// is re-embedded in the same transaction as the update, so a model that
     /// cannot load or embed leaves the memory untouched, exactly as `remember`
-    /// stores nothing on an embedding failure.
+    /// stores nothing on an embedding failure. A change that leaves the content
+    /// alone never loads the model and keeps the stored vector. `scopes`
+    /// restricts which memory the id may address; see `ensure_in_scopes`.
     pub fn update(
         &mut self,
         id: i64,
         content: Option<String>,
         memory_type: Option<String>,
         importance: Option<f64>,
+        scopes: Option<&[String]>,
     ) -> Result<Memory> {
+        self.ensure_in_scopes(id, scopes)?;
         let current = self
             .database
             .get_memory(id)?
             .ok_or(ApplicationError::NotFound("memory"))?;
-        let content = content.unwrap_or(current.content);
+        let stored_content = current.content;
+        let content = content.unwrap_or_else(|| stored_content.clone());
         let memory_type = memory_type.unwrap_or(current.memory_type);
         let importance = importance.unwrap_or(current.importance);
+
+        // memory_type and importance are not part of the embedded document, so
+        // a metadata-only change must not need the model, and must not throw
+        // away a vector that is still correct.
+        if content == stored_content {
+            if !self
+                .database
+                .update_memory(id, &content, &memory_type, importance)?
+            {
+                return Err(ApplicationError::NotFound("memory"));
+            }
+            return self
+                .database
+                .get_memory(id)?
+                .ok_or(ApplicationError::NotFound("memory"));
+        }
 
         let Self {
             database,
@@ -442,7 +478,8 @@ impl MemoryService {
             .ok_or(ApplicationError::NotFound("memory"))
     }
 
-    pub fn forget(&self, id: i64) -> Result<()> {
+    pub fn forget(&self, id: i64, scopes: Option<&[String]>) -> Result<()> {
+        self.ensure_in_scopes(id, scopes)?;
         if self.database.delete_memory(id)? {
             Ok(())
         } else {
@@ -1082,6 +1119,86 @@ mod tests {
             .expect("updated memory is re-embedded");
         assert_ne!(before, after);
         drop(database);
+        fs::remove_dir_all(root).expect("test database is removed");
+    }
+
+    #[test]
+    fn metadata_only_update_keeps_the_vector_and_never_loads_the_model() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "graphmem-metadata-update-test-{}-{nonce}",
+            std::process::id()
+        ));
+        let mut service = MemoryService {
+            database: Database::open(&root.join("memory.sqlite")).expect("database opens"),
+            retrieval_config: RetrievalConfig::default(),
+            embedding_config: EmbeddingConfig {
+                // Loading this model would fail (and try to download it), so a
+                // metadata-only update reaching the embedder cannot pass here.
+                enabled: true,
+                model: "missing-model".to_owned(),
+                revision: "main".to_owned(),
+                cache_dir: root.join("models"),
+                backend: "cpu".to_owned(),
+                batch_size: None,
+            },
+            embedder: None,
+        };
+        let memory = service
+            .database
+            .remember_with_graph(
+                "retry the upload",
+                "fact",
+                0.0,
+                &["global".to_owned()],
+                &[],
+                &[],
+            )
+            .expect("memory is stored");
+        service
+            .database
+            .store_memory_embedding(memory.id, "test-model", "r", &[1.0, 0.0])
+            .expect("memory is embedded");
+
+        let updated = service
+            .update(
+                memory.id,
+                None,
+                Some("decision".to_owned()),
+                Some(0.9),
+                None,
+            )
+            .expect("a metadata-only update does not need the model");
+
+        assert_eq!(updated.content, "retry the upload");
+        assert_eq!(updated.memory_type, "decision");
+        assert_eq!(updated.importance, 0.9);
+        assert!(updated.updated_at >= memory.updated_at);
+        assert_eq!(
+            service
+                .database
+                .memory_embedding(memory.id, "test-model", "r")
+                .unwrap(),
+            Some(vec![1.0, 0.0]),
+            "a category or importance change must not discard a valid vector"
+        );
+
+        // Changing the content does still invalidate the vector.
+        service
+            .database
+            .update_memory(memory.id, "drop the upload queue", "decision", 0.9)
+            .expect("content is updated");
+        assert_eq!(
+            service
+                .database
+                .memory_embedding(memory.id, "test-model", "r")
+                .unwrap(),
+            None
+        );
+        drop(service);
         fs::remove_dir_all(root).expect("test database is removed");
     }
 

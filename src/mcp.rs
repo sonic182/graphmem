@@ -285,7 +285,7 @@ impl MemoryServer {
             })
             .map_err(|error| tool_error(error.to_string()))?;
         let details = service
-            .show(memory.id)
+            .show(memory.id, None)
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
@@ -394,8 +394,9 @@ impl MemoryServer {
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
         let id = input.id;
+        let scopes = self.scopes(Vec::new());
         self.lock()?
-            .forget(id)
+            .forget(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(ForgetOutput {
             id,
@@ -416,12 +417,19 @@ impl MemoryServer {
         Parameters(input): Parameters<UpdateInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
+        let scopes = self.scopes(Vec::new());
         let mut service = self.lock()?;
         service
-            .update(id, input.content, input.memory_type, input.importance)
+            .update(
+                id,
+                input.content,
+                input.memory_type,
+                input.importance,
+                Some(&scopes),
+            )
             .map_err(|error| tool_error(error.to_string()))?;
         let details = service
-            .show(id)
+            .show(id, None)
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
@@ -435,9 +443,10 @@ impl MemoryServer {
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
+        let scopes = self.scopes(Vec::new());
         let details = self
             .lock()?
-            .show(id)
+            .show(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
