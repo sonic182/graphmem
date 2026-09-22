@@ -7,16 +7,22 @@ use graphmem::{
     Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
     StoreStats,
     application::{
-        GraphDetails, GraphRequest, MemoryService, RelateRequest, RelationDetails, RememberRequest,
+        EmbeddingSummary, GraphDetails, GraphRequest, MemoryService, RelateRequest,
+        RelationDetails, RememberRequest,
     },
     infrastructure::config::ConfigOverrides,
     infrastructure::repository::git_repository_root,
 };
 use rmcp::schemars::JsonSchema;
 use rmcp::{
-    Json, ServerHandler, ServiceExt,
+    ErrorData as McpError, Json, RoleServer, ServerHandler, ServiceExt,
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo},
+    model::{
+        CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
+        ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+        ResourceContents, ServerCapabilities, ServerInfo,
+    },
+    service::{MaybeSendFuture, RequestContext},
     tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
@@ -31,13 +37,17 @@ pub async fn run(overrides: ConfigOverrides) -> Result<(), Box<dyn std::error::E
 pub struct MemoryServer {
     memory: Mutex<MemoryService>,
     default_scope: String,
+    embedding: EmbeddingSummary,
 }
 
 impl MemoryServer {
     fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
+        let service = MemoryService::open_default(overrides)?;
+        let embedding = service.embedding_summary();
         Ok(Self {
-            memory: Mutex::new(MemoryService::open_default(overrides)?),
+            memory: Mutex::new(service),
             default_scope: current_scope(),
+            embedding,
         })
     }
 
@@ -202,11 +212,17 @@ struct MemoryRecord {
     scopes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     score: Option<f64>,
+    /// Set when an embedding had to truncate its input to the model's token
+    /// limit, so content past the limit did not affect ranking.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct RecallOutput {
     memories: Vec<MemoryRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -249,6 +265,8 @@ struct RelationOutput {
     source: EntityRecord,
     edge: EdgeRecord,
     target: EntityRecord,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -275,7 +293,9 @@ impl MemoryServer {
         name = "remember",
         description = "Store a narrative memory. Optional entities and directed relations connect \
              it to the graph for graph-assisted recall. Repeated relations reuse the existing \
-             edge. Omit scopes to use the server's default scope."
+             edge. Omit scopes to use the server's default scope. Content longer than the \
+             embedding model's token limit is truncated before embedding; the response's warnings \
+             field reports when that happens."
     )]
     fn remember(
         &self,
@@ -296,10 +316,13 @@ impl MemoryServer {
                 relations: input.relations.into_iter().map(relation).collect(),
             })
             .map_err(|error| tool_error(error.to_string()))?;
+        let warning = service.take_embedding_warning();
         let details = service
             .show(memory.id, None)
             .map_err(|error| tool_error(error.to_string()))?;
-        Ok(Json(record(details.memory, details.scopes, None)))
+        let mut record = record(details.memory, details.scopes, None);
+        record.warnings = warning.into_iter().collect();
+        Ok(Json(record))
     }
 
     #[tool(
@@ -308,7 +331,8 @@ impl MemoryServer {
              relations by meaning, then propagates rank along graph edges. Scores are relative \
              within a query. Scope filtering happens before ranking, so out-of-scope memory is \
              never returned. If the embedding model cannot load, recall falls back to lexical \
-             ranking."
+             ranking. When embedding input was truncated to the model's token limit, the response \
+             includes a warnings field; use use_embeddings false to rank the full text lexically."
     )]
     fn recall(
         &self,
@@ -326,6 +350,7 @@ impl MemoryServer {
                 input.memory_type.as_deref(),
             )
             .map_err(|error| tool_error(error.to_string()))?;
+        let warning = service.take_embedding_warning();
         let memory_ids = results
             .iter()
             .map(|result| result.memory.id)
@@ -342,7 +367,10 @@ impl MemoryServer {
                 record(result.memory, scopes, Some(result.score))
             })
             .collect::<Vec<_>>();
-        Ok(Json(RecallOutput { memories }))
+        Ok(Json(RecallOutput {
+            memories,
+            warnings: warning.into_iter().collect(),
+        }))
     }
 
     #[tool(
@@ -370,8 +398,8 @@ impl MemoryServer {
         &self,
         Parameters(input): Parameters<RelateInput>,
     ) -> Result<Json<RelationOutput>, CallToolResult> {
-        let details = self
-            .lock()?
+        let mut service = self.lock()?;
+        let details = service
             .relate(RelateRequest {
                 source: entity_reference(input.source),
                 relation: input.relation,
@@ -379,7 +407,10 @@ impl MemoryServer {
                 metadata: input.metadata,
             })
             .map_err(|error| tool_error(error.to_string()))?;
-        Ok(Json(relation_output(details)))
+        let warning = service.take_embedding_warning();
+        let mut output = relation_output(details);
+        output.warnings = warning.into_iter().collect();
+        Ok(Json(output))
     }
 
     #[tool(
@@ -480,15 +511,98 @@ impl MemoryServer {
 #[tool_handler(name = "gmem", version = "0.1.0")]
 impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("gmem", "0.1.0"))
-            .with_instructions(
-                "Graphmem has two separate local stores: scoped narrative memory and an \
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_server_info(Implementation::new("gmem", "0.1.0"))
+        .with_instructions(format!(
+            "Graphmem has two separate local stores: scoped narrative memory and an \
                  unscoped entity graph. Omitted scopes use the Git repository containing the \
                  server's startup working directory and include global memories during recall; \
                  outside a Git repository they use global. Pass global or \
-                 repo:/absolute/path to choose a scope.",
-            )
+                 repo:/absolute/path to choose a scope. {}",
+            embedding_note(&self.embedding)
+        ))
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourcesResult, McpError>> + MaybeSendFuture + '_ {
+        std::future::ready(Ok(ListResourcesResult::with_all_items(vec![
+            Resource::new(EMBEDDING_RESOURCE_URI, "embedding")
+                .with_description(
+                    "Active embedding model and the exact token limit it truncates input to",
+                )
+                .with_mime_type("application/json"),
+        ])))
+    }
+
+    fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ReadResourceResponse, McpError>> + MaybeSendFuture + '_ {
+        // the config.json fetch blocks the async worker on first read;
+        // move to spawn_blocking if resource reads ever share a busy runtime.
+        std::future::ready(self.read_embedding_resource(&request.uri))
+    }
+}
+
+const EMBEDDING_RESOURCE_URI: &str = "gmem://embedding";
+
+impl MemoryServer {
+    fn read_embedding_resource(
+        &self,
+        uri: &str,
+    ) -> std::result::Result<ReadResourceResponse, McpError> {
+        if uri != EMBEDDING_RESOURCE_URI {
+            return Err(McpError::invalid_params(
+                format!("unknown resource: {uri}"),
+                None,
+            ));
+        }
+        let details = self
+            .memory
+            .lock()
+            .map_err(|_| McpError::internal_error("memory service lock is poisoned", None))?
+            .embedding_details()
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        let body = serde_json::to_string_pretty(&serde_json::json!({
+            "enabled": details.enabled,
+            "model": details.model,
+            "revision": details.revision,
+            "max_tokens": details.max_tokens,
+        }))
+        .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(body, uri).with_mime_type("application/json"),
+        ])
+        .into())
+    }
+}
+
+/// Tells an MCP client which model ranks recall and how long input is handled,
+/// so it can interpret `warnings` and prefer lexical search when it needs
+/// content past the model's token limit.
+fn embedding_note(embedding: &EmbeddingSummary) -> String {
+    if embedding.enabled {
+        format!(
+            "Recall embeds memories, entities, and relations with {}; input longer than the \
+             model's max_position_embeddings (512 tokens for MiniLM checkpoints) is truncated \
+             before embedding, so content past that limit does not affect ranking. remember, \
+             recall, and relate report truncation in their warnings field; for exact-token lookup \
+             of long content use recall with use_embeddings false, which ranks the full text \
+             lexically. Read the {} resource for the active model and its exact token limit.",
+            embedding.model, EMBEDDING_RESOURCE_URI
+        )
+    } else {
+        "Embeddings are disabled; recall ranks the full text with SQLite FTS5 lexical search."
+            .to_owned()
     }
 }
 
@@ -504,6 +618,7 @@ fn record(memory: Memory, scopes: Vec<Scope>, score: Option<f64>) -> MemoryRecor
         access_count: memory.access_count,
         scopes: scopes.into_iter().map(|scope| scope.name).collect(),
         score,
+        warnings: Vec::new(),
     }
 }
 
@@ -584,6 +699,7 @@ fn relation_output(details: RelationDetails) -> RelationOutput {
         source: entity_record(details.source),
         edge: edge_record(details.edge),
         target: entity_record(details.target),
+        warnings: Vec::new(),
     }
 }
 
@@ -635,4 +751,28 @@ fn current_scope() -> String {
     git_repository_root()
         .and_then(|path| path.to_str().map(|path| format!("repo:{path}")))
         .unwrap_or_else(|| "global".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::embedding_note;
+    use graphmem::application::EmbeddingSummary;
+
+    #[test]
+    fn embedding_note_names_the_model_and_truncation_behavior() {
+        let enabled = EmbeddingSummary {
+            enabled: true,
+            model: "sentence-transformers/all-MiniLM-L6-v2".to_owned(),
+        };
+        let note = embedding_note(&enabled);
+        assert!(note.contains("all-MiniLM-L6-v2"));
+        assert!(note.contains("warnings"));
+        assert!(note.contains("use_embeddings false"));
+
+        let disabled = EmbeddingSummary {
+            enabled: false,
+            model: "ignored".to_owned(),
+        };
+        assert!(embedding_note(&disabled).contains("FTS5"));
+    }
 }

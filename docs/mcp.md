@@ -67,10 +67,18 @@ scopes must be `global` or an absolute `repo:` path.
 
 Embeddings default to `sentence-transformers/msmarco-MiniLM-L6-cos-v5` through Candle. The model is
 downloaded and loaded on first use (the first `remember`, `relate`, or
-`recall`) and cached under `models/` in the Graphmem data directory. Content is silently truncated to the model's
+`recall`) and cached under `models/` in the Graphmem data directory. Content is truncated to the model's
 `max_position_embeddings` (512 tokens for the default model) before
 embedding, so only the first ~512 tokens of a very long memory, entity, or
-edge document affect its embedding. To disable embeddings and retain SQLite
+edge document affect its embedding. The `initialize` response's instructions
+name the active model (or report embeddings disabled), and the
+`gmem://embedding` resource returns the active model, revision, and the exact
+`max_tokens` limit read from its `config.json` (only that file is fetched, from
+cache once present; `max_tokens` is null when embeddings are disabled).
+Truncation is logged as
+a warning and reported back in the `warnings` field of the `remember`,
+`recall`, and `relate` responses (omitted when nothing was truncated). To
+disable embeddings and retain SQLite
 FTS5 lexical ranking, use either:
 
 ```toml

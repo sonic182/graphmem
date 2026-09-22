@@ -84,6 +84,7 @@ fn serves_memory_lifecycle_over_stdio() {
     assert!(instructions.contains("startup working directory"));
     assert!(instructions.contains("two separate local stores"));
     assert!(instructions.contains("unscoped entity graph"));
+    assert!(instructions.contains("Embeddings are disabled"));
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
@@ -138,6 +139,22 @@ fn serves_memory_lifecycle_over_stdio() {
             .unwrap()
             .contains("Counts only")
     );
+
+    let resources = mcp.request(90, "resources/list", json!({}));
+    let listed_resources = resources["result"]["resources"]
+        .as_array()
+        .expect("resource list");
+    assert_eq!(listed_resources[0]["uri"], "gmem://embedding");
+    assert_eq!(listed_resources[0]["mimeType"], "application/json");
+
+    let read = mcp.request(91, "resources/read", json!({"uri":"gmem://embedding"}));
+    let text = read["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("resource text");
+    let details: Value = serde_json::from_str(text).expect("resource text is JSON");
+    assert_eq!(details["enabled"], false);
+    assert!(details["max_tokens"].is_null());
+    assert!(details["model"].as_str().unwrap().contains("MiniLM"));
 
     let invalid = mcp.request(
         8,
