@@ -11,7 +11,7 @@ Graphmem is a local memory service for agents and developer tools. It stores sco
 - Verified entities and directed relations attached atomically to memories.
 - Local `sentence-transformers/msmarco-MiniLM-L6-cos-v5` embeddings through Candle.
 - CUDA, CPU, or automatic backend selection.
-- MCP server over stdio with `remember`, `recall`, `stats`, `relate`, `graph`, `inspect`, and `forget` tools.
+- MCP server over stdio with `remember`, `recall`, `update`, `stats`, `relate`, `graph`, `inspect`, and `forget` tools.
 - `recall` accepts `use_embeddings: false` to force lexical FTS5 ranking.
 
 ## Install

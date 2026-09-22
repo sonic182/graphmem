@@ -99,6 +99,12 @@ struct RecallInput {
     /// embeddings.
     #[serde(default)]
     use_embeddings: Option<bool>,
+    /// Optional filter on the memory's category, applied before ranking.
+    /// Matching ignores case. Use the value stored by remember, such as
+    /// decision, convention, constraint, incident, or observation; a category
+    /// nothing was stored under returns no memories.
+    #[serde(default)]
+    memory_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -154,6 +160,21 @@ struct GraphInput {
 struct IdInput {
     /// Memory id, as returned by recall or remember.
     id: i64,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct UpdateInput {
+    /// Memory id, as returned by recall or remember.
+    id: i64,
+    /// Replacement content. Omit to keep the stored content.
+    #[serde(default)]
+    content: Option<String>,
+    /// Replacement category. Omit to keep the stored one.
+    #[serde(default)]
+    memory_type: Option<String>,
+    /// Replacement importance from 0.0 to 1.0. Omit to keep the stored one.
+    #[serde(default)]
+    importance: Option<f64>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -290,6 +311,7 @@ impl MemoryServer {
                 &scopes,
                 input.limit.unwrap_or(10),
                 input.use_embeddings.unwrap_or(true),
+                input.memory_type.as_deref(),
             )
             .map_err(|error| tool_error(error.to_string()))?;
         let memory_ids = results
@@ -379,6 +401,29 @@ impl MemoryServer {
             id,
             forgotten: true,
         }))
+    }
+
+    #[tool(
+        name = "update",
+        description = "Revise one memory in place by id. Fields you pass replace the stored \
+             ones; fields you omit are kept. Prefer this over storing a second memory when a \
+             decision or convention has changed. Scopes, entities, and relations are left \
+             untouched; changed content is re-embedded in the same transaction, so a failed \
+             embedding changes nothing."
+    )]
+    fn update(
+        &self,
+        Parameters(input): Parameters<UpdateInput>,
+    ) -> Result<Json<MemoryRecord>, CallToolResult> {
+        let id = input.id;
+        let mut service = self.lock()?;
+        service
+            .update(id, input.content, input.memory_type, input.importance)
+            .map_err(|error| tool_error(error.to_string()))?;
+        let details = service
+            .show(id)
+            .map_err(|error| tool_error(error.to_string()))?;
+        Ok(Json(record(details.memory, details.scopes, None)))
     }
 
     #[tool(

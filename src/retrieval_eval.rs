@@ -182,6 +182,7 @@ impl Fixture {
             query,
             Some(&[SCOPE.to_owned()]),
             10,
+            None,
         )
         .expect("semantic recall succeeds")
         .expect("semantic recall has seeds");

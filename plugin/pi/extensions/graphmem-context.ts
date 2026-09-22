@@ -8,11 +8,13 @@ Recall: before investigating or changing code for a substantive task (coding, de
 
 Read the result critically: a weak or off-topic result means "nothing known" - continue from the code rather than treating it as fact.
 
-Remember: after verifying a durable decision, convention, constraint, or resolved failure cause, call \`remember\` with a concise self-contained statement and attach its \`entities\` (and \`relations\`) in the same call. Recall the topic first and update your understanding instead of storing a duplicate.
+Remember: after verifying a durable decision, convention, constraint, or resolved failure cause, call \`remember\` with a self-contained statement and attach its \`entities\` (and \`relations\`) in the same call. Shape a durable save as \`**What**\` (the fact or decision), \`**Why**\` (what motivated it), \`**Where**\` (files or components affected), and \`**Learned**\` (the gotcha, omit if none); a single fact may stay one line.
+
+Update, do not duplicate: recall the topic first, and when a stored memory is now wrong or superseded, call \`update\` with its \`id\` instead of storing a competing second one.
 
 Skip both for logistical or no-code requests, and when Graphmem is unavailable. Never store secrets, private data, speculation, temporary progress updates, raw debugging output, or source code that can be read from the repository.
 
-Load the \`graphmem-mcp-for-dev\` skill for the full contract before storing anything, or before using \`relate\`, \`graph\`, \`inspect\`, or \`forget\`.`;
+Load the \`graphmem-mcp-for-dev\` skill for the full contract before storing anything, or before using \`update\`, \`relate\`, \`graph\`, \`inspect\`, or \`forget\`.`;
 
 export default function (pi: ExtensionAPI) {
   let injected = false;

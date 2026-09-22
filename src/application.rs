@@ -182,7 +182,7 @@ impl MemoryService {
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
         let scopes = scope.map(|scope| vec![scope.to_owned()]);
-        self.search_with_scopes(query, scopes.as_deref(), limit)
+        self.search_with_scopes(query, scopes.as_deref(), limit, None)
     }
 
     pub fn search_scopes(
@@ -191,7 +191,7 @@ impl MemoryService {
         scopes: &[String],
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
-        self.search_scopes_with_embeddings(query, scopes, limit, true)
+        self.search_scopes_with_embeddings(query, scopes, limit, true, None)
     }
 
     pub fn search_scopes_with_embeddings(
@@ -200,6 +200,7 @@ impl MemoryService {
         scopes: &[String],
         limit: usize,
         use_embeddings: bool,
+        memory_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         let scopes = if scopes.is_empty() {
             vec!["global".to_owned()]
@@ -207,25 +208,29 @@ impl MemoryService {
             scopes.to_vec()
         };
         if use_embeddings {
-            self.search_with_scopes(query, Some(&scopes), limit)
+            self.search_with_scopes(query, Some(&scopes), limit, memory_type)
         } else {
-            self.lexical_search(query, Some(&scopes), limit)
+            self.lexical_search(query, Some(&scopes), limit, memory_type)
         }
     }
 
+    /// `memory_type` narrows the candidates before ranking, like the scope
+    /// filter. It applies to the scoped path only; `scopes: None` searches
+    /// every memory and ignores it.
     fn search_with_scopes(
         &mut self,
         query: &str,
         scopes: Option<&[String]>,
         limit: usize,
+        memory_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
-        match self.semantic_search(query, scopes, limit) {
+        match self.semantic_search(query, scopes, limit, memory_type) {
             Ok(Some(results)) => Ok(results),
-            Ok(None) => self.lexical_search(query, scopes, limit),
+            Ok(None) => self.lexical_search(query, scopes, limit, memory_type),
             Err(SemanticError::Embedding(error)) => {
                 tracing::warn!(%error, "embedding unavailable; using lexical recall");
                 eprintln!("embedding unavailable; using lexical recall: {error}");
-                self.lexical_search(query, scopes, limit)
+                self.lexical_search(query, scopes, limit, memory_type)
             }
             Err(SemanticError::Storage(error)) => Err(error.into()),
         }
@@ -236,6 +241,7 @@ impl MemoryService {
         query: &str,
         scopes: Option<&[String]>,
         limit: usize,
+        memory_type: Option<&str>,
     ) -> std::result::Result<Option<Vec<SearchResult>>, SemanticError> {
         let Self {
             database,
@@ -249,7 +255,15 @@ impl MemoryService {
             Ok(None) => return Ok(None),
             Err(error) => return Err(error.into()),
         };
-        semantic_results(database, embedder, retrieval_config, query, scopes, limit)
+        semantic_results(
+            database,
+            embedder,
+            retrieval_config,
+            query,
+            scopes,
+            limit,
+            memory_type,
+        )
     }
 
     pub fn reembed_all(&mut self) -> Result<ReembedStats> {
@@ -345,14 +359,19 @@ impl MemoryService {
         query: &str,
         scopes: Option<&[String]>,
         limit: usize,
+        memory_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         let Some(scopes) = scopes else {
             return Ok(self.database.search_memories(query, None, limit)?);
         };
         let proximate_names = self.graph_proximate_names(query)?;
-        Ok(self
-            .database
-            .search_memories_in_scopes(query, scopes, limit, &proximate_names)?)
+        Ok(self.database.search_memories_in_scopes(
+            query,
+            scopes,
+            limit,
+            &proximate_names,
+            memory_type,
+        )?)
     }
 
     fn graph_proximate_names(&self, query: &str) -> Result<Vec<String>> {
@@ -375,6 +394,52 @@ impl MemoryService {
         names.sort();
         names.dedup();
         Ok(names)
+    }
+
+    /// Replaces the fields that are `Some` and keeps the rest. Changed content
+    /// is re-embedded in the same transaction as the update, so a model that
+    /// cannot load or embed leaves the memory untouched, exactly as `remember`
+    /// stores nothing on an embedding failure.
+    pub fn update(
+        &mut self,
+        id: i64,
+        content: Option<String>,
+        memory_type: Option<String>,
+        importance: Option<f64>,
+    ) -> Result<Memory> {
+        let current = self
+            .database
+            .get_memory(id)?
+            .ok_or(ApplicationError::NotFound("memory"))?;
+        let content = content.unwrap_or(current.content);
+        let memory_type = memory_type.unwrap_or(current.memory_type);
+        let importance = importance.unwrap_or(current.importance);
+
+        let Self {
+            database,
+            embedding_config,
+            embedder,
+            ..
+        } = self;
+        let config: &EmbeddingConfig = embedding_config;
+        let embedder = ensure_embedder(config, embedder, || Embedder::load(config))?;
+        let revision = embedder.map(revision_key).unwrap_or_default();
+        let mut embed = |documents: &[&str]| -> std::result::Result<_, SemanticError> {
+            Ok(embedder.map_or(Ok(Vec::new()), |embedder| {
+                embedder.embed_documents(documents)
+            })?)
+        };
+        let sink = embedder.map(|embedder| VectorSink {
+            model: &embedder.model_name,
+            revision: &revision,
+            embed: &mut embed,
+        });
+        if !database.update_memory_with_vector(id, &content, &memory_type, importance, sink)? {
+            return Err(ApplicationError::NotFound("memory"));
+        }
+        database
+            .get_memory(id)?
+            .ok_or(ApplicationError::NotFound("memory"))
     }
 
     pub fn forget(&self, id: i64) -> Result<()> {
@@ -486,10 +551,11 @@ pub(crate) fn semantic_results<M: EmbeddingModel>(
     query: &str,
     scopes: Option<&[String]>,
     limit: usize,
+    memory_type: Option<&str>,
 ) -> std::result::Result<Option<Vec<SearchResult>>, SemanticError> {
     let query_vector = embedder.embed_query(query)?;
     let memories = match scopes {
-        Some(scopes) => database.list_memories_in_scopes(scopes)?,
+        Some(scopes) => database.list_memories_in_scopes(scopes, memory_type)?,
         None => database.list_all_memories()?,
     };
     if memories.is_empty() {
@@ -961,6 +1027,112 @@ mod tests {
     }
 
     #[test]
+    fn update_reembeds_the_memory_in_one_transaction() {
+        let root = temp_root("update-vectors");
+        let mut database = Database::open(&root.join("memory.sqlite")).expect("database opens");
+        let embedder = CountingEmbedder::default();
+        let revision = revision_key(&embedder);
+        let mut embed = |documents: &[&str]| -> Result<_, SemanticError> {
+            Ok(embedder.embed_documents(documents)?)
+        };
+        let memory = database
+            .remember_with_graph_and_vectors(
+                "semantic seed for the upload path",
+                "fact",
+                0.0,
+                &["global".to_owned()],
+                &[],
+                &[],
+                Some(VectorSink {
+                    model: "test-model",
+                    revision: &revision,
+                    embed: &mut embed,
+                }),
+            )
+            .expect("memory is stored");
+        let before = database
+            .memory_embedding(memory.id, "test-model", &revision)
+            .unwrap()
+            .expect("memory is embedded");
+
+        let mut embed = |documents: &[&str]| -> Result<_, SemanticError> {
+            Ok(embedder.embed_documents(documents)?)
+        };
+        let updated = database
+            .update_memory_with_vector(
+                memory.id,
+                "drop the upload queue entirely",
+                "decision",
+                0.9,
+                Some(VectorSink {
+                    model: "test-model",
+                    revision: &revision,
+                    embed: &mut embed,
+                }),
+            )
+            .expect("memory is updated");
+
+        assert!(updated);
+        let stored = database.get_memory(memory.id).unwrap().unwrap();
+        assert_eq!(stored.content, "drop the upload queue entirely");
+        assert_eq!(stored.memory_type, "decision");
+        let after = database
+            .memory_embedding(memory.id, "test-model", &revision)
+            .unwrap()
+            .expect("updated memory is re-embedded");
+        assert_ne!(before, after);
+        drop(database);
+        fs::remove_dir_all(root).expect("test database is removed");
+    }
+
+    #[test]
+    fn update_stores_nothing_when_embedding_fails() {
+        let root = temp_root("update-rollback");
+        let mut database = Database::open(&root.join("memory.sqlite")).expect("database opens");
+        let memory = database
+            .remember_with_graph(
+                "retry the upload",
+                "fact",
+                0.0,
+                &["global".to_owned()],
+                &[],
+                &[],
+            )
+            .expect("memory is stored");
+        database
+            .store_memory_embedding(memory.id, "test-model", "r", &[1.0, 0.0])
+            .expect("memory is embedded");
+        let mut embed = |_: &[&str]| -> Result<Vec<Vec<f32>>, SemanticError> {
+            Err(EmbeddingError::EmptyEmbedding.into())
+        };
+
+        let result = database.update_memory_with_vector(
+            memory.id,
+            "never stored",
+            "decision",
+            0.9,
+            Some(VectorSink {
+                model: "test-model",
+                revision: "r",
+                embed: &mut embed,
+            }),
+        );
+
+        assert!(result.is_err());
+        let stored = database.get_memory(memory.id).unwrap().unwrap();
+        assert_eq!(stored.content, "retry the upload");
+        assert_eq!(stored.memory_type, "fact");
+        assert_eq!(
+            database
+                .memory_embedding(memory.id, "test-model", "r")
+                .unwrap(),
+            Some(vec![1.0, 0.0])
+        );
+        drop(database);
+        fs::remove_dir_all(root).expect("test database is removed");
+    }
+
+    #[test]
     fn fill_missing_vectors_batches_each_kind_and_skips_cached_rows() {
         let root = temp_root("fill-vectors");
         let mut database = Database::open(&root.join("memory.sqlite")).expect("database opens");
@@ -1115,6 +1287,7 @@ mod tests {
                 &["global".to_owned()],
                 10,
                 false,
+                None,
             )
             .expect("lexical recall succeeds");
 
@@ -1185,6 +1358,7 @@ mod tests {
             "different wording",
             Some(&["repo:/a".to_owned()]),
             10,
+            None,
         )
         .expect("semantic recall succeeds")
         .expect("semantic recall has seeds");
@@ -1195,6 +1369,33 @@ mod tests {
         assert!(ids.contains(&seed.id));
         assert!(ids.contains(&linked.id));
         assert!(!ids.contains(&excluded.id));
+
+        let filtered = semantic_results(
+            &database,
+            &FakeEmbedder,
+            &RetrievalConfig::default(),
+            "different wording",
+            Some(&["repo:/a".to_owned()]),
+            10,
+            Some("FACT"),
+        )
+        .expect("filtered recall succeeds")
+        .expect("filtered recall has seeds");
+        assert_eq!(filtered.len(), results.len(), "case-insensitive type match");
+        assert!(
+            semantic_results(
+                &database,
+                &FakeEmbedder,
+                &RetrievalConfig::default(),
+                "different wording",
+                Some(&["repo:/a".to_owned()]),
+                10,
+                Some("decision"),
+            )
+            .expect("unmatched recall succeeds")
+            .is_none_or(|results| results.is_empty()),
+            "a type nothing was stored under returns no memories"
+        );
         let revision = revision_key(&FakeEmbedder);
         assert!(
             database

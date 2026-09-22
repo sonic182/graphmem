@@ -30,7 +30,7 @@ fn remove_database(path: &Path) {
 
 #[test]
 fn fts_tracks_memory_insert_update_and_delete() {
-    let (database, path) = test_database();
+    let (mut database, path) = test_database();
     let memory = database
         .create_memory("retry queue convention", "fact", 0.0)
         .expect("memory is created");

@@ -224,27 +224,69 @@ impl Database {
     }
 
     pub fn update_memory(
-        &self,
+        &mut self,
         id: i64,
         content: &str,
         memory_type: &str,
         importance: f64,
     ) -> Result<bool> {
+        self.update_memory_with_vector::<StorageError>(id, content, memory_type, importance, None)
+    }
+
+    /// Replaces a memory's fields and, when `vectors` is given, its embedding.
+    /// Everything commits together, so a failed embedding changes nothing.
+    /// Without a sink the stale vector is dropped instead, and recall embeds
+    /// the new content on its next semantic pass.
+    pub fn update_memory_with_vector<E: From<StorageError>>(
+        &mut self,
+        id: i64,
+        content: &str,
+        memory_type: &str,
+        importance: f64,
+        vectors: Option<VectorSink<'_, E>>,
+    ) -> std::result::Result<bool, E> {
         validate_text("content", content)?;
         validate_text("memory_type", memory_type)?;
         validate_importance(importance)?;
 
-        let changed = self.connection.execute(
-            "UPDATE memories
-             SET content = ?2, memory_type = ?3, importance = ?4, updated_at = ?5
-             WHERE id = ?1",
-            params![id, content, memory_type.trim(), importance, now_millis()?],
-        )?;
-        if changed == 1 {
-            self.connection
-                .execute("DELETE FROM memory_embeddings WHERE memory_id = ?1", [id])?;
+        let timestamp = now_millis()?;
+        let transaction = self.connection.transaction().map_err(StorageError::from)?;
+        let changed = transaction
+            .execute(
+                "UPDATE memories
+                 SET content = ?2, memory_type = ?3, importance = ?4, updated_at = ?5
+                 WHERE id = ?1",
+                params![id, content, memory_type.trim(), importance, timestamp],
+            )
+            .map_err(StorageError::from)?;
+        if changed != 1 {
+            return Ok(false);
         }
-        Ok(changed == 1)
+        transaction
+            .execute("DELETE FROM memory_embeddings WHERE memory_id = ?1", [id])
+            .map_err(StorageError::from)?;
+        if let Some(sink) = vectors {
+            let (model, revision) = (sink.model, sink.revision);
+            let vectors = (sink.embed)(&[content])?;
+            let [vector] = vectors.as_slice() else {
+                return Err(StorageError::Invalid {
+                    field: "embedding",
+                    message: "model returned a different number of vectors than documents",
+                }
+                .into());
+            };
+            write_embedding(
+                &transaction,
+                "memory_embeddings",
+                "memory_id",
+                id,
+                model,
+                revision,
+                vector,
+            )?;
+        }
+        transaction.commit().map_err(StorageError::from)?;
+        Ok(true)
     }
 
     pub fn delete_memory(&self, id: i64) -> Result<bool> {
@@ -307,28 +349,40 @@ impl Database {
         Ok(memories)
     }
 
-    pub fn list_memories_in_scopes(&self, scopes: &[String]) -> Result<Vec<Memory>> {
+    pub fn list_memories_in_scopes(
+        &self,
+        scopes: &[String],
+        memory_type: Option<&str>,
+    ) -> Result<Vec<Memory>> {
         let scopes = normalized_scopes(scopes)?;
         let placeholders = (0..scopes.len())
             .map(|index| format!("?{}", index + 1))
             .collect::<Vec<_>>()
             .join(", ");
+        let type_placeholder = format!("?{}", scopes.len() + 1);
         let sql = format!(
             "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
                     m.last_accessed_at, m.access_count
              FROM memories m
-             WHERE NOT EXISTS (
+             WHERE (NOT EXISTS (
                  SELECT 1 FROM memory_scopes ms WHERE ms.memory_id = m.id
              ) OR EXISTS (
                  SELECT 1 FROM memory_scopes ms
                  JOIN scopes s ON s.id = ms.scope_id
                  WHERE ms.memory_id = m.id AND (s.name = 'global' OR s.name IN ({placeholders}))
-             )
+             ))
+               AND ({type_placeholder} IS NULL
+                    OR LOWER(m.memory_type) = LOWER({type_placeholder}))
              ORDER BY m.created_at DESC, m.id DESC"
         );
+        let mut values = scopes
+            .into_iter()
+            .map(rusqlite::types::Value::Text)
+            .collect::<Vec<_>>();
+        values.push(memory_type_value(memory_type));
         let mut statement = self.connection.prepare(&sql)?;
         let memories = statement
-            .query_map(rusqlite::params_from_iter(scopes), memory_from_row)?
+            .query_map(rusqlite::params_from_iter(values), memory_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(memories)
     }
@@ -370,6 +424,7 @@ impl Database {
         scopes: &[String],
         limit: usize,
         proximate_names: &[String],
+        memory_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         validate_text("query", query)?;
         let scopes = normalized_scopes(scopes)?;
@@ -394,6 +449,7 @@ impl Database {
             format!("CASE WHEN {likes} THEN 0 ELSE 1 END,")
         };
         let limit_placeholder = format!("?{}", graph_start + proximate_names.len());
+        let type_placeholder = format!("?{}", graph_start + proximate_names.len() + 1);
         let sql = format!(
             "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
                     m.last_accessed_at, m.access_count, -bm25(memories_fts) AS score
@@ -407,6 +463,8 @@ impl Database {
                    JOIN scopes s ON s.id = ms.scope_id
                    WHERE ms.memory_id = m.id AND (s.name = 'global' OR s.name IN ({placeholders}))
                ))
+               AND ({type_placeholder} IS NULL
+                    OR LOWER(m.memory_type) = LOWER({type_placeholder}))
              ORDER BY CASE WHEN EXISTS (
                    SELECT 1 FROM memory_scopes ms
                    JOIN scopes s ON s.id = ms.scope_id
@@ -427,6 +485,7 @@ impl Database {
                 .map(rusqlite::types::Value::Text),
         );
         values.push(rusqlite::types::Value::Integer(limit));
+        values.push(memory_type_value(memory_type));
         let mut statement = self.connection.prepare(&sql)?;
         let memories = run_fts_query(query, |match_query| {
             values[0] = rusqlite::types::Value::Text(match_query.to_owned());
@@ -1499,6 +1558,15 @@ fn limit_value(value: usize) -> Result<i64> {
         field: "limit",
         message: "is too large",
     })
+}
+
+/// Binds the optional `memory_type` filter. An empty value is no filter, and
+/// matching is case-insensitive so `Decision` and `decision` behave alike.
+fn memory_type_value(memory_type: Option<&str>) -> rusqlite::types::Value {
+    match memory_type.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => rusqlite::types::Value::Text(value.to_owned()),
+        None => rusqlite::types::Value::Null,
+    }
 }
 
 fn normalize_scope(value: &str) -> Result<String> {

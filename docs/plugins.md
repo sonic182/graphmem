@@ -26,7 +26,7 @@ claude plugin marketplace add sonic182/graphmem
 claude plugin install graphmem@graphmem
 ```
 
-The plugin provides three things: the `graphmem-mcp-for-dev` skill, the `SessionStart`/`SubagentStart` hooks that inject the recall/store guidance into every session and subagent, and the `gmem mcp` server through its bundled `.mcp.json`, which exposes the `remember`/`recall`/`relate`/`graph`/`inspect`/`forget` tools. Nothing else is needed.
+The plugin provides three things: the `graphmem-mcp-for-dev` skill, the `SessionStart`/`SubagentStart` hooks that inject the recall/store guidance into every session and subagent, and the `gmem mcp` server through its bundled `.mcp.json`, which exposes the `remember`/`recall`/`update`/`relate`/`graph`/`inspect`/`forget` tools. Nothing else is needed.
 
 After installing, run `/mcp` and confirm the `gmem` server is listed. Claude Code has open bugs where a plugin's `.mcp.json` is not copied into the plugin cache, so if it is missing, register the server explicitly:
 

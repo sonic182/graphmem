@@ -95,8 +95,8 @@ Minimal exchange (see `tests/mcp.rs` for the full reference):
 {"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"id":1,"scopes":["global"]},...}}
 ```
 
-The seven tools (`remember`, `recall`, `stats`, `relate`, `graph`, `inspect`,
-`forget`) and their exact argument/response shapes are documented in
+The eight tools (`remember`, `recall`, `update`, `stats`, `relate`, `graph`,
+`inspect`, `forget`) and their exact argument/response shapes are documented in
 `docs/mcp.md` and exercised in `tests/mcp.rs`.
 
 ### Smoke-testing it
