@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `recall`/`search` and `inspect`/`show` now update `last_accessed_at` and
+  increment `access_count` for each memory returned. List commands and internal
+  reads do not count as accesses.
+
 ## [0.3.1] - 2026-09-22
 
 ### Fixed

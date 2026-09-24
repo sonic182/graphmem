@@ -25,6 +25,8 @@ The server exposes eight tools:
   narrows the candidates the same way and ignores case, so a filtered memory
   neither seeds nor propagates rank; it applies to both the semantic and the
   lexical path.
+  Each returned memory increments `access_count` and updates `last_accessed_at`;
+  candidates outside the response are not counted.
 - `stats`: returns the counts of memories, scopes, entities, and edges.
 - `relate`: stores a directed relationship between two entities and embeds
   it. On an embedding error the call fails; the entities and edge may already
@@ -32,7 +34,8 @@ The server exposes eight tools:
 - `graph`: inspects incoming, outgoing, or both relationship paths for an
   entity.
 - `inspect`: returns a memory and its scopes by numeric `id`, with optional
-  `scopes`.
+  `scopes`. A successful inspection increments `access_count` and updates
+  `last_accessed_at`.
 - `update`: revises a memory by numeric `id`, with optional `scopes`.
   `content`, `memory_type`, and `importance` replace the stored values; omitted
   fields are kept. Scopes,

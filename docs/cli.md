@@ -74,7 +74,9 @@ Output: one line per memory, tab-separated `id`, `memory_type`, `content`.
 ## `gmem show <id>`
 
 Print one memory's full detail (id, type, importance, timestamps, scopes,
-content). Exits non-zero with `memory not found` if the id doesn't exist.
+content). A successful `show` updates `last_accessed_at` and increments
+`access_count`; `list` does not. Exits non-zero with `memory not found` if the
+id doesn't exist.
 
 ## `gmem search <query>`
 
@@ -83,6 +85,7 @@ embeddings are disabled, or the model fails to load, it reports the failure
 on stderr and falls back to SQLite FTS5 lexical ranking — the same fallback
 the MCP `recall` tool uses. Unlike `recall`, the CLI has no flag to force
 lexical search.
+Each returned result updates `last_accessed_at` and increments `access_count`.
 
 | Flag | Default | Notes |
 | --- | --- | --- |

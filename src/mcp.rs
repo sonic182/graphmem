@@ -498,7 +498,7 @@ impl MemoryServer {
         let scopes = self.scopes(input.scopes);
         let details = self
             .lock()?
-            .show(id, Some(&scopes))
+            .inspect(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
