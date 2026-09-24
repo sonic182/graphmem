@@ -6,6 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use graphmem::Database;
 use serde_json::{Value, json};
 
 struct Mcp {
@@ -107,20 +108,40 @@ fn memory_lifecycle_works_across_cli_processes() {
         .strip_prefix("remembered: ")
         .expect("remember output contains an ID")
         .to_owned();
+    let memory_id = id.parse::<i64>().expect("remembered ID is numeric");
+    let database = Database::open(&data_dir.join("memory.sqlite")).expect("database opens");
+    let created = database.get_memory(memory_id).unwrap().unwrap();
+    assert_eq!(created.access_count, 0);
+    assert_eq!(created.last_accessed_at, None);
 
     let shown = stdout(run(&data_dir, &["show", &id]));
     assert!(shown.contains("type: convention"));
     assert!(shown.contains("repo:/workspace/graphmem"));
     assert!(shown.contains("Use cargo nextest"));
+    let shown_memory = database.get_memory(memory_id).unwrap().unwrap();
+    assert_eq!(shown_memory.access_count, 1);
+    assert!(shown_memory.last_accessed_at.is_some());
 
     let listed = stdout(run(
         &data_dir,
         &["list", "--scope", "repo:/workspace/graphmem"],
     ));
     assert!(listed.contains(&id));
+    assert_eq!(
+        database
+            .get_memory(memory_id)
+            .unwrap()
+            .unwrap()
+            .access_count,
+        1
+    );
 
     let searched = stdout(run(&data_dir, &["search", "nextest"]));
     assert!(searched.contains(&id));
+    let searched_memory = database.get_memory(memory_id).unwrap().unwrap();
+    assert_eq!(searched_memory.access_count, 2);
+    assert!(searched_memory.last_accessed_at >= shown_memory.last_accessed_at);
+    assert_eq!(searched_memory.updated_at, created.updated_at);
     assert!(
         searched
             .split('\n')

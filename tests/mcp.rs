@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use graphmem::Database;
 use serde_json::{Value, json};
 
 struct Mcp {
@@ -191,6 +192,8 @@ fn serves_memory_lifecycle_over_stdio() {
         remembered["result"]["structuredContent"]["warnings"],
         json!([])
     );
+    assert_eq!(remembered["result"]["structuredContent"]["access_count"], 0);
+    assert!(remembered["result"]["structuredContent"]["last_accessed_at"].is_null());
     let graph = mcp.request(
         9,
         "tools/call",
@@ -225,6 +228,15 @@ fn serves_memory_lifecycle_over_stdio() {
         recalled["result"]["structuredContent"]["memories"][0]["warnings"],
         json!([])
     );
+    let recalled_memory = &recalled["result"]["structuredContent"]["memories"][0];
+    assert_eq!(recalled_memory["access_count"], 1);
+    let first_access = recalled_memory["last_accessed_at"]
+        .as_i64()
+        .expect("recall records an access timestamp");
+    assert_eq!(
+        recalled_memory["updated_at"],
+        remembered["result"]["structuredContent"]["updated_at"]
+    );
 
     let inspected = mcp.request(
         6,
@@ -234,6 +246,13 @@ fn serves_memory_lifecycle_over_stdio() {
     assert_eq!(
         inspected["result"]["structuredContent"]["content"],
         "stdio memory"
+    );
+    assert_eq!(inspected["result"]["structuredContent"]["access_count"], 2);
+    assert!(
+        inspected["result"]["structuredContent"]["last_accessed_at"]
+            .as_i64()
+            .expect("inspect records an access timestamp")
+            >= first_access
     );
 
     let forgotten = mcp.request(
@@ -262,15 +281,21 @@ fn repository_scopes_are_prioritized_and_isolated() {
         "initialize",
         json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
     );
+    let mut stored_ids = Vec::new();
     for (id, scopes) in [
         (2, json!([])),
         (3, json!(["repo:/a"])),
         (4, json!(["repo:/b"])),
     ] {
-        mcp.request(
+        let stored = mcp.request(
             id,
             "tools/call",
             json!({"name":"remember","arguments":{"content":"deployment rule","scopes":scopes}}),
+        );
+        stored_ids.push(
+            stored["result"]["structuredContent"]["id"]
+                .as_i64()
+                .expect("remembered ID"),
         );
     }
     let recalled = mcp.request(
@@ -284,6 +309,40 @@ fn repository_scopes_are_prioritized_and_isolated() {
     assert_eq!(memories.len(), 2);
     assert_eq!(memories[0]["scopes"], json!(["repo:/a"]));
     assert_eq!(memories[1]["scopes"], json!(["global"]));
+    let limited = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"deployment","scopes":["repo:/a"],"limit":1}}),
+    );
+    assert_eq!(
+        limited["result"]["structuredContent"]["memories"][0]["access_count"],
+        2
+    );
+    let database = Database::open(&home.join("memory.sqlite")).expect("database opens");
+    assert_eq!(
+        database
+            .get_memory(stored_ids[0])
+            .unwrap()
+            .unwrap()
+            .access_count,
+        1
+    );
+    assert_eq!(
+        database
+            .get_memory(stored_ids[1])
+            .unwrap()
+            .unwrap()
+            .access_count,
+        2
+    );
+    assert_eq!(
+        database
+            .get_memory(stored_ids[2])
+            .unwrap()
+            .unwrap()
+            .access_count,
+        0
+    );
     drop(mcp);
     std::fs::remove_dir_all(home).expect("MCP test data is removed");
 }

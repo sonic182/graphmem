@@ -174,6 +174,14 @@ impl MemoryService {
         Ok(MemoryDetails { memory, scopes })
     }
 
+    pub fn inspect(&mut self, id: i64, scopes: Option<&[String]>) -> Result<MemoryDetails> {
+        let mut details = self.show(id, scopes)?;
+        let (last_accessed_at, access_count) = self.database.record_accesses(&[id])?[0];
+        details.memory.last_accessed_at = Some(last_accessed_at);
+        details.memory.access_count = access_count;
+        Ok(details)
+    }
+
     /// The one guard every id-addressed operation routes through. A memory
     /// outside `scopes` reports `NotFound` rather than a distinct refusal, so
     /// a caller in another repository cannot probe for ids that exist.
@@ -213,7 +221,8 @@ impl MemoryService {
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
         let scopes = scope.map(|scope| vec![scope.to_owned()]);
-        self.search_with_scopes(query, scopes.as_deref(), limit, None)
+        let results = self.search_with_scopes(query, scopes.as_deref(), limit, None)?;
+        self.record_search_accesses(results)
     }
 
     pub fn search_scopes(
@@ -238,11 +247,28 @@ impl MemoryService {
         } else {
             scopes.to_vec()
         };
-        if use_embeddings {
+        let results = if use_embeddings {
             self.search_with_scopes(query, Some(&scopes), limit, memory_type)
         } else {
             self.lexical_search(query, Some(&scopes), limit, memory_type)
+        }?;
+        self.record_search_accesses(results)
+    }
+
+    fn record_search_accesses(
+        &mut self,
+        mut results: Vec<SearchResult>,
+    ) -> Result<Vec<SearchResult>> {
+        let ids = results
+            .iter()
+            .map(|result| result.memory.id)
+            .collect::<Vec<_>>();
+        let accesses = self.database.record_accesses(&ids)?;
+        for (result, (last_accessed_at, access_count)) in results.iter_mut().zip(accesses) {
+            result.memory.last_accessed_at = Some(last_accessed_at);
+            result.memory.access_count = access_count;
         }
+        Ok(results)
     }
 
     /// `memory_type` narrows the candidates before ranking, like the scope

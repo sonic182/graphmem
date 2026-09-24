@@ -142,8 +142,8 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             print_memories(service.list(args.scope.as_deref(), args.limit)?);
         }
         Command::Show { id } => {
-            let service = MemoryService::open_default(overrides)?;
-            print_memory_details(service.show(id, None)?);
+            let mut service = MemoryService::open_default(overrides)?;
+            print_memory_details(service.inspect(id, None)?);
         }
         Command::Search(args) => {
             let mut service = MemoryService::open_default(overrides)?;

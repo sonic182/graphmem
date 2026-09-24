@@ -258,6 +258,32 @@ impl Database {
             .map_err(StorageError::from)
     }
 
+    pub fn record_accesses(&mut self, ids: &[i64]) -> Result<Vec<(i64, i64)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let timestamp = now_millis()?;
+        let transaction = self.connection.transaction()?;
+        let mut accesses = Vec::with_capacity(ids.len());
+        {
+            let mut statement = transaction.prepare(
+                "UPDATE memories
+                 SET last_accessed_at = ?2, access_count = access_count + 1
+                 WHERE id = ?1
+                 RETURNING last_accessed_at, access_count",
+            )?;
+            for &id in ids {
+                accesses.push(
+                    statement
+                        .query_row(params![id, timestamp], |row| Ok((row.get(0)?, row.get(1)?)))?,
+                );
+            }
+        }
+        transaction.commit()?;
+        Ok(accesses)
+    }
+
     pub fn update_memory(
         &mut self,
         id: i64,
