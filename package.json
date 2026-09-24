@@ -1,6 +1,6 @@
 {
   "name": "graphmem",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Durable project memory for coding agents: skill and session guidance for gmem.",
   "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development"],
   "license": "MIT",
