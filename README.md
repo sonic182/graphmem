@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/sonic182/graphmem/actions/workflows/ci.yml/badge.svg)](https://github.com/sonic182/graphmem/actions/workflows/ci.yml)
 
-Graphmem is a local memory service for agents and developer tools. It stores scoped narrative memories alongside an entity graph, then combines semantic embeddings, graph context, and Personalized PageRank for recall — the non-trained retrieval approach of [HippoRAG 2](https://proceedings.mlr.press/v267/gutierrez25a.html) (Gutiérrez et al., ICML 2025). SQLite FTS5 remains available as a lexical fallback and as a per-request comparison mode.
+Graphmem gives coding agents a shared, local memory. Claude Code, Codex, OpenCode, pi, and other MCP clients can use the same store, so project decisions and context survive new sessions and switches between tools. It finds relevant memories even when a query uses different words.
+
+Under the hood, Graphmem stores scoped notes and linked entities in SQLite. Recall combines local embeddings with graph context and Personalized PageRank — the non-trained retrieval approach of [HippoRAG 2](https://proceedings.mlr.press/v267/gutierrez25a.html) (Gutiérrez et al., ICML 2025). SQLite FTS5 provides lexical search when embeddings are disabled or for per-request comparison.
 
 ## Highlights
 
