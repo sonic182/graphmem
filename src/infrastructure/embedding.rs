@@ -46,6 +46,19 @@ struct MaxLengthProbe {
     max_position_embeddings: Option<usize>,
 }
 
+#[derive(Deserialize)]
+struct AttentionHeadsProbe {
+    n_heads: Option<usize>,
+    num_attention_heads: Option<usize>,
+}
+
+/// The candle-wgpu fork dispatches most ops (softmax, masking, matmul) with
+/// `enqueue_64`, which spreads elements only across the dispatch grid's X
+/// axis: at most 65535 workgroups of 64 threads. The attention score matrix
+/// is `(batch, heads, seq, seq)`, so a batch whose `batch * seq^2 * heads`
+/// exceeds this panics instead of running.
+const WGPU_DISPATCH_ELEMENT_LIMIT: usize = 65_535 * 64;
+
 enum Backbone {
     Bert(bert::BertModel),
     Qwen3(qwen3::Model),
@@ -59,6 +72,9 @@ pub struct Embedder {
     batch_size: usize,
     truncation_limit: Option<usize>,
     truncated: AtomicBool,
+    /// Set only on WGPU: caps `batch * max_seq_len^2` within a sub-batch to
+    /// stay under the fork's dispatch-grid limit. `None` elsewhere.
+    wgpu_max_batch_seq_sq: Option<usize>,
     pub model_name: String,
     pub revision: String,
 }
@@ -142,8 +158,18 @@ impl Embedder {
         // batching saves, so default to one text per call there.
         let batch_size = config
             .batch_size
-            .unwrap_or(if backend == "cuda" { 16 } else { 1 })
+            .unwrap_or(match backend {
+                "cuda" => 16,
+                // Provisional; measured on an AMD Vega iGPU.
+                "wgpu" => 8,
+                _ => 1,
+            })
             .max(1);
+        let wgpu_max_batch_seq_sq = (backend == "wgpu")
+            .then(|| serde_json::from_slice::<AttentionHeadsProbe>(&config_bytes))
+            .transpose()?
+            .and_then(|probe| probe.n_heads.or(probe.num_attention_heads))
+            .map(|n_heads| WGPU_DISPATCH_ELEMENT_LIMIT / n_heads.max(1));
         let embedder = Self {
             backbone,
             tokenizer,
@@ -151,6 +177,7 @@ impl Embedder {
             batch_size,
             truncation_limit,
             truncated: AtomicBool::new(false),
+            wgpu_max_batch_seq_sq,
             model_name: config.model.clone(),
             revision: config.revision.clone(),
         };
@@ -179,21 +206,63 @@ impl Embedder {
     /// Embeds `documents` in chunks of the configured batch size, so single
     /// and batched calls share one code path and produce the same vectors.
     pub fn embed_documents(&self, documents: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let mut vectors = Vec::with_capacity(documents.len());
-        for chunk in documents.chunks(self.batch_size) {
-            match &self.backbone {
-                // Qwen3 runs one text at a time; candle 0.11's
-                // causal_mask cannot build a b>1 mask and has no padding mask.
-                Backbone::Qwen3(model) => {
-                    for document in chunk {
-                        vectors.push(self.embed_qwen3(model, document)?);
-                    }
+        match &self.backbone {
+            // ponytail: Qwen3 runs one text at a time; candle 0.11's
+            // causal_mask cannot build a b>1 mask and has no padding mask.
+            Backbone::Qwen3(model) => documents
+                .iter()
+                .map(|document| self.embed_qwen3(model, document))
+                .collect(),
+            Backbone::Bert(model) => {
+                let ids = documents
+                    .iter()
+                    .map(|document| self.token_ids(document))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut vectors = Vec::with_capacity(documents.len());
+                for chunk in self.transformer_chunks(&ids) {
+                    vectors.extend(self.embed_bert(model, chunk)?);
                 }
-                Backbone::Bert(model) => vectors.extend(self.embed_bert(model, chunk)?),
-                Backbone::DistilBert(model) => vectors.extend(self.embed_distilbert(model, chunk)?),
+                Ok(vectors)
+            }
+            Backbone::DistilBert(model) => {
+                let ids = documents
+                    .iter()
+                    .map(|document| self.token_ids(document))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut vectors = Vec::with_capacity(documents.len());
+                for chunk in self.transformer_chunks(&ids) {
+                    vectors.extend(self.embed_distilbert(model, chunk)?);
+                }
+                Ok(vectors)
             }
         }
-        Ok(vectors)
+    }
+
+    /// Splits pre-tokenized rows into batches of at most `batch_size`, and,
+    /// on WGPU, no larger than the dispatch-grid budget for the longest row
+    /// in the batch (see [`WGPU_DISPATCH_ELEMENT_LIMIT`]).
+    fn transformer_chunks<'a>(&self, ids: &'a [Vec<u32>]) -> Vec<&'a [Vec<u32>]> {
+        let mut chunks = Vec::new();
+        let mut start = 0;
+        while start < ids.len() {
+            let mut end = start + 1;
+            let mut max_len = ids[start].len();
+            while end < ids.len() && end - start < self.batch_size {
+                let candidate_len = max_len.max(ids[end].len());
+                let fits_budget = self
+                    .wgpu_max_batch_seq_sq
+                    .map(|budget| (end + 1 - start) * candidate_len * candidate_len <= budget)
+                    .unwrap_or(true);
+                if !fits_budget {
+                    break;
+                }
+                max_len = candidate_len;
+                end += 1;
+            }
+            chunks.push(&ids[start..end]);
+            start = end;
+        }
+        chunks
     }
 
     fn token_ids(&self, text: &str) -> Result<Vec<u32>, EmbeddingError> {
@@ -245,18 +314,14 @@ impl Embedder {
     fn embed_bert(
         &self,
         model: &bert::BertModel,
-        texts: &[&str],
+        rows: &[Vec<u32>],
     ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let rows = texts
-            .iter()
-            .map(|text| self.token_ids(text))
-            .collect::<Result<Vec<_>, _>>()?;
         let batch = rows.len();
         let length = rows.iter().map(Vec::len).max().unwrap_or(0);
         let mut ids = Vec::with_capacity(batch * length);
         let mut attention = Vec::with_capacity(batch * length);
         let mut real = Vec::with_capacity(batch * length);
-        for row in &rows {
+        for row in rows {
             for position in 0..length {
                 let token = row.get(position);
                 ids.push(token.copied().unwrap_or(0));
@@ -286,18 +351,14 @@ impl Embedder {
     fn embed_distilbert(
         &self,
         model: &distilbert::DistilBertModel,
-        texts: &[&str],
+        rows: &[Vec<u32>],
     ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let rows = texts
-            .iter()
-            .map(|text| self.token_ids(text))
-            .collect::<Result<Vec<_>, _>>()?;
         let batch = rows.len();
         let length = rows.iter().map(Vec::len).max().unwrap_or(0);
         let mut ids = Vec::with_capacity(batch * length);
         let mut padding = Vec::with_capacity(batch * length);
         let mut real = Vec::with_capacity(batch * length);
-        for row in &rows {
+        for row in rows {
             for position in 0..length {
                 let token = row.get(position);
                 ids.push(token.copied().unwrap_or(0));
@@ -396,6 +457,10 @@ fn select_device(requested: &str) -> Result<(Device, &'static str), EmbeddingErr
         "cuda" => Device::new_cuda(0)
             .map(|device| (device, "cuda"))
             .map_err(|error| EmbeddingError::Backend(error.to_string())),
+        // ponytail: explicit only; the candle fork panics when no adapter exists, so auto never tries it
+        "wgpu" | "vulkan" => Device::new_wgpu(0)
+            .map(|device| (device, "wgpu"))
+            .map_err(|error| EmbeddingError::Backend(error.to_string())),
         backend => Err(EmbeddingError::Backend(backend.to_owned())),
     }
 }
@@ -484,6 +549,35 @@ mod tests {
         assert!(!details.enabled);
         assert_eq!(details.model, "some/model");
         assert_eq!(details.max_tokens, None);
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn load_on(backend: &str) -> Embedder {
+        let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".data");
+        let config = EmbeddingConfig {
+            backend: backend.to_owned(),
+            batch_size: Some(3),
+            ..embedding_config(&data_dir).unwrap()
+        };
+        Embedder::load(&config).unwrap()
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    #[ignore = "needs a Vulkan GPU and the real embedding model"]
+    fn wgpu_embeddings_match_cpu() {
+        let documents = [
+            "short",
+            "a noticeably longer document so the batch needs padding tokens",
+            "retry queue",
+            "the fourth document lands in a second chunk",
+        ];
+        let cpu = load_on("cpu").embed_documents(&documents).unwrap();
+        let gpu = load_on("wgpu").embed_documents(&documents).unwrap();
+        for ((document, cpu), gpu) in documents.iter().zip(&cpu).zip(&gpu) {
+            let cosine: f32 = cpu.iter().zip(gpu).map(|(a, b)| a * b).sum();
+            assert!(cosine > 0.999, "{document}: cosine {cosine}");
+        }
     }
 
     #[test]
