@@ -7,14 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-28
+
 ### Added
 
 - CPU-only prebuilt `gmem` binaries for Linux x86-64, macOS Intel and Apple
   Silicon, and Windows x86-64. Version tags publish archives and SHA-256
   checksums to GitHub Releases; manual workflow runs build artifacts without
   publishing a release.
-
-## [0.3.2] - 2026-09-24
 
 ### Fixed
 
