@@ -18,16 +18,39 @@ Under the hood, Graphmem stores scoped notes and linked entities in SQLite. Reca
 
 ## Install
 
+Download the **CPU binary** for your platform from [GitHub Releases](https://github.com/sonic182/graphmem/releases/latest):
+
+| System | Release archive |
+| --- | --- |
+| Linux x86-64 (glibc) | `gmem-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Intel | `gmem-<version>-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `gmem-<version>-aarch64-apple-darwin.tar.gz` |
+| Windows x86-64 | `gmem-<version>-x86_64-pc-windows-msvc.zip` |
+
+Check the archive against the release's `SHA256SUMS`, extract it, and put `gmem` (or `gmem.exe`) in a directory on your `PATH`. On Linux/macOS, for example:
+
 ```sh
-cargo install --locked --path .                                  # from a checkout
+tar -xzf gmem-*.tar.gz  # after downloading one archive
+mkdir -p "$HOME/.local/bin"
+install -m 755 gmem "$HOME/.local/bin/gmem"
+export PATH="$HOME/.local/bin:$PATH"  # also add this to your shell profile
+gmem --help
+```
+
+On Windows, extract the ZIP into a directory on your user `PATH`, then run `gmem --help` in a new terminal. The Linux build targets Ubuntu 24.04 (glibc 2.39) and requires system OpenSSL 3 (`libssl.so.3`); older systems may need a source build. CUDA support also requires a source build.
+
+Alternatively, install with Rust (this puts `gmem` in `~/.cargo/bin`):
+
+```sh
+cargo install --locked --path .                                   # from a checkout
 cargo install --locked --git https://github.com/sonic182/graphmem # latest from GitHub
 ```
 
-This puts `gmem` in `~/.cargo/bin/gmem`. The editor plugins assume it is on your `PATH`; see [docs/plugins.md](docs/plugins.md). `git` must also be on your `PATH` for repository-scoped memory: `gmem` runs `git rev-parse --show-toplevel` to derive the current repository, and falls back to `global` when it cannot.
+The editor plugins assume `gmem` is on your `PATH`; see [docs/plugins.md](docs/plugins.md). `git` must also be on your `PATH` for repository-scoped memory: `gmem` runs `git rev-parse --show-toplevel` to derive the current repository, and falls back to `global` when it cannot.
 
 ## Use it with your coding agent
 
-The binary works with any MCP client, but the Claude Code, Codex, and OpenCode plugins also install a skill and lifecycle guidance, so your agent recalls relevant context before a task and records durable decisions after it — without being asked each time. Each plugin bundles its own MCP server config, so there is no separate `mcp add` step. After `cargo install`:
+The binary works with any MCP client, but the Claude Code, Codex, and OpenCode plugins also install a skill and lifecycle guidance, so your agent recalls relevant context before a task and records durable decisions after it — without being asked each time. Each plugin bundles its own MCP server config, so there is no separate `mcp add` step. After installing the binary:
 
 ```sh
 # Claude Code
@@ -90,14 +113,14 @@ Configure an MCP client to launch:
 {
   "mcpServers": {
     "graphmem": {
-      "command": "~/.cargo/bin/gmem",
+      "command": "/absolute/path/to/gmem",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Use the absolute path to the binary; `~/.cargo/bin/gmem` is where `cargo install` puts it.
+Use the absolute path to your installed binary; `~/.cargo/bin/gmem` is the path for a Cargo installation.
 
 `recall` uses embeddings by default. For a lexical comparison, pass:
 
