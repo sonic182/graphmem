@@ -37,7 +37,7 @@ export PATH="$HOME/.local/bin:$PATH"  # also add this to your shell profile
 gmem --help
 ```
 
-On Windows, extract the ZIP into a directory on your user `PATH`, then run `gmem --help` in a new terminal. The Linux build targets Ubuntu 22.04 (glibc 2.35) and requires system OpenSSL 3 (`libssl.so.3`); other distributions may need a source build. CUDA support also requires a source build.
+On Windows, extract the ZIP into a directory on your user `PATH`, then run `gmem --help` in a new terminal. The Linux build targets Ubuntu 24.04 (glibc 2.39) and requires system OpenSSL 3 (`libssl.so.3`); older systems may need a source build. CUDA support also requires a source build.
 
 Alternatively, install with Rust (this puts `gmem` in `~/.cargo/bin`):
 
