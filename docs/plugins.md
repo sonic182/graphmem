@@ -2,7 +2,7 @@
 
 Graphmem ships its skills, lifecycle guidance, and MCP server configuration to Claude Code, Codex, OpenCode, and pi.
 
-All flows need `gmem` on your `PATH`. The Claude Code and Codex hooks also need `node`; without it the MCP server still works, but the agent does not receive the recall/store guidance. OpenCode runs the plugin on Bun and needs no extra runtime.
+All flows need `gmem` on your `PATH`. [Install a prebuilt binary](../README.md#install) first (or build with Cargo). The Claude Code and Codex hooks also need `node`; without it the MCP server still works, but the agent does not receive the recall/store guidance. OpenCode runs the plugin on Bun and needs no extra runtime.
 
 | Harness | What the plugin provides | MCP registration |
 | --- | --- | --- |
@@ -13,13 +13,9 @@ All flows need `gmem` on your `PATH`. The Claude Code and Codex hooks also need 
 
 ## Claude Code
 
-Install the optimized binary from GitHub, then add the repository as a plugin marketplace and install the plugin:
+With `gmem` installed, add the repository as a plugin marketplace and install the plugin:
 
 ```sh
-# install the optimized gmem binary
-cargo install --locked --git https://github.com/sonic182/graphmem
-
-# add the repository as a plugin marketplace
 claude plugin marketplace add sonic182/graphmem
 
 # install the Graphmem plugin (skill + hooks + MCP server)
@@ -31,10 +27,10 @@ The plugin provides three things: the `graphmem-mcp-for-dev` skill, the `Session
 After installing, run `/mcp` and confirm the `gmem` server is listed. Claude Code has open bugs where a plugin's `.mcp.json` is not copied into the plugin cache, so if it is missing, register the server explicitly:
 
 ```sh
-claude mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
+claude mcp add gmem -- gmem mcp
 ```
 
-Re-run the `cargo install` command after new releases, and `claude plugin marketplace update graphmem` after the plugin manifest, hooks, or `.mcp.json` change.
+Replace the binary after new releases (or re-run `cargo install` if installed from source), and run `claude plugin marketplace update graphmem` after the plugin manifest, hooks, or `.mcp.json` change.
 
 To install from a local checkout instead:
 
@@ -54,13 +50,9 @@ export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 
 ## Codex
 
-Install the optimized binary from GitHub, then add the repository as a plugin marketplace and install the plugin:
+With `gmem` installed, add the repository as a plugin marketplace and install the plugin:
 
 ```sh
-# install the optimized gmem binary
-cargo install --locked --git https://github.com/sonic182/graphmem
-
-# add the repository as a plugin marketplace
 codex plugin marketplace add sonic182/graphmem
 
 # install the Graphmem plugin (skill + hooks + MCP server)
@@ -70,7 +62,7 @@ codex plugin add graphmem@graphmem
 The plugin provides the `graphmem-mcp-for-dev` skill, the lifecycle hooks, and the `gmem mcp` server through its bundled `.mcp.json`. After installing, run `/mcp` and confirm the `gmem` server is listed; if it is missing, register it explicitly:
 
 ```sh
-codex mcp add gmem -- "$HOME/.cargo/bin/gmem" mcp
+codex mcp add gmem -- gmem mcp
 ```
 
 Open `/hooks` in Codex, review and trust the two Graphmem hooks, then start a new thread.
@@ -93,13 +85,9 @@ The plugin uses Codex's `gmem mcp` server, so semantic calls reuse the same in-m
 
 ## OpenCode
 
-Install the optimized binary from GitHub, then install the plugin directly from GitHub (no npm publication needed):
+With `gmem` installed, install the plugin directly from GitHub (no npm publication needed):
 
 ```sh
-# install the optimized gmem binary
-cargo install --locked --git https://github.com/sonic182/graphmem
-
-# install the Graphmem plugin (skill + guidance + MCP server)
 opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
@@ -124,16 +112,15 @@ Restart OpenCode after installing or changing the plugin, then run `opencode mcp
 
 pi has no built-in MCP support, so install [`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) and configure `gmem mcp` once in pi's shared MCP config. The Graphmem package itself only adds its skill and session-start guidance.
 
-Install Graphmem from GitHub:
+With `gmem` installed, set up pi:
 
 ```sh
-cargo install --locked --git https://github.com/sonic182/graphmem
 pi install npm:pi-mcp-adapter   # once, if you do not already use it
 pi install git:github.com/sonic182/graphmem
 mkdir -p ~/.config/mcp
 ```
 
-To install from a local checkout instead, replace the `cargo install` and `pi install` commands with:
+To install from a local checkout instead, build the binary and replace the `pi install` command with:
 
 ```sh
 cargo install --locked --path .
@@ -146,7 +133,7 @@ Create `~/.config/mcp/mcp.json`:
 {
   "mcpServers": {
     "gmem": {
-      "command": "~/.cargo/bin/gmem",
+      "command": "/absolute/path/to/gmem",
       "args": ["mcp"],
       "lifecycle": "lazy",
       "directTools": true,
