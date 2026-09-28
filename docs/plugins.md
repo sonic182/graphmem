@@ -2,7 +2,7 @@
 
 Graphmem ships its skills, lifecycle guidance, and MCP server configuration to Claude Code, Codex, OpenCode, and pi.
 
-All flows need `gmem` on your `PATH`. [Install a prebuilt binary](../README.md#install) first (or build with Cargo). The Claude Code and Codex hooks also need `node`; without it the MCP server still works, but the agent does not receive the recall/store guidance. OpenCode runs the plugin on Bun and needs no extra runtime.
+All flows need `gmem` on your `PATH`. [Install a prebuilt binary](../README.md#install) first (or build with Cargo). Cargo installs `gmem` at `$HOME/.cargo/bin/gmem`; if that directory is not on your editor's `PATH`, add it there. For the manual `mcp add` fallbacks below, you can instead replace `gmem` with `"$HOME/.cargo/bin/gmem"`. The Claude Code and Codex hooks also need `node`; without it the MCP server still works, but the agent does not receive the recall/store guidance. OpenCode runs the plugin on Bun and needs no extra runtime.
 
 | Harness | What the plugin provides | MCP registration |
 | --- | --- | --- |

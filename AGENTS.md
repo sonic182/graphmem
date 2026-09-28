@@ -5,9 +5,8 @@ Use the CLI feedback loop instead of an editor or LSP integration.
 ## Feedback loop
 
 - Use `rg` for plain-text searches and `ast-grep` for syntax-aware code searches whenever available; use the next-best fallback only when they are unavailable.
-- Start with package-scoped checks: `just check`, `just test`, and `just lint`.
-- Run `just fmt` after edits.
-- Run `just verify` before handing off changes.
+- For Rust source, Cargo dependencies, or build/test changes, start with the relevant package-scoped checks: `just check`, `just test`, and `just lint`. Run `just fmt` after Rust edits and `just verify` before handing off.
+- For Markdown/docs-only changes, do not run `just`; review the text and run `git diff --check`. For workflow/config-only changes, validate the affected syntax or behavior instead of running the Rust suite unless the change affects Rust builds or tests.
 - Use `just ra` for supplemental rust-analyzer diagnostics when needed.
 - Keep MCP protocol output on stdout; application logs belong on stderr.
 
