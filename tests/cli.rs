@@ -279,3 +279,13 @@ fn graph_command_inspects_entities_seeded_via_mcp() {
 
     fs::remove_dir_all(data_dir).expect("test data directory is removed");
 }
+
+#[test]
+fn tui_requires_an_interactive_terminal() {
+    let data_dir = data_dir();
+    let output = run(&data_dir, &["tui"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("interactive terminal"));
+    assert!(!data_dir.join("memory.sqlite").exists());
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}

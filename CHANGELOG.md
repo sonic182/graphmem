@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Keyboard-driven `gmem tui` to browse memories and graph nodes, filter
+  memories, view colored Markdown details, edit memory text with an external
+  editor, and delete with confirmation.
 - ModernBERT embedding checkpoints with CLS pooling, including the
   multilingual `ibm-granite/granite-embedding-97m-multilingual-r2`. Set it as
   `[embedding] model` and run `gmem reembed` to migrate existing vectors.

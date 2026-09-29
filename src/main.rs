@@ -1,5 +1,6 @@
 mod cli;
 mod mcp;
+mod tui;
 
 fn main() {
     let data_dir = graphmem::Database::default_path()

@@ -162,6 +162,10 @@ impl MemoryService {
         }
     }
 
+    pub fn list_all(&self) -> Result<Vec<Memory>> {
+        Ok(self.database.list_all_memories()?)
+    }
+
     /// `scopes` restricts the memory to one reachable from them, as recall
     /// does; `None` reaches any memory, which is what the human CLI wants.
     pub fn show(&self, id: i64, scopes: Option<&[String]>) -> Result<MemoryDetails> {
@@ -591,6 +595,18 @@ impl MemoryService {
             )?,
             entity,
         })
+    }
+
+    pub fn entities(&self) -> Result<Vec<Entity>> {
+        Ok(self.database.list_entities()?)
+    }
+
+    pub fn delete_entity(&self, id: i64) -> Result<()> {
+        if self.database.delete_entity(id)? {
+            Ok(())
+        } else {
+            Err(ApplicationError::NotFound("entity"))
+        }
     }
 
     fn find_entity(&self, entity: EntityReference) -> Result<Entity> {
