@@ -62,6 +62,38 @@ Modes:
 | MuSiQue | spacy | embeddings | **0.605** | **0.735** | **0.855** | **0.891** |
 | MuSiQue | oracle | embeddings | 0.765 | 0.855 | 0.885 | 0.930 |
 
+## IBM Granite Embedding: 100 questions, shared corpus
+
+Run with `GRAPHMEM_EMBEDDING_MODEL=ibm-granite/granite-embedding-97m-multilingual-r2`,
+`GRAPHMEM_EMBEDDING_BACKEND=auto`, and `~/.cargo/bin/gmem` (CUDA-enabled) on an
+NVIDIA GeForce RTX 4060 Laptop GPU. The harness's standard matrix (all graphs
+and modes above, 100 questions per dataset) completed in about 90 seconds.
+
+| dataset | graph | mode | recall@2 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|---|---|
+| HotpotQA | none | embeddings | 0.645 | 0.825 | 0.935 | 0.911 |
+| HotpotQA | none | fts-raw | 0.540 | 0.740 | 0.895 | 0.872 |
+| HotpotQA | none | fts-or | 0.550 | 0.745 | 0.895 | 0.885 |
+| HotpotQA | mentions | embeddings | **0.665** | **0.870** | **0.965** | 0.910 |
+| HotpotQA | spacy | embeddings | 0.635 | 0.840 | 0.935 | 0.904 |
+| 2Wiki | none | embeddings | 0.667 | 0.745 | 0.777 | 0.985 |
+| 2Wiki | none | fts-raw | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | none | fts-or | 0.605 | 0.690 | 0.755 | 0.950 |
+| 2Wiki | mentions | embeddings | **0.705** | **0.825** | **0.910** | 0.990 |
+| 2Wiki | spacy | embeddings | 0.685 | 0.762 | 0.807 | 0.990 |
+| 2Wiki | oracle | embeddings | 0.845 | **0.968** | **0.968** | **0.995** |
+| MuSiQue | none | embeddings | 0.500 | 0.625 | 0.690 | 0.898 |
+| MuSiQue | none | fts-raw | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | none | fts-or | 0.465 | 0.520 | 0.565 | 0.812 |
+| MuSiQue | mentions | embeddings | 0.530 | **0.680** | **0.745** | **0.922** |
+| MuSiQue | spacy | embeddings | 0.530 | 0.665 | **0.745** | 0.914 |
+| MuSiQue | oracle | embeddings | 0.785 | 0.895 | 0.925 | 0.977 |
+
+The lexical rows are identical to the MS MARCO run. Among non-oracle graph
+settings, `mentions` leads HotpotQA and 2Wiki recall; on MuSiQue, `mentions`
+and `spacy` tie at recall@10, with `mentions` ahead at recall@5 and MRR.
+Oracle results leak gold reasoning paths and are only a ceiling.
+
 ## all-MiniLM-L6-v2: 100 questions, shared corpus
 
 Run at commit `0db8dcf` with
