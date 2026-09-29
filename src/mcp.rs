@@ -37,7 +37,6 @@ pub async fn run(overrides: ConfigOverrides) -> Result<(), Box<dyn std::error::E
 pub struct MemoryServer {
     memory: Mutex<MemoryService>,
     default_scope: String,
-    default_read_scopes: Vec<String>,
     embedding: EmbeddingConfig,
 }
 
@@ -46,11 +45,9 @@ impl MemoryServer {
         let service = MemoryService::open_default(overrides)?;
         let embedding = service.embedding_config().clone();
         let default_scope = current_scope();
-        let default_read_scopes = resolve_scopes(vec![default_scope.clone()], true);
         Ok(Self {
             memory: Mutex::new(service),
             default_scope,
-            default_read_scopes,
             embedding,
         })
     }
@@ -61,19 +58,11 @@ impl MemoryServer {
             .map_err(|_| tool_error("memory service lock is poisoned"))
     }
 
-    fn write_scopes(&self, scopes: Vec<String>) -> Vec<String> {
+    fn scopes(&self, scopes: Vec<String>) -> Vec<String> {
         if scopes.is_empty() {
             vec![self.default_scope.clone()]
         } else {
-            resolve_scopes(scopes, false)
-        }
-    }
-
-    fn read_scopes(&self, scopes: Vec<String>) -> Vec<String> {
-        if scopes.is_empty() {
-            self.default_read_scopes.clone()
-        } else {
-            resolve_scopes(scopes, true)
+            resolve_scopes(scopes)
         }
     }
 }
@@ -311,7 +300,7 @@ impl MemoryServer {
         Parameters(input): Parameters<RememberInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         validate_scopes(&input.scopes)?;
-        let scopes = self.write_scopes(input.scopes);
+        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         let stored = service.remember(RememberRequest {
             content: input.content,
@@ -349,7 +338,7 @@ impl MemoryServer {
         Parameters(input): Parameters<RecallInput>,
     ) -> Result<Json<RecallOutput>, CallToolResult> {
         validate_scopes(&input.scopes)?;
-        let scopes = self.read_scopes(input.scopes);
+        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         let found = service.search_scopes_with_embeddings(
             &input.query,
@@ -451,7 +440,7 @@ impl MemoryServer {
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
         let id = input.id;
         validate_scopes(&input.scopes)?;
-        let scopes = self.read_scopes(input.scopes);
+        let scopes = self.scopes(input.scopes);
         self.lock()?
             .forget(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
@@ -477,7 +466,7 @@ impl MemoryServer {
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
         validate_scopes(&input.scopes)?;
-        let scopes = self.read_scopes(input.scopes);
+        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         service
             .update(
@@ -507,7 +496,7 @@ impl MemoryServer {
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
         validate_scopes(&input.scopes)?;
-        let scopes = self.read_scopes(input.scopes);
+        let scopes = self.scopes(input.scopes);
         let details = self
             .lock()?
             .inspect(id, Some(&scopes))
@@ -765,7 +754,7 @@ fn current_scope() -> String {
         .unwrap_or_else(|| "global".to_owned())
 }
 
-fn resolve_scopes(scopes: Vec<String>, include_legacy: bool) -> Vec<String> {
+fn resolve_scopes(scopes: Vec<String>) -> Vec<String> {
     let mut resolved = Vec::new();
     for scope in scopes {
         let Some(path) = scope.strip_prefix("repo:") else {
@@ -777,23 +766,19 @@ fn resolve_scopes(scopes: Vec<String>, include_legacy: bool) -> Vec<String> {
         let canonical = Path::new(path).canonicalize();
         let repository = git_repository(Path::new(path));
         let Some(repo) = repository.filter(|repo| {
-            canonical
-                .as_ref()
-                .is_ok_and(|path| path == &repo.common_dir || repo.worktree_roots.contains(path))
+            canonical.as_ref().is_ok_and(|path| {
+                path == &repo.common_dir || repo.checkout_root.as_ref() == Some(path)
+            })
         }) else {
             if !resolved.contains(&scope) {
                 resolved.push(scope);
             }
             continue;
         };
-        for path in std::iter::once(repo.common_dir)
-            .chain(repo.worktree_roots.into_iter().filter(|_| include_legacy))
-        {
-            if let Some(path) = path.to_str() {
-                let value = format!("repo:{path}");
-                if !resolved.contains(&value) {
-                    resolved.push(value);
-                }
+        if let Some(path) = repo.common_dir.to_str() {
+            let value = format!("repo:{path}");
+            if !resolved.contains(&value) {
+                resolved.push(value);
             }
         }
     }

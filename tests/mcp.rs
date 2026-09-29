@@ -350,7 +350,7 @@ fn repository_scopes_are_prioritized_and_isolated() {
 }
 
 #[test]
-fn worktrees_share_scope_and_can_read_legacy_worktree_memories() {
+fn worktrees_share_scope() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is valid")
@@ -442,17 +442,7 @@ fn worktrees_share_scope_and_can_read_legacy_worktree_memories() {
         "repo:{}",
         main.join(".git").canonicalize().unwrap().display()
     );
-    let old_linked = format!("repo:{}", linked.canonicalize().unwrap().display());
-
-    // A row written by an older gmem version has only the worktree-root scope.
-    fs::create_dir_all(&home).unwrap();
-    let mut database = Database::open(&home.join("memory.sqlite")).unwrap();
-    let legacy = database
-        .create_memory("old worktree note", "observation", 0.0)
-        .unwrap();
-    let old_scope = database.create_scope(&old_linked).unwrap();
-    database.attach_scopes(legacy.id, &[old_scope.id]).unwrap();
-    drop(database);
+    let linked_scope = format!("repo:{}", linked.canonicalize().unwrap().display());
 
     let mut mcp = Mcp::start_in(&home, &main);
     let initialized = mcp.request(1, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
@@ -472,15 +462,6 @@ fn worktrees_share_scope_and_can_read_legacy_worktree_memories() {
         json!([canonical])
     );
     let id = note["result"]["structuredContent"]["id"].as_i64().unwrap();
-    let old = mcp.request(
-        3,
-        "tools/call",
-        json!({"name":"inspect","arguments":{"id":legacy.id}}),
-    );
-    assert_eq!(
-        old["result"]["structuredContent"]["content"],
-        "old worktree note"
-    );
     drop(mcp);
 
     let mut mcp = Mcp::start_in(&home, &linked);
@@ -493,22 +474,14 @@ fn worktrees_share_scope_and_can_read_legacy_worktree_memories() {
     let memories = recalled["result"]["structuredContent"]["memories"]
         .as_array()
         .unwrap_or_else(|| panic!("unexpected recall: {recalled}"));
-    assert_eq!(memories.len(), 2);
-    let old = mcp.request(
-        5,
-        "tools/call",
-        json!({"name":"update","arguments":{"id":legacy.id,"content":"revised worktree note"}}),
-    );
-    assert_eq!(
-        old["result"]["structuredContent"]["content"],
-        "revised worktree note"
-    );
+    assert_eq!(memories.len(), 1);
+    assert_eq!(memories[0]["id"], id);
     let explicit = mcp.request(6, "tools/call", json!({"name":"inspect","arguments":{"id":id,"scopes":[format!("repo:{}", main.display())]}}));
     assert_eq!(
         explicit["result"]["structuredContent"]["content"],
         "shared worktree note"
     );
-    let explicit_write = mcp.request(8, "tools/call", json!({"name":"remember","arguments":{"content":"explicit worktree note", "scopes":[old_linked]}}));
+    let explicit_write = mcp.request(8, "tools/call", json!({"name":"remember","arguments":{"content":"explicit worktree note", "scopes":[linked_scope]}}));
     assert_eq!(
         explicit_write["result"]["structuredContent"]["scopes"],
         json!([canonical])

@@ -5,7 +5,7 @@ use std::{
 
 pub struct GitRepository {
     pub common_dir: PathBuf,
-    pub worktree_roots: Vec<PathBuf>,
+    pub checkout_root: Option<PathBuf>,
 }
 
 pub fn git_repository(directory: &Path) -> Option<GitRepository> {
@@ -13,15 +13,11 @@ pub fn git_repository(directory: &Path) -> Option<GitRepository> {
     let common_dir = git(&directory, &["rev-parse", "--git-common-dir"])?;
     let common_dir = directory.join(common_dir.trim_end()).canonicalize().ok()?;
 
-    let worktrees = git(&directory, &["worktree", "list", "--porcelain", "-z"]).unwrap_or_default();
-    let worktree_roots = worktrees
-        .split('\0')
-        .filter_map(|field| field.strip_prefix("worktree "))
-        .filter_map(|root| Path::new(root).canonicalize().ok())
-        .collect();
+    let checkout_root = git(&directory, &["rev-parse", "--show-toplevel"])
+        .and_then(|root| Path::new(root.trim_end()).canonicalize().ok());
     Some(GitRepository {
         common_dir,
-        worktree_roots,
+        checkout_root,
     })
 }
 

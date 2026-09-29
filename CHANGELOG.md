@@ -27,9 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - MCP repository scopes now use Git's common directory so linked worktrees share
-  memories, including when the repository is bare. Existing worktree-root
-  memories remain readable, and explicit checkout paths resolve to the shared
-  scope; separate clones remain isolated.
+  memories, including when the repository is bare. Explicit checkout paths
+  resolve to the shared scope; separate clones remain isolated.
 - ModernBERT now rejects checkpoints with unsupported bias flags or pooling,
   and invalid attention dimensions return errors instead of panicking. Layer
   normalization load errors are no longer silently ignored.

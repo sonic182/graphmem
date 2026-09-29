@@ -72,10 +72,6 @@ is outside a repository, the default is `global`.
 
 Explicit `repo:` paths pointing to a checkout root or its common Git directory
 resolve to the same canonical scope. Other absolute paths remain literal scopes.
-New memories use the canonical scope; recall, inspect, update, and forget also
-accept old worktree-root scopes for worktrees still listed by Git. Memories from
-removed/pruned worktrees can still be reached by explicitly passing their
-original `repo:/absolute/path` (even if the directory no longer exists).
 The default is fixed at server startup: a client switching to another repository
 without restarting the MCP server must pass that repository's scope explicitly.
 Explicit scopes must be `global` or an absolute `repo:` path.
