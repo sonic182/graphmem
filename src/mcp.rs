@@ -11,7 +11,7 @@ use graphmem::{
     },
     infrastructure::config::{ConfigOverrides, EmbeddingConfig},
     infrastructure::embedding::{MAX_EMBEDDING_TOKENS, embedding_details},
-    infrastructure::repository::git_repository_root,
+    infrastructure::repository::git_repository,
 };
 use rmcp::schemars::JsonSchema;
 use rmcp::{
@@ -37,6 +37,7 @@ pub async fn run(overrides: ConfigOverrides) -> Result<(), Box<dyn std::error::E
 pub struct MemoryServer {
     memory: Mutex<MemoryService>,
     default_scope: String,
+    default_read_scopes: Vec<String>,
     embedding: EmbeddingConfig,
 }
 
@@ -44,9 +45,12 @@ impl MemoryServer {
     fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
         let service = MemoryService::open_default(overrides)?;
         let embedding = service.embedding_config().clone();
+        let default_scope = current_scope();
+        let default_read_scopes = resolve_scopes(vec![default_scope.clone()], true);
         Ok(Self {
             memory: Mutex::new(service),
-            default_scope: current_scope(),
+            default_scope,
+            default_read_scopes,
             embedding,
         })
     }
@@ -57,11 +61,19 @@ impl MemoryServer {
             .map_err(|_| tool_error("memory service lock is poisoned"))
     }
 
-    fn scopes(&self, scopes: Vec<String>) -> Vec<String> {
+    fn write_scopes(&self, scopes: Vec<String>) -> Vec<String> {
         if scopes.is_empty() {
             vec![self.default_scope.clone()]
         } else {
-            scopes
+            resolve_scopes(scopes, false)
+        }
+    }
+
+    fn read_scopes(&self, scopes: Vec<String>) -> Vec<String> {
+        if scopes.is_empty() {
+            self.default_read_scopes.clone()
+        } else {
+            resolve_scopes(scopes, true)
         }
     }
 }
@@ -299,7 +311,7 @@ impl MemoryServer {
         Parameters(input): Parameters<RememberInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
+        let scopes = self.write_scopes(input.scopes);
         let mut service = self.lock()?;
         let stored = service.remember(RememberRequest {
             content: input.content,
@@ -337,7 +349,7 @@ impl MemoryServer {
         Parameters(input): Parameters<RecallInput>,
     ) -> Result<Json<RecallOutput>, CallToolResult> {
         validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
+        let scopes = self.read_scopes(input.scopes);
         let mut service = self.lock()?;
         let found = service.search_scopes_with_embeddings(
             &input.query,
@@ -439,7 +451,7 @@ impl MemoryServer {
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
         let id = input.id;
         validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
+        let scopes = self.read_scopes(input.scopes);
         self.lock()?
             .forget(id, Some(&scopes))
             .map_err(|error| tool_error(error.to_string()))?;
@@ -465,7 +477,7 @@ impl MemoryServer {
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
         validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
+        let scopes = self.read_scopes(input.scopes);
         let mut service = self.lock()?;
         service
             .update(
@@ -495,7 +507,7 @@ impl MemoryServer {
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
         validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
+        let scopes = self.read_scopes(input.scopes);
         let details = self
             .lock()?
             .inspect(id, Some(&scopes))
@@ -517,9 +529,10 @@ impl ServerHandler for MemoryServer {
         .with_instructions(format!(
             "Graphmem has two separate local stores: scoped narrative memory and an \
                  unscoped entity graph. Omitted scopes use the Git repository containing the \
-                 server's startup working directory and include global memories during recall; \
-                 outside a Git repository they use global. Pass global or \
-                 repo:/absolute/path to choose a scope. {}",
+                 server's startup working directory (shared by linked worktrees) and include \
+                 global memories during recall; outside a Git repository they use global. \
+                 Default scope: {}. Pass global or repo:/absolute/path to choose a scope. {}",
+            self.default_scope,
             embedding_note(&self.embedding)
         ))
     }
@@ -745,9 +758,46 @@ fn validate_scopes(scopes: &[String]) -> Result<(), CallToolResult> {
 }
 
 fn current_scope() -> String {
-    git_repository_root()
-        .and_then(|path| path.to_str().map(|path| format!("repo:{path}")))
+    std::env::current_dir()
+        .ok()
+        .and_then(|path| git_repository(&path))
+        .and_then(|repo| repo.common_dir.to_str().map(|path| format!("repo:{path}")))
         .unwrap_or_else(|| "global".to_owned())
+}
+
+fn resolve_scopes(scopes: Vec<String>, include_legacy: bool) -> Vec<String> {
+    let mut resolved = Vec::new();
+    for scope in scopes {
+        let Some(path) = scope.strip_prefix("repo:") else {
+            if !resolved.contains(&scope) {
+                resolved.push(scope);
+            }
+            continue;
+        };
+        let canonical = Path::new(path).canonicalize();
+        let repository = git_repository(Path::new(path));
+        let Some(repo) = repository.filter(|repo| {
+            canonical
+                .as_ref()
+                .is_ok_and(|path| path == &repo.common_dir || repo.worktree_roots.contains(path))
+        }) else {
+            if !resolved.contains(&scope) {
+                resolved.push(scope);
+            }
+            continue;
+        };
+        for path in std::iter::once(repo.common_dir)
+            .chain(repo.worktree_roots.into_iter().filter(|_| include_legacy))
+        {
+            if let Some(path) = path.to_str() {
+                let value = format!("repo:{path}");
+                if !resolved.contains(&value) {
+                    resolved.push(value);
+                }
+            }
+        }
+    }
+    resolved
 }
 
 #[cfg(test)]

@@ -62,11 +62,23 @@ administrative surface and is not restricted this way.
 For example, a successful `remember` response contains `"id": 1`.
 
 Use `global` for reusable knowledge and `repo:/absolute/path/to/repository`
-for project-specific knowledge. If scopes are omitted, the server derives the
-repository scope from its working directory by running `git rev-parse
---show-toplevel`; it falls back to `global` when that fails, including when the
-`git` binary is not on `PATH` or the directory is not a Git repository. Explicit
-scopes must be `global` or an absolute `repo:` path.
+for project-specific knowledge. If scopes are omitted, the server resolves its
+**startup working directory** to Git's canonical common directory (`git rev-parse
+--git-common-dir`); linked worktrees share that scope, separate clones do not.
+The default scope appears in the MCP `initialize` instructions. A bare repository
+uses its own Git directory as the scope; the server does not modify Git or turn
+a checkout into a bare repository. If Git is unavailable or the startup directory
+is outside a repository, the default is `global`.
+
+Explicit `repo:` paths pointing to a checkout root or its common Git directory
+resolve to the same canonical scope. Other absolute paths remain literal scopes.
+New memories use the canonical scope; recall, inspect, update, and forget also
+accept old worktree-root scopes for worktrees still listed by Git. Memories from
+removed/pruned worktrees can still be reached by explicitly passing their
+original `repo:/absolute/path` (even if the directory no longer exists).
+The default is fixed at server startup: a client switching to another repository
+without restarting the MCP server must pass that repository's scope explicitly.
+Explicit scopes must be `global` or an absolute `repo:` path.
 
 Embeddings default to `sentence-transformers/msmarco-MiniLM-L6-cos-v5` through Candle. BERT,
 DistilBERT, Qwen3, and ModernBERT checkpoints with CLS pooling are supported;

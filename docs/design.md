@@ -45,7 +45,7 @@ Writes are transactional: a `remember` that fails to embed stores nothing.
 
 **Memory** — one durable piece of remembered information: `content`, `memory_type`, `importance`, `created_at`, `updated_at`, `last_accessed_at`, `access_count`. `memory_type` is a free string (e.g. `decision`, `convention`, `observation`); there is no fixed ontology.
 
-**Scope** — `global` or `repo:/absolute/path`. A memory may have several scopes. `recall` filters by scope before ranking, so one repository's memories never leak into another's results. When the caller omits scopes, the server uses its repository (derived with `git rev-parse --show-toplevel`) plus `global`, repository first.
+**Scope** — `global` or `repo:/absolute/path`. A memory may have several scopes. `recall` filters by scope before ranking, so one repository's memories never leak into another's results. When the caller omits scopes, the server uses the canonical Git common directory of its startup working directory (shared by linked worktrees) plus `global`, repository first. Legacy worktree-root scopes of Git-listed worktrees remain readable; new writes use the common-directory scope.
 
 **Entity** — a named thing a memory refers to (`kind` + `name` + normalized form). Kinds are strings, not an enum.
 
