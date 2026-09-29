@@ -31,16 +31,18 @@ knob), not *aggregate quality*.
       as HippoRAG evaluates; per question recall@10 ≈ 1
 - [x] Decide `BagOfWords` vs real embedder: the script uses the real one
       (`msmarco-distilbert-cos-v5`, CPU, batch 1 by default)
-- [ ] Replace (or complement) `sweeps_the_memory_channel_weight` with a
+- [x] Replace (or complement) `sweeps_the_memory_channel_weight` with a
       version that prints the aggregate metric per knob value, not just the raw
-      ranking — in the script: pass `GRAPHMEM_RETRIEVAL_*` and add a column per
-      configuration
+      ranking — `eval_retrieval.py --retrieval KNOB=VALUE,...` (repeatable)
+      adds a `config` column; `sweep_retrieval.sh` builds the grid
 - [ ] A mechanism to compare two configurations/algorithms side by side (today
       HippoRAG 2 vs HippoRAG 2 with a different `damping`; later, HippoRAG 2 vs
-      CatRAG once Phase 2 exists) over the same set
+      CatRAG once Phase 2 exists) over the same set — configurations are
+      covered by `--retrieval` over one store; algorithms still pending
 - [ ] Save results (JSON with commit, model, config, and metrics) to compare
       across commits
-- [ ] Reuse memory vectors across graphs: today each combination re-embeds them
-      (~0.4 s/paragraph on CPU)
+- [x] Reuse memory vectors across graphs: vectors are cached in
+      `.data/eval/vectors.sqlite` and seeded before `gmem reembed`, so each
+      text is embedded once per model (`--no-vector-cache` opts out)
 - [ ] spaCy relations are sparse (<1 per paragraph): consider extra patterns
       (appositions, "X is a Y") or a bigger model (`--model`)
