@@ -5,6 +5,13 @@ Summary of the retrieval-quality work. Numbers are in
 
 ## What works
 
+- **IBM Granite is a strong model, but not a universal winner.** Against the
+  MS MARCO DistilBERT baseline on the same 100-question runs, IBM improves all
+  no-graph embedding metrics on all three datasets and all HotpotQA graph
+  metrics. On 2Wiki and MuSiQue with graphs, it trades lower recall at some
+  cutoffs for higher MRR; it does not consistently beat DistilBERT on graph
+  recall. Choose based on whether first-relevant rank (MRR) or coverage of
+  supporting paragraphs (recall@k) matters more.
 - **Embeddings + graph is the best configuration** on all three benchmarks at
   the top ranks (recall@2/5, MRR). The lift comes from the graph: adding one
   beats every no-graph variant on every dataset.
