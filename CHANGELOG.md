@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Keyboard-driven `gmem tui` to browse memories and graph nodes, filter
+  memories, view colored Markdown details, edit memory text with an external
+  editor, and delete with confirmation.
+
 ### Changed
 
 - Retrieval evaluations now reuse cached vectors across graph runs and sweep

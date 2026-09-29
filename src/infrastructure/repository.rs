@@ -5,6 +5,11 @@ pub fn git_repository_root() -> Option<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(directory)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_PREFIX")
         .output()
         .ok()?;
     if !output.status.success() {
