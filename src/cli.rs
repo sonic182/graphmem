@@ -64,6 +64,7 @@ enum Command {
     Doctor,
     Migrate,
     Mcp,
+    Tui,
 }
 
 #[derive(Args)]
@@ -226,6 +227,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             println!("schema version: {}", service.schema_version()?);
         }
         Command::Mcp => crate::mcp::run(overrides).await?,
+        Command::Tui => crate::tui::run(overrides)?,
     }
     Ok(())
 }

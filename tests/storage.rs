@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use graphmem::{Database, EntityReference, Relation};
+use graphmem::{Database, EntityReference, GraphDirection, Relation};
 
 fn test_database() -> (Database, PathBuf) {
     let nonce = SystemTime::now()
@@ -105,6 +105,37 @@ fn supports_entity_and_edge_crud_with_directional_lookup() {
 }
 
 #[test]
+fn graph_paths_include_self_relations_without_retraversing_them() {
+    let (database, path) = test_database();
+    let entity = database.create_entity("component", "API", "api").unwrap();
+    let other = database
+        .create_entity("component", "Worker", "worker")
+        .unwrap();
+    let loop_edge = database
+        .create_edge(entity.id, "calls_itself", entity.id, None)
+        .unwrap();
+    database
+        .create_edge(entity.id, "calls", other.id, None)
+        .unwrap();
+
+    let paths = database
+        .graph_paths(entity.id, GraphDirection::Both, 2, 100)
+        .unwrap();
+    assert_eq!(paths.len(), 3);
+    let loop_directions = paths
+        .iter()
+        .filter(|path| path.hops[0].edge.id == loop_edge.id)
+        .map(|path| path.hops[0].direction)
+        .collect::<Vec<_>>();
+    assert_eq!(loop_directions.len(), 2);
+    assert!(loop_directions.contains(&GraphDirection::Outgoing));
+    assert!(loop_directions.contains(&GraphDirection::Incoming));
+    assert!(paths.iter().all(|path| path.hops.len() == 1));
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
 fn failed_scope_batch_rolls_back_all_associations() {
     let (mut database, path) = test_database();
     let memory = database
@@ -151,6 +182,11 @@ fn remembers_entities_and_relations_atomically() {
     assert_eq!(database.list_memory_entities(memory.id).unwrap().len(), 2);
     assert_eq!(database.list_entities().unwrap().len(), 2);
     assert_eq!(database.list_outgoing_edges(1).unwrap().len(), 1);
+    let entity_id = database.list_entities().unwrap()[0].id;
+    assert!(database.delete_entity(entity_id).unwrap());
+    assert!(database.get_memory(memory.id).unwrap().is_some());
+    assert_eq!(database.list_memory_entities(memory.id).unwrap().len(), 1);
+    assert!(database.list_all_edges().unwrap().is_empty());
     drop(database);
     remove_database(&path);
 }

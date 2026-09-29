@@ -1108,7 +1108,9 @@ impl Database {
                  FROM paths
                  JOIN ({steps}) AS step ON step.from_id = paths.node_id
                  WHERE paths.depth < ?2
-                   AND instr(paths.nodes, printf(',%d,', step.node_id)) = 0
+                   AND (paths.depth = 0 OR paths.node_id != ?1)
+                   AND (instr(paths.nodes, printf(',%d,', step.node_id)) = 0
+                        OR (paths.depth = 0 AND step.node_id = ?1))
              )
              SELECT edge_ids, directions
              FROM paths

@@ -8,8 +8,8 @@ different data directory (for example a separate dev store), and put
 [docs/mcp.md](mcp.md)) and retrieval tuning (`[retrieval]`, see the
 [README](../README.md#configuration)).
 
-Every command below opens its own connection and exits — there is no
-long-running CLI process to keep in sync with disk state.
+Commands open their own connection. `gmem tui` keeps its connection open until
+you quit; press `r` to reload changes made by another process.
 
 ## Global options
 
@@ -114,6 +114,28 @@ line per hop per path (`depth`, `direction`, `relation`, `entity kind`,
 
 Permanently delete one memory. Prints `forgot: <id>`. Exits non-zero with
 `memory not found` if the id doesn't exist.
+
+## `gmem tui`
+
+Browse memories and unscoped graph nodes in an interactive terminal. The
+memory list shows all scopes, as `gmem list` does. The graph pane shows each
+node's incoming and outgoing relations, up to 100 per node. Memory details
+render common Markdown formatting with terminal colors.
+
+| Key | Action |
+| --- | --- |
+| `Tab` | Switch between memories and graph nodes |
+| `j` / `k`, arrow keys | Move through the list |
+| `PageUp` / `PageDown` | Scroll the detail pane |
+| `/` | Filter memories by text or type as you type; `Enter` keeps the filter, `Esc` restores the previous filter, `Ctrl-U` clears it |
+| `e` | Edit the selected memory's text with `$VISUAL`, then `$EDITOR` |
+| `d` | Ask to delete the selected memory or graph node; `y` confirms, `n` or `Esc` cancels |
+| `r` | Reload both lists |
+| `q` | Quit |
+
+Deleting a graph node also removes its edges and links to memories, but keeps
+the memories. Editing preserves a memory's type and importance. The editor
+command may include arguments and runs through a POSIX shell.
 
 ## `gmem flush`
 
