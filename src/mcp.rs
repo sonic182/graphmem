@@ -10,7 +10,7 @@ use graphmem::{
         GraphDetails, GraphRequest, MemoryService, RelateRequest, RelationDetails, RememberRequest,
     },
     infrastructure::config::{ConfigOverrides, EmbeddingConfig},
-    infrastructure::embedding::embedding_details,
+    infrastructure::embedding::{MAX_EMBEDDING_TOKENS, embedding_details},
     infrastructure::repository::git_repository_root,
 };
 use rmcp::schemars::JsonSchema;
@@ -589,12 +589,13 @@ fn embedding_note(embedding: &EmbeddingConfig) -> String {
     if embedding.enabled {
         format!(
             "Recall embeds memories, entities, and relations with {}; input longer than the \
-             model's max_position_embeddings (512 tokens for MiniLM checkpoints) is truncated \
-             before embedding, so content past that limit does not affect ranking. remember, \
-             recall, and relate report truncation in their warnings field; for exact-token lookup \
-             of long content use recall with use_embeddings false, which ranks the full text \
-             lexically. Read the {} resource for the active model and its exact token limit.",
-            embedding.model, EMBEDDING_RESOURCE_URI
+             model's max_position_embeddings (512 tokens for MiniLM checkpoints), capped at {} \
+             tokens, is truncated before embedding, so content past that limit does not affect \
+             ranking. remember, recall, and relate report truncation in their warnings field; for \
+             exact-token lookup of long content use recall with use_embeddings false, which ranks \
+             the full text lexically. Read the {} resource for the active model and its exact \
+             token limit.",
+            embedding.model, MAX_EMBEDDING_TOKENS, EMBEDDING_RESOURCE_URI
         )
     } else {
         "Embeddings are disabled; recall ranks the full text with SQLite FTS5 lexical search."

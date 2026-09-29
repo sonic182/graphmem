@@ -1,4 +1,4 @@
-use candle_core::{D, DType, Module, Result, Tensor};
+use candle_core::{D, DType, Module, Result, Tensor, bail};
 use candle_nn::{
     Activation, Embedding, LayerNorm, Linear, VarBuilder, embedding, layer_norm_no_bias,
     linear_no_bias, ops::softmax_last_dim, rotary_emb::rope,
@@ -21,6 +21,13 @@ pub struct Config {
     local_rope_theta: f64,
     #[serde(default)]
     hidden_activation: Activation,
+    #[serde(default)]
+    attention_bias: bool,
+    #[serde(default)]
+    mlp_bias: bool,
+    #[serde(default)]
+    norm_bias: bool,
+    classifier_pooling: String,
 }
 
 fn default_norm_eps() -> f64 {
@@ -50,8 +57,33 @@ pub struct ModernBert {
     dtype: DType,
 }
 
+impl Config {
+    fn validate(&self) -> Result<()> {
+        if self.attention_bias || self.mlp_bias || self.norm_bias {
+            bail!("modernbert checkpoints with attention, mlp, or norm biases are not supported");
+        }
+        if self.classifier_pooling != "cls" {
+            bail!("modernbert checkpoints must use CLS pooling");
+        }
+        if self.num_attention_heads == 0
+            || self.hidden_size == 0
+            || !self.hidden_size.is_multiple_of(self.num_attention_heads)
+            || self.global_attn_every_n_layers == 0
+        {
+            bail!(
+                "invalid modernbert config: hidden_size {} must split evenly across {} attention \
+                 heads and global_attn_every_n_layers must be non-zero",
+                self.hidden_size,
+                self.num_attention_heads
+            );
+        }
+        Ok(())
+    }
+}
+
 impl ModernBert {
     pub fn load(vb: VarBuilder, config: &Config) -> Result<Self> {
+        config.validate()?;
         let hidden = config.hidden_size;
         let eps = config.norm_eps;
         let head = hidden / config.num_attention_heads;
@@ -63,7 +95,9 @@ impl ModernBert {
                 let is_local = index % config.global_attn_every_n_layers != 0;
                 let (cos, sin) = if is_local { &local } else { &global };
                 Ok(Layer {
-                    attn_norm: layer_norm_no_bias(hidden, eps, vb.pp("attn_norm")).ok(),
+                    attn_norm: (index != 0)
+                        .then(|| layer_norm_no_bias(hidden, eps, vb.pp("attn_norm")))
+                        .transpose()?,
                     wqkv: linear_no_bias(hidden, hidden * 3, vb.pp("attn.Wqkv"))?,
                     attn_out: linear_no_bias(hidden, hidden, vb.pp("attn.Wo"))?,
                     mlp_norm: layer_norm_no_bias(hidden, eps, vb.pp("mlp_norm"))?,
@@ -79,7 +113,7 @@ impl ModernBert {
             embeddings: embedding(
                 config.vocab_size,
                 hidden,
-                vb.pp("embeddings.tok_embeddings").to_dtype(DType::BF16),
+                vb.pp("embeddings.tok_embeddings"),
             )?,
             embeddings_norm: layer_norm_no_bias(hidden, eps, vb.pp("embeddings.norm"))?,
             layers,
@@ -102,20 +136,13 @@ impl ModernBert {
             None => None,
         };
         let local = if length > self.window + 1 {
-            let window = self.window as isize;
-            let mask: Vec<f32> = (0..length as isize)
-                .flat_map(|i| {
-                    (0..length as isize).map(move |j| {
-                        if (i - j).abs() > window {
-                            f32::NEG_INFINITY
-                        } else {
-                            0.0
-                        }
-                    })
-                })
-                .collect();
-            let mask =
-                Tensor::from_vec(mask, (length, length), ids.device())?.to_dtype(self.dtype)?;
+            let positions = Tensor::arange(0f32, length as f32, ids.device())?;
+            let distance = positions
+                .unsqueeze(1)?
+                .broadcast_sub(&positions.unsqueeze(0)?)?
+                .abs()?;
+            let mask = (distance.gt(self.window as f32)?.to_dtype(DType::F32)? * -1e30)?
+                .to_dtype(self.dtype)?;
             Some(match &padding {
                 Some(padding) => padding.broadcast_add(&mask)?,
                 None => mask,
@@ -183,4 +210,52 @@ fn rotary(theta: f64, head: usize, config: &Config, vb: &VarBuilder) -> Result<(
         freqs.cos()?.to_dtype(vb.dtype())?,
         freqs.sin()?.to_dtype(vb.dtype())?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    fn config() -> Config {
+        serde_json::from_str(
+            r#"{
+                "vocab_size": 100,
+                "hidden_size": 384,
+                "num_hidden_layers": 12,
+                "num_attention_heads": 12,
+                "intermediate_size": 1536,
+                "max_position_embeddings": 2048,
+                "global_attn_every_n_layers": 3,
+                "global_rope_theta": 150000.0,
+                "local_attention": 128,
+                "local_rope_theta": 160000.0,
+                "classifier_pooling": "cls"
+            }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn accepts_only_supported_pooling_and_bias_configuration() {
+        assert!(config().validate().is_ok());
+        let mut mean_pooling = config();
+        mean_pooling.classifier_pooling = "mean".to_owned();
+        assert!(mean_pooling.validate().is_err());
+        let mut biased = config();
+        biased.attention_bias = true;
+        assert!(biased.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_attention_dimensions_without_panicking() {
+        let mut zero_heads = config();
+        zero_heads.num_attention_heads = 0;
+        assert!(zero_heads.validate().is_err());
+        let mut uneven_heads = config();
+        uneven_heads.hidden_size = 385;
+        assert!(uneven_heads.validate().is_err());
+        let mut zero_spacing = config();
+        zero_spacing.global_attn_every_n_layers = 0;
+        assert!(zero_spacing.validate().is_err());
+    }
 }

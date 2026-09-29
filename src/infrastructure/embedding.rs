@@ -47,6 +47,15 @@ struct MaxLengthProbe {
     max_position_embeddings: Option<usize>,
 }
 
+// Attention memory grows quadratically with sequence length; keep CPU inference bounded.
+pub const MAX_EMBEDDING_TOKENS: usize = 2048;
+
+fn token_limit(config_bytes: &[u8]) -> Result<Option<usize>, EmbeddingError> {
+    Ok(serde_json::from_slice::<MaxLengthProbe>(config_bytes)?
+        .max_position_embeddings
+        .map(|limit| limit.min(MAX_EMBEDDING_TOKENS)))
+}
+
 enum Backbone {
     Bert(bert::BertModel),
     Qwen3(qwen3::Model),
@@ -99,8 +108,7 @@ impl Embedder {
         let model_type = serde_json::from_slice::<ModelTypeProbe>(&config_bytes)?.model_type;
         let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
-        let truncation_limit =
-            serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings;
+        let truncation_limit = token_limit(&config_bytes)?;
         if let Some(max_length) = truncation_limit {
             tokenizer
                 .with_truncation(Some(TruncationParams {
@@ -139,7 +147,8 @@ impl Embedder {
                 Backbone::Bert(bert::BertModel::load(weights, &model_config)?)
             }
             Some("modernbert") => {
-                let dtype = device.bf16_default_to_f32();
+                // Candle's BF16 CUDA kernels require Ampere or newer; F32 also supports older GPUs.
+                let dtype = DType::F32;
                 let model_config = serde_json::from_slice::<modernbert::Config>(&config_bytes)?;
                 let weights = unsafe {
                     VarBuilder::from_mmaped_safetensors(&[weights_path], dtype, &device)?
@@ -416,8 +425,7 @@ pub fn embedding_details(config: &EmbeddingConfig) -> Result<EmbeddingDetails, E
     let repository = model_repository(config)?;
     let config_path = repository.get("config.json")?;
     let config_bytes = std::fs::read(config_path)?;
-    details.max_tokens =
-        serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings;
+    details.max_tokens = token_limit(&config_bytes)?;
     Ok(details)
 }
 
@@ -482,7 +490,7 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use super::{Embedder, embedding_details, qwen_embedding_weight_name};
+    use super::{Embedder, embedding_details, qwen_embedding_weight_name, token_limit};
     use crate::infrastructure::config::{ConfigOverrides, EmbeddingConfig, embedding_config};
 
     /// Loads the configured model from `GRAPHMEM_EMBEDDING_CACHE_DIR`, or the
@@ -549,6 +557,18 @@ mod tests {
         let score =
             |vector: &Vec<f32>| -> f32 { query.iter().zip(vector).map(|(a, b)| a * b).sum() };
         assert!(score(&batched[0]) > score(&batched[2]));
+    }
+
+    #[test]
+    fn token_limit_is_capped_for_long_context_models() {
+        assert_eq!(
+            token_limit(br#"{"max_position_embeddings":32768}"#).unwrap(),
+            Some(2048)
+        );
+        assert_eq!(
+            token_limit(br#"{"max_position_embeddings":512}"#).unwrap(),
+            Some(512)
+        );
     }
 
     #[test]
