@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multilingual `ibm-granite/granite-embedding-97m-multilingual-r2`. Set it as
   `[embedding] model` and run `gmem reembed` to migrate existing vectors.
 
+### Changed
+
+- Embedding inputs are capped at 2,048 tokens (or the checkpoint's lower
+  `max_position_embeddings`) to bound long-context attention memory. Truncation
+  continues to be reported in warnings.
+- ModernBERT uses F32 inference, including on CUDA, to support GPUs without
+  BF16 kernels.
+
+### Fixed
+
+- ModernBERT now rejects checkpoints with unsupported bias flags or pooling,
+  and invalid attention dimensions return errors instead of panicking. Layer
+  normalization load errors are no longer silently ignored.
+
 ## [0.4.0] - 2026-09-28
 
 ### Added
