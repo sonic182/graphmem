@@ -7,7 +7,7 @@
 
 HotpotQA, 2WikiMultiHopQA and MuSiQue are the three benchmarks the HippoRAG
 (2) paper itself evaluates on, which is the algorithm graphmem implements
-today (see todos/graph_tune.md). Run with: uv run scripts/download_eval_datasets.py
+today (see docs/roadmap/graph-tune.md). Run with: uv run scripts/download_eval_datasets.py
 """
 
 from __future__ import annotations
