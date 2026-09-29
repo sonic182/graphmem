@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `gmem reembed` now reports model loading and per-type processing progress on
+  stderr during long migrations.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added

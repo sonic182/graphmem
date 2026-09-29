@@ -1,4 +1,7 @@
-use std::error::Error;
+use std::{
+    error::Error,
+    time::{Duration, Instant},
+};
 
 use clap::{Args, Parser, Subcommand};
 use graphmem::{
@@ -205,7 +208,16 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::Reembed => {
             let mut service = MemoryService::open_default(overrides)?;
-            let stats = service.reembed_all()?;
+            if service.embedding_config().enabled {
+                eprintln!("loading embedding model (first use may download it)...");
+            }
+            let mut last_update = Instant::now();
+            let stats = service.reembed_all(|kind, done, total| {
+                if done == 0 || done == total || last_update.elapsed() >= Duration::from_secs(2) {
+                    eprintln!("{kind}: {done}/{total} processed");
+                    last_update = Instant::now();
+                }
+            })?;
             println!(
                 "reembedded {} memories, {} entities, {} edges under the current embedding model",
                 stats.memories, stats.entities, stats.edges

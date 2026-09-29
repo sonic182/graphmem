@@ -175,6 +175,8 @@ fn memory_lifecycle_works_across_cli_processes() {
     let reembed_disabled = run(&data_dir, &["reembed"]);
     assert!(!reembed_disabled.status.success());
     assert!(String::from_utf8_lossy(&reembed_disabled.stderr).contains("embeddings are disabled"));
+    assert!(!String::from_utf8_lossy(&reembed_disabled.stderr).contains("loading embedding model"));
+    assert!(reembed_disabled.stdout.is_empty());
 
     let forgotten = stdout(run(&data_dir, &["forget", &id]));
     assert_eq!(forgotten, format!("forgot: {id}\n"));
