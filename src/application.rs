@@ -210,8 +210,8 @@ impl MemoryService {
 
     /// Returns and clears any truncation notice accumulated by embedding calls
     /// since the previous call. Embeddings ignore content past the model's
-    /// `max_position_embeddings`; callers surface this so a long memory is not
-    /// mistaken for fully embedded.
+    /// `max_position_embeddings`, capped at `MAX_EMBEDDING_TOKENS`; callers
+    /// surface this so a long memory is not mistaken for fully embedded.
     pub fn take_embedding_warning(&self) -> Option<String> {
         self.embedder
             .as_ref()

@@ -13,6 +13,7 @@ use thiserror::Error;
 use tokenizers::{Tokenizer, TruncationDirection, TruncationParams};
 
 use crate::infrastructure::config::EmbeddingConfig;
+use crate::infrastructure::modernbert;
 
 #[derive(Debug, Error)]
 pub enum EmbeddingError {
@@ -46,10 +47,20 @@ struct MaxLengthProbe {
     max_position_embeddings: Option<usize>,
 }
 
+// Attention memory grows quadratically with sequence length; keep CPU inference bounded.
+pub const MAX_EMBEDDING_TOKENS: usize = 2048;
+
+fn token_limit(config_bytes: &[u8]) -> Result<Option<usize>, EmbeddingError> {
+    Ok(serde_json::from_slice::<MaxLengthProbe>(config_bytes)?
+        .max_position_embeddings
+        .map(|limit| limit.min(MAX_EMBEDDING_TOKENS)))
+}
+
 enum Backbone {
     Bert(bert::BertModel),
     Qwen3(qwen3::Model),
     DistilBert(distilbert::DistilBertModel),
+    ModernBert(modernbert::ModernBert),
 }
 
 pub struct Embedder {
@@ -97,8 +108,7 @@ impl Embedder {
         let model_type = serde_json::from_slice::<ModelTypeProbe>(&config_bytes)?.model_type;
         let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
-        let truncation_limit =
-            serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings;
+        let truncation_limit = token_limit(&config_bytes)?;
         if let Some(max_length) = truncation_limit {
             tokenizer
                 .with_truncation(Some(TruncationParams {
@@ -136,6 +146,20 @@ impl Embedder {
                 };
                 Backbone::Bert(bert::BertModel::load(weights, &model_config)?)
             }
+            Some("modernbert") => {
+                // Candle's BF16 CUDA kernels require Ampere or newer; F32 also supports older GPUs.
+                let dtype = DType::F32;
+                let model_config = serde_json::from_slice::<modernbert::Config>(&config_bytes)?;
+                let weights = unsafe {
+                    VarBuilder::from_mmaped_safetensors(&[weights_path], dtype, &device)?
+                };
+                let max_tokens = truncation_limit.unwrap_or(MAX_EMBEDDING_TOKENS);
+                Backbone::ModernBert(modernbert::ModernBert::load(
+                    weights,
+                    &model_config,
+                    max_tokens,
+                )?)
+            }
             Some(_) => return Err(EmbeddingError::Architecture(model_type)),
         };
         // Padded batches pay off on a GPU; on CPU the padding costs more than
@@ -167,7 +191,9 @@ impl Embedder {
             Backbone::Qwen3(_) => self.embed_document(&format!(
                 "Instruct: Given a memory request, retrieve the most relevant durable memory passages and relationship facts.\nQuery: {query}"
             )),
-            Backbone::Bert(_) | Backbone::DistilBert(_) => self.embed_document(query),
+            Backbone::Bert(_) | Backbone::DistilBert(_) | Backbone::ModernBert(_) => {
+                self.embed_document(query)
+            }
         }
     }
 
@@ -191,6 +217,7 @@ impl Embedder {
                 }
                 Backbone::Bert(model) => vectors.extend(self.embed_bert(model, chunk)?),
                 Backbone::DistilBert(model) => vectors.extend(self.embed_distilbert(model, chunk)?),
+                Backbone::ModernBert(model) => vectors.extend(self.embed_modernbert(model, chunk)?),
             }
         }
         Ok(vectors)
@@ -321,6 +348,43 @@ impl Embedder {
             .map(normalize)
             .collect()
     }
+
+    fn embed_modernbert(
+        &self,
+        model: &modernbert::ModernBert,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let rows = texts
+            .iter()
+            .map(|text| self.token_ids(text))
+            .collect::<Result<Vec<_>, _>>()?;
+        let batch = rows.len();
+        let length = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut ids = Vec::with_capacity(batch * length);
+        let mut attention = Vec::with_capacity(batch * length);
+        for row in &rows {
+            for position in 0..length {
+                let token = row.get(position);
+                ids.push(token.copied().unwrap_or(0));
+                attention.push(if token.is_some() { 1f32 } else { 0f32 });
+            }
+        }
+        let input = Tensor::from_vec(ids, (batch, length), &self.device)?;
+        let attention = if rows.iter().all(|row| row.len() == length) {
+            None
+        } else {
+            Some(Tensor::from_vec(attention, (batch, length), &self.device)?)
+        };
+        model
+            .forward(&input, attention.as_ref())?
+            .narrow(1, 0, 1)?
+            .squeeze(1)?
+            .to_dtype(DType::F32)?
+            .to_vec2::<f32>()?
+            .into_iter()
+            .map(normalize)
+            .collect()
+    }
 }
 
 fn normalize(vector: Vec<f32>) -> Result<Vec<f32>, EmbeddingError> {
@@ -366,8 +430,7 @@ pub fn embedding_details(config: &EmbeddingConfig) -> Result<EmbeddingDetails, E
     let repository = model_repository(config)?;
     let config_path = repository.get("config.json")?;
     let config_bytes = std::fs::read(config_path)?;
-    details.max_tokens =
-        serde_json::from_slice::<MaxLengthProbe>(&config_bytes)?.max_position_embeddings;
+    details.max_tokens = token_limit(&config_bytes)?;
     Ok(details)
 }
 
@@ -432,7 +495,7 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use super::{Embedder, embedding_details, qwen_embedding_weight_name};
+    use super::{Embedder, embedding_details, qwen_embedding_weight_name, token_limit};
     use crate::infrastructure::config::{ConfigOverrides, EmbeddingConfig, embedding_config};
 
     /// Loads the configured model from `GRAPHMEM_EMBEDDING_CACHE_DIR`, or the
@@ -468,6 +531,49 @@ mod tests {
             .expect("long input warns about truncation");
         assert!(warning.contains("512"), "{warning}");
         assert!(embedder.take_truncation_warning().is_none());
+    }
+
+    #[test]
+    #[ignore = "downloads and runs the real embedding model"]
+    fn granite_modernbert_batch_matches_single_and_crosses_languages() {
+        let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".data");
+        let mut config = embedding_config(&data_dir, &ConfigOverrides::default()).unwrap();
+        config.model = "ibm-granite/granite-embedding-97m-multilingual-r2".to_owned();
+        config.backend = "cpu".to_owned();
+        config.batch_size = Some(3);
+        let embedder = Embedder::load(&config).unwrap();
+        let long = "token ".repeat(300);
+        let documents = [
+            "The retry policy is configured in src/transport.rs with exponential backoff.",
+            "short",
+            "The SQLite schema migrations live under src/infrastructure/migrations.",
+            &long,
+        ];
+        let batched = embedder.embed_documents(&documents).unwrap();
+        for (document, vector) in documents.iter().zip(&batched) {
+            assert_eq!(vector.len(), 384);
+            let single = embedder.embed_document(document).unwrap();
+            let cosine: f32 = single.iter().zip(vector).map(|(a, b)| a * b).sum();
+            assert!(cosine > 0.999, "{document}: cosine {cosine}");
+        }
+        let query = embedder
+            .embed_query("¿dónde se configura el retry?")
+            .unwrap();
+        let score =
+            |vector: &Vec<f32>| -> f32 { query.iter().zip(vector).map(|(a, b)| a * b).sum() };
+        assert!(score(&batched[0]) > score(&batched[2]));
+    }
+
+    #[test]
+    fn token_limit_is_capped_for_long_context_models() {
+        assert_eq!(
+            token_limit(br#"{"max_position_embeddings":32768}"#).unwrap(),
+            Some(2048)
+        );
+        assert_eq!(
+            token_limit(br#"{"max_position_embeddings":512}"#).unwrap(),
+            Some(512)
+        );
     }
 
     #[test]
