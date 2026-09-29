@@ -82,13 +82,14 @@ impl Config {
 }
 
 impl ModernBert {
-    pub fn load(vb: VarBuilder, config: &Config) -> Result<Self> {
+    pub fn load(vb: VarBuilder, config: &Config, max_tokens: usize) -> Result<Self> {
         config.validate()?;
         let hidden = config.hidden_size;
         let eps = config.norm_eps;
         let head = hidden / config.num_attention_heads;
-        let global = rotary(config.global_rope_theta, head, config, &vb)?;
-        let local = rotary(config.local_rope_theta, head, config, &vb)?;
+        let positions = rotary_positions(config.max_position_embeddings, max_tokens);
+        let global = rotary(config.global_rope_theta, head, positions, &vb)?;
+        let local = rotary(config.local_rope_theta, head, positions, &vb)?;
         let layers = (0..config.num_hidden_layers)
             .map(|index| {
                 let vb = vb.pp(format!("layers.{index}"));
@@ -194,14 +195,17 @@ impl ModernBert {
     }
 }
 
-fn rotary(theta: f64, head: usize, config: &Config, vb: &VarBuilder) -> Result<(Tensor, Tensor)> {
+fn rotary_positions(max_position_embeddings: usize, max_tokens: usize) -> usize {
+    max_position_embeddings.min(max_tokens)
+}
+
+fn rotary(theta: f64, head: usize, positions: usize, vb: &VarBuilder) -> Result<(Tensor, Tensor)> {
     let device = vb.device();
     let inv_freq: Vec<f32> = (0..head)
         .step_by(2)
         .map(|i| (1.0 / theta.powf(i as f64 / head as f64)) as f32)
         .collect();
     let inv_freq = Tensor::from_vec(inv_freq, (1, head / 2), device)?;
-    let positions = config.max_position_embeddings;
     let freqs = Tensor::arange(0u32, positions as u32, device)?
         .to_dtype(DType::F32)?
         .reshape((positions, 1))?
@@ -214,7 +218,7 @@ fn rotary(theta: f64, head: usize, config: &Config, vb: &VarBuilder) -> Result<(
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, rotary_positions};
 
     fn config() -> Config {
         serde_json::from_str(
@@ -233,6 +237,12 @@ mod tests {
             }"#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn rotary_tables_are_bounded_by_the_input_token_limit() {
+        assert_eq!(rotary_positions(32_768, 2_048), 2_048);
+        assert_eq!(rotary_positions(512, 2_048), 512);
     }
 
     #[test]

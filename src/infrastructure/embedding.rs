@@ -153,7 +153,12 @@ impl Embedder {
                 let weights = unsafe {
                     VarBuilder::from_mmaped_safetensors(&[weights_path], dtype, &device)?
                 };
-                Backbone::ModernBert(modernbert::ModernBert::load(weights, &model_config)?)
+                let max_tokens = truncation_limit.unwrap_or(MAX_EMBEDDING_TOKENS);
+                Backbone::ModernBert(modernbert::ModernBert::load(
+                    weights,
+                    &model_config,
+                    max_tokens,
+                )?)
             }
             Some(_) => return Err(EmbeddingError::Architecture(model_type)),
         };
