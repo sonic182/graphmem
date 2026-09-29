@@ -327,7 +327,10 @@ impl MemoryService {
         )
     }
 
-    pub fn reembed_all(&mut self) -> Result<ReembedStats> {
+    pub fn reembed_all(
+        &mut self,
+        mut progress: impl FnMut(&str, usize, usize),
+    ) -> Result<ReembedStats> {
         if !self.embedding_config.enabled {
             return Err(ApplicationError::EmbeddingsDisabled);
         }
@@ -353,35 +356,43 @@ impl MemoryService {
         // report still names each failing record.
         let batch_size = embedder.batch_size();
         let memories = database.list_all_memories()?;
-        for chunk in memories.chunks(batch_size) {
+        progress("memories", 0, memories.len());
+        for (index, chunk) in memories.chunks(batch_size).enumerate() {
             if fill_missing_vectors(database, embedder, chunk, &[], &[]).is_ok() {
                 stats.memories += chunk.len();
+            } else {
+                for (offset, memory) in chunk.iter().enumerate() {
+                    match memory_vector(database, embedder, memory.id, &memory.content) {
+                        Ok(_) => stats.memories += 1,
+                        Err(error) => stats
+                            .failures
+                            .push(format!("memory {}: {error}", memory.id)),
+                    }
+                    progress("memories", index * batch_size + offset + 1, memories.len());
+                }
                 continue;
             }
-            for memory in chunk {
-                match memory_vector(database, embedder, memory.id, &memory.content) {
-                    Ok(_) => stats.memories += 1,
-                    Err(error) => stats
-                        .failures
-                        .push(format!("memory {}: {error}", memory.id)),
-                }
-            }
+            progress("memories", index * batch_size + chunk.len(), memories.len());
         }
 
         let entities = database.list_entities()?;
-        for chunk in entities.chunks(batch_size) {
+        progress("entities", 0, entities.len());
+        for (index, chunk) in entities.chunks(batch_size).enumerate() {
             if fill_missing_vectors(database, embedder, &[], chunk, &[]).is_ok() {
                 stats.entities += chunk.len();
+            } else {
+                for (offset, entity) in chunk.iter().enumerate() {
+                    match entity_vector(database, embedder, entity) {
+                        Ok(_) => stats.entities += 1,
+                        Err(error) => stats
+                            .failures
+                            .push(format!("entity {}: {error}", entity.id)),
+                    }
+                    progress("entities", index * batch_size + offset + 1, entities.len());
+                }
                 continue;
             }
-            for entity in chunk {
-                match entity_vector(database, embedder, entity) {
-                    Ok(_) => stats.entities += 1,
-                    Err(error) => stats
-                        .failures
-                        .push(format!("entity {}: {error}", entity.id)),
-                }
-            }
+            progress("entities", index * batch_size + chunk.len(), entities.len());
         }
         let entities_by_id: HashMap<i64, &Entity> =
             entities.iter().map(|entity| (entity.id, entity)).collect();
@@ -397,19 +408,23 @@ impl MemoryService {
             }
             linked
         });
-        for chunk in edges.chunks(batch_size) {
+        progress("edges", 0, edges.len());
+        for (index, chunk) in edges.chunks(batch_size).enumerate() {
             if fill_missing_vectors(database, embedder, &[], &entities, chunk).is_ok() {
                 stats.edges += chunk.len();
+            } else {
+                for (offset, edge) in chunk.iter().enumerate() {
+                    let source = entities_by_id[&edge.source_id];
+                    let target = entities_by_id[&edge.target_id];
+                    match edge_vector(database, embedder, edge, source, target) {
+                        Ok(_) => stats.edges += 1,
+                        Err(error) => stats.failures.push(format!("edge {}: {error}", edge.id)),
+                    }
+                    progress("edges", index * batch_size + offset + 1, edges.len());
+                }
                 continue;
             }
-            for edge in chunk {
-                let source = entities_by_id[&edge.source_id];
-                let target = entities_by_id[&edge.target_id];
-                match edge_vector(database, embedder, edge, source, target) {
-                    Ok(_) => stats.edges += 1,
-                    Err(error) => stats.failures.push(format!("edge {}: {error}", edge.id)),
-                }
-            }
+            progress("edges", index * batch_size + chunk.len(), edges.len());
         }
 
         Ok(stats)

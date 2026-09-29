@@ -176,7 +176,13 @@ deleting first.
 
 **Batched**: records are embedded `--embedding-batch-size` at a time. If a
 batch fails, its records are retried one by one so each failure is still
-reported individually.
+reported individually. Progress goes to stderr: first a message before loading
+(or downloading) the model, then `memories: 20/100 processed`, followed by
+entities and edges. There is no percentage for model download; progress is
+reported at the start and end of each type, and otherwise at most once every
+two seconds. Counts include items already cached and items whose embedding
+failed; the final summary on stdout and any failures retain their existing
+format.
 
 **Idempotent and safe to re-run**: every item is cache-checked against
 `(model, revision)` before being recomputed, so re-running `gmem reembed`
