@@ -479,20 +479,33 @@ impl App {
             }
             Ok(fs::read_to_string(&path)?)
         })();
-        let _ = fs::remove_file(path);
-        *terminal = ratatui::try_init()?;
+        *terminal = ratatui::try_init().map_err(|error| {
+            format!(
+                "terminal recovery failed; edit kept at {}: {error}",
+                path.display()
+            )
+        })?;
         match edited {
             Ok(content) if content != previous => {
                 match self.service.update(id, Some(content), None, None, None) {
                     Ok(_) => {
+                        let _ = fs::remove_file(&path);
                         self.reload()?;
                         self.message = "Memory updated".to_owned();
                     }
-                    Err(error) => self.message = format!("Update failed: {error}"),
+                    Err(error) => {
+                        self.message =
+                            format!("Update failed: {error}; edit kept at {}", path.display());
+                    }
                 }
             }
-            Ok(_) => self.message = "No changes".to_owned(),
-            Err(error) => self.message = format!("Edit failed: {error}"),
+            Ok(_) => {
+                let _ = fs::remove_file(&path);
+                self.message = "No changes".to_owned();
+            }
+            Err(error) => {
+                self.message = format!("Edit failed: {error}; edit kept at {}", path.display());
+            }
         }
         Ok(())
     }

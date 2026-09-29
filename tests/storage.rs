@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use graphmem::{Database, EntityReference, Relation};
+use graphmem::{Database, EntityReference, GraphDirection, Relation};
 
 fn test_database() -> (Database, PathBuf) {
     let nonce = SystemTime::now()
@@ -100,6 +100,37 @@ fn supports_entity_and_edge_crud_with_directional_lookup() {
     );
     assert!(database.delete_entity(target.id).unwrap());
     assert!(database.get_edge(edge.id).unwrap().is_none());
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
+fn graph_paths_include_self_relations_without_retraversing_them() {
+    let (database, path) = test_database();
+    let entity = database.create_entity("component", "API", "api").unwrap();
+    let other = database
+        .create_entity("component", "Worker", "worker")
+        .unwrap();
+    let loop_edge = database
+        .create_edge(entity.id, "calls_itself", entity.id, None)
+        .unwrap();
+    database
+        .create_edge(entity.id, "calls", other.id, None)
+        .unwrap();
+
+    let paths = database
+        .graph_paths(entity.id, GraphDirection::Both, 2, 100)
+        .unwrap();
+    assert_eq!(paths.len(), 3);
+    let loop_directions = paths
+        .iter()
+        .filter(|path| path.hops[0].edge.id == loop_edge.id)
+        .map(|path| path.hops[0].direction)
+        .collect::<Vec<_>>();
+    assert_eq!(loop_directions.len(), 2);
+    assert!(loop_directions.contains(&GraphDirection::Outgoing));
+    assert!(loop_directions.contains(&GraphDirection::Incoming));
+    assert!(paths.iter().all(|path| path.hops.len() == 1));
     drop(database);
     remove_database(&path);
 }
