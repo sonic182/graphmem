@@ -6,9 +6,10 @@ database at `~/.graphmem` by default; set `GRAPHMEM_HOME` to point at a
 different data directory (for example a separate dev store), and put
 `config.toml` there to configure embeddings (`[embedding]`, see
 [docs/mcp.md](mcp.md)) and retrieval tuning (`[retrieval]`, see the
-[README](../README.md#configuration)).
+[README](../README.md#configuration)). Run `gmem version` to print the installed
+binary version.
 
-Commands open their own connection. `gmem tui` keeps its connection open until
+Commands that access the store open their own connection. `gmem tui` keeps its connection open until
 you quit; press `r` to reload changes made by another process.
 
 ## Global options

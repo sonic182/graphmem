@@ -350,6 +350,255 @@ fn repository_scopes_are_prioritized_and_isolated() {
 }
 
 #[test]
+fn worktrees_share_scope() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-worktree-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let (main, linked, other, home) = (
+        root.join("main"),
+        root.join("linked"),
+        root.join("other"),
+        root.join("home"),
+    );
+    fs::create_dir_all(&main).expect("test repository is created");
+    let git = |dir: &Path, args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_COMMON_DIR")
+                .env_remove("GIT_INDEX_FILE")
+                .env_remove("GIT_PREFIX")
+                .status()
+                .expect("git is available")
+                .success(),
+            "git {args:?} failed"
+        );
+    };
+    git(&main, &["init", "--quiet"]);
+    git(
+        &main,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "seed",
+        ],
+    );
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            linked.to_str().unwrap(),
+        ],
+    );
+    git(
+        &root,
+        &[
+            "clone",
+            "--quiet",
+            main.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
+    let bare = root.join("bare.git");
+    let bare_linked = root.join("bare-linked");
+    git(
+        &root,
+        &[
+            "clone",
+            "--bare",
+            "--quiet",
+            main.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    git(
+        &bare,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            bare_linked.to_str().unwrap(),
+        ],
+    );
+    let canonical = format!(
+        "repo:{}",
+        main.join(".git").canonicalize().unwrap().display()
+    );
+    let linked_scope = format!("repo:{}", linked.canonicalize().unwrap().display());
+
+    let mut mcp = Mcp::start_in(&home, &main);
+    let initialized = mcp.request(1, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    assert!(
+        initialized["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains(&canonical)
+    );
+    let note = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"shared worktree note"}}),
+    );
+    assert_eq!(
+        note["result"]["structuredContent"]["scopes"],
+        json!([canonical])
+    );
+    let id = note["result"]["structuredContent"]["id"].as_i64().unwrap();
+    drop(mcp);
+
+    let mut mcp = Mcp::start_in(&home, &linked);
+    mcp.request(11, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    let recalled = mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"worktree note", "use_embeddings":false}}),
+    );
+    let memories = recalled["result"]["structuredContent"]["memories"]
+        .as_array()
+        .unwrap_or_else(|| panic!("unexpected recall: {recalled}"));
+    assert_eq!(memories.len(), 1);
+    assert_eq!(memories[0]["id"], id);
+    let explicit = mcp.request(6, "tools/call", json!({"name":"inspect","arguments":{"id":id,"scopes":[format!("repo:{}", main.display())]}}));
+    assert_eq!(
+        explicit["result"]["structuredContent"]["content"],
+        "shared worktree note"
+    );
+    let explicit_write = mcp.request(8, "tools/call", json!({"name":"remember","arguments":{"content":"explicit worktree note", "scopes":[linked_scope]}}));
+    assert_eq!(
+        explicit_write["result"]["structuredContent"]["scopes"],
+        json!([canonical])
+    );
+    drop(mcp);
+
+    let nested = main.join("src");
+    fs::create_dir_all(&nested).unwrap();
+    let mut mcp = Mcp::start_in(&home, &nested);
+    mcp.request(13, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    let inspected = mcp.request(
+        14,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":id}}),
+    );
+    assert_eq!(
+        inspected["result"]["structuredContent"]["content"],
+        "shared worktree note"
+    );
+    let arbitrary_scope = format!("repo:{}", nested.display());
+    let custom = mcp.request(15, "tools/call", json!({"name":"remember","arguments":{"content":"custom scope", "scopes":[arbitrary_scope.clone()]}}));
+    assert_eq!(
+        custom["result"]["structuredContent"]["scopes"],
+        json!([arbitrary_scope])
+    );
+    drop(mcp);
+
+    let mut mcp = Mcp::start_in(&home, &other);
+    mcp.request(12, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    let inaccessible = mcp.request(
+        7,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":id}}),
+    );
+    assert_eq!(inaccessible["result"]["isError"], true);
+    drop(mcp);
+
+    let mut mcp = Mcp::start_in(&home, &bare);
+    mcp.request(16, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    let bare_note = mcp.request(
+        17,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"bare-linked scope note"}}),
+    );
+    let bare_scope = format!("repo:{}", bare.canonicalize().unwrap().display());
+    assert_eq!(
+        bare_note["result"]["structuredContent"]["scopes"],
+        json!([bare_scope])
+    );
+    let bare_id = bare_note["result"]["structuredContent"]["id"]
+        .as_i64()
+        .unwrap();
+    drop(mcp);
+    let mut mcp = Mcp::start_in(&home, &bare_linked);
+    mcp.request(18, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    let shared = mcp.request(
+        19,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":bare_id}}),
+    );
+    assert_eq!(
+        shared["result"]["structuredContent"]["content"],
+        "bare-linked scope note"
+    );
+    let isolated = mcp.request(
+        20,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":id}}),
+    );
+    assert_eq!(isolated["result"]["isError"], true);
+    drop(mcp);
+    fs::remove_dir_all(root).expect("MCP test data is removed");
+}
+
+#[test]
+fn bare_repository_uses_its_own_scope_without_falling_back_to_global() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-bare-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let (bare, home) = (root.join("project.git"), root.join("home"));
+    fs::create_dir_all(&root).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "--bare", "--quiet", bare.to_str().unwrap()])
+            .current_dir(&root)
+            .status()
+            .unwrap()
+            .success()
+    );
+    // A bare repository with no commits still has a stable default scope.
+    let mut mcp = Mcp::start_in(&home, &bare);
+    let response = mcp.request(1, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    assert!(
+        response["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("repo:{}", bare.canonicalize().unwrap().display()))
+    );
+    let remembered = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"bare repository note"}}),
+    );
+    assert_eq!(
+        remembered["result"]["structuredContent"]["scopes"],
+        json!([format!("repo:{}", bare.canonicalize().unwrap().display())])
+    );
+    drop(mcp);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn omitted_scopes_default_to_the_server_repository() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -378,6 +627,7 @@ fn omitted_scopes_default_to_the_server_repository() {
     let scope = format!(
         "repo:{}",
         repository
+            .join(".git")
             .canonicalize()
             .expect("repository path is canonical")
             .display()

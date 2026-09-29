@@ -63,6 +63,7 @@ enum Command {
     Reembed,
     Doctor,
     Migrate,
+    Version,
     Mcp,
     Tui,
 }
@@ -226,6 +227,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             let service = MemoryService::open_default(overrides)?;
             println!("schema version: {}", service.schema_version()?);
         }
+        Command::Version => println!("gmem {}", env!("CARGO_PKG_VERSION")),
         Command::Mcp => crate::mcp::run(overrides).await?,
         Command::Tui => crate::tui::run(overrides)?,
     }

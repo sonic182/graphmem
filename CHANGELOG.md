@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `gmem version` prints the installed binary version.
 - Keyboard-driven `gmem tui` to browse memories and graph nodes, filter
   memories, view colored Markdown details, edit memory text with an external
   editor, and delete with confirmation.
@@ -23,18 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   continues to be reported in warnings.
 - ModernBERT uses F32 inference, including on CUDA, to support GPUs without
   BF16 kernels.
-
-### Fixed
-
-- ModernBERT now rejects checkpoints with unsupported bias flags or pooling,
-  and invalid attention dimensions return errors instead of panicking. Layer
-  normalization load errors are no longer silently ignored.
-
-### Changed
-
 - Retrieval evaluations now reuse cached vectors across graph runs and sweep
   configurations over one ingested store, avoiding repeated embedding and
   ingestion work.
+
+### Fixed
+
+- MCP repository scopes now use Git's common directory so linked worktrees share
+  memories, including when the repository is bare. Explicit checkout paths
+  resolve to the shared scope; separate clones remain isolated.
+- ModernBERT now rejects checkpoints with unsupported bias flags or pooling,
+  and invalid attention dimensions return errors instead of panicking. Layer
+  normalization load errors are no longer silently ignored.
+- Graph paths now include self-relations in both directions without following
+  them repeatedly.
 
 ## [0.4.0] - 2026-09-28
 

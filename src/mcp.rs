@@ -11,7 +11,7 @@ use graphmem::{
     },
     infrastructure::config::{ConfigOverrides, EmbeddingConfig},
     infrastructure::embedding::{MAX_EMBEDDING_TOKENS, embedding_details},
-    infrastructure::repository::git_repository_root,
+    infrastructure::repository::git_repository,
 };
 use rmcp::schemars::JsonSchema;
 use rmcp::{
@@ -44,9 +44,10 @@ impl MemoryServer {
     fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
         let service = MemoryService::open_default(overrides)?;
         let embedding = service.embedding_config().clone();
+        let default_scope = current_scope();
         Ok(Self {
             memory: Mutex::new(service),
-            default_scope: current_scope(),
+            default_scope,
             embedding,
         })
     }
@@ -61,7 +62,7 @@ impl MemoryServer {
         if scopes.is_empty() {
             vec![self.default_scope.clone()]
         } else {
-            scopes
+            resolve_scopes(scopes)
         }
     }
 }
@@ -517,9 +518,10 @@ impl ServerHandler for MemoryServer {
         .with_instructions(format!(
             "Graphmem has two separate local stores: scoped narrative memory and an \
                  unscoped entity graph. Omitted scopes use the Git repository containing the \
-                 server's startup working directory and include global memories during recall; \
-                 outside a Git repository they use global. Pass global or \
-                 repo:/absolute/path to choose a scope. {}",
+                 server's startup working directory (shared by linked worktrees) and include \
+                 global memories during recall; outside a Git repository they use global. \
+                 Default scope: {}. Pass global or repo:/absolute/path to choose a scope. {}",
+            self.default_scope,
             embedding_note(&self.embedding)
         ))
     }
@@ -745,9 +747,42 @@ fn validate_scopes(scopes: &[String]) -> Result<(), CallToolResult> {
 }
 
 fn current_scope() -> String {
-    git_repository_root()
-        .and_then(|path| path.to_str().map(|path| format!("repo:{path}")))
+    std::env::current_dir()
+        .ok()
+        .and_then(|path| git_repository(&path))
+        .and_then(|repo| repo.common_dir.to_str().map(|path| format!("repo:{path}")))
         .unwrap_or_else(|| "global".to_owned())
+}
+
+fn resolve_scopes(scopes: Vec<String>) -> Vec<String> {
+    let mut resolved = Vec::new();
+    for scope in scopes {
+        let Some(path) = scope.strip_prefix("repo:") else {
+            if !resolved.contains(&scope) {
+                resolved.push(scope);
+            }
+            continue;
+        };
+        let canonical = Path::new(path).canonicalize();
+        let repository = git_repository(Path::new(path));
+        let Some(repo) = repository.filter(|repo| {
+            canonical.as_ref().is_ok_and(|path| {
+                path == &repo.common_dir || repo.checkout_root.as_ref() == Some(path)
+            })
+        }) else {
+            if !resolved.contains(&scope) {
+                resolved.push(scope);
+            }
+            continue;
+        };
+        if let Some(path) = repo.common_dir.to_str() {
+            let value = format!("repo:{path}");
+            if !resolved.contains(&value) {
+                resolved.push(value);
+            }
+        }
+    }
+    resolved
 }
 
 #[cfg(test)]
