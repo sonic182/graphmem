@@ -88,6 +88,16 @@ fn stdout(output: Output) -> String {
 }
 
 #[test]
+fn version_reports_package_version() {
+    let data_dir = data_dir();
+    assert_eq!(
+        stdout(run(&data_dir, &["version"])),
+        format!("gmem {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}
+
+#[test]
 fn memory_lifecycle_works_across_cli_processes() {
     let data_dir = data_dir();
     let remembered = stdout(run(
