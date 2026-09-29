@@ -15,6 +15,8 @@ Under the hood, Graphmem stores scoped notes and linked entities in SQLite. Reca
 - CUDA, CPU, or automatic backend selection.
 - MCP server over stdio with `remember`, `recall`, `update`, `stats`, `relate`, `graph`, `inspect`, and `forget` tools.
 - `recall` accepts `use_embeddings: false` to force lexical FTS5 ranking.
+- Keyboard-driven `gmem tui` to browse memories and graph nodes, filter and
+  edit memories, and delete with confirmation.
 
 ## Install
 
@@ -97,11 +99,17 @@ gmem remember "Use nextest for integration tests" \
   --type convention --scope repo:/absolute/path/to/project
 gmem search "integration tests"
 gmem graph component api --direction both --max-depth 2
+gmem tui
 gmem reembed
 gmem mcp
 ```
 
 The default data directory is `~/.graphmem`. Set `GRAPHMEM_HOME` to use a separate store, for example `~/.graphmem-dev`.
+
+In `gmem tui`, use `j`/`k` to navigate, `Tab` to switch between memories and
+graph nodes, and `/` to filter memories. Details render common Markdown with
+colors; `e` edits a memory through `$VISUAL` or `$EDITOR`, and `d` asks for
+confirmation before deletion.
 
 See [docs/cli.md](docs/cli.md) for the complete command reference, including `gmem reembed` (the embedding-model migration command).
 

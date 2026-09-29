@@ -151,6 +151,11 @@ fn remembers_entities_and_relations_atomically() {
     assert_eq!(database.list_memory_entities(memory.id).unwrap().len(), 2);
     assert_eq!(database.list_entities().unwrap().len(), 2);
     assert_eq!(database.list_outgoing_edges(1).unwrap().len(), 1);
+    let entity_id = database.list_entities().unwrap()[0].id;
+    assert!(database.delete_entity(entity_id).unwrap());
+    assert!(database.get_memory(memory.id).unwrap().is_some());
+    assert_eq!(database.list_memory_entities(memory.id).unwrap().len(), 1);
+    assert!(database.list_all_edges().unwrap().is_empty());
     drop(database);
     remove_database(&path);
 }
