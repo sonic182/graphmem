@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Grid sweep for gmem's [retrieval] defaults over the eval harness.
 #
-# Drives scripts/eval_retrieval.py once per config in the cartesian product of
-# the value lists passed on the command line. The harness spawns `gmem mcp`
-# children that inherit os.environ, and gmem resolves config as
-# env > flag > file > default, so exporting GRAPHMEM_RETRIEVAL_* here reaches
-# the server that answers `recall` without touching gmem.
+# Drives scripts/eval_retrieval.py once, passing one --retrieval per config in
+# the cartesian product of the value lists passed on the command line. The
+# harness ingests and embeds each dataset/graph once and starts one `gmem mcp`
+# per config over that store with GRAPHMEM_RETRIEVAL_* set, which gmem
+# resolves as env > flag > file > default.
 #
 # Each value list defaults to the built-in default, so with no arguments this
 # runs exactly the baseline config once.
@@ -88,34 +88,33 @@ mkdir -p "$(dirname "$out")"
 
 printf 'damping\tweight\ttemperature\ttop_k\tanchor\tdataset\tgraph\trecall@2\trecall@5\trecall@10\tmrr\n' >"$out"
 
-i=0
+configs=()
 for d in "${damping_vals[@]}"; do
     for w in "${weight_vals[@]}"; do
         for t in "${temperature_vals[@]}"; do
             for k in "${top_k_vals[@]}"; do
                 for a in "${anchor_vals[@]}"; do
-                    i=$((i + 1))
-                    echo "sweep $i/$total damping=$d weight=$w temperature=$t top_k=$k anchor=$a" >&2
-                    GRAPHMEM_RETRIEVAL_DAMPING="$d" \
-                        GRAPHMEM_RETRIEVAL_MEMORY_SEED_WEIGHT="$w" \
-                        GRAPHMEM_RETRIEVAL_SEED_TEMPERATURE="$t" \
-                        GRAPHMEM_RETRIEVAL_SEED_TOP_K="$k" \
-                        GRAPHMEM_RETRIEVAL_ENTITY_ANCHOR_WEIGHT="$a" \
-                        uv run scripts/eval_retrieval.py \
-                        --bin "$bin" \
-                        --datasets "${datasets[@]}" \
-                        --graphs "${graphs[@]}" \
-                        --modes embeddings \
-                        --questions "$questions" \
-                        --offset "$offset" \
-                        2>/dev/null |
-                        awk -F'\t' -v OFS='\t' -v d="$d" -v w="$w" -v t="$t" -v k="$k" -v a="$a" \
-                            'NR > 1 { print d, w, t, k, a, $1, $3, $6, $7, $8, $9 }' >>"$out"
+                    configs+=(--retrieval "damping=$d,memory_seed_weight=$w,seed_temperature=$t,seed_top_k=$k,entity_anchor_weight=$a")
                 done
             done
         done
     done
 done
+
+echo "sweep: $total config(s) over one store per dataset and graph" >&2
+uv run scripts/eval_retrieval.py \
+    --bin "$bin" \
+    --datasets "${datasets[@]}" \
+    --graphs "${graphs[@]}" \
+    --modes embeddings \
+    --questions "$questions" \
+    --offset "$offset" \
+    "${configs[@]}" |
+    awk -F'\t' -v OFS='\t' 'NR > 1 {
+        split($10, pairs, ",")
+        for (i = 1; i <= 5; i++) { split(pairs[i], kv, "="); v[i] = kv[2] }
+        print v[1], v[2], v[3], v[4], v[5], $1, $3, $6, $7, $8, $9
+    }' >>"$out"
 
 echo >&2
 echo "results: $out" >&2

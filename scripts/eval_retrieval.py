@@ -19,7 +19,10 @@ Corpus (--corpus):
 Each (dataset, graph) pair starts from a flushed store and is ingested once by
 a server with embeddings off (fast inserts). `gmem reembed` then embeds everything (in batches when
 `--batch-size` is given or gmem runs on CUDA), and a fresh server answers
-every mode, so all modes rank the same memories.
+every mode, so all modes rank the same memories. Vectors are cached in
+.data/eval/vectors.sqlite and seeded before `reembed`, so each text is
+embedded once per model (`--no-vector-cache` to embed from scratch). Each
+`--retrieval` config gets its own server over that same store.
 
 Modes:
   embeddings  recall with use_embeddings=true (semantic seeds + PPR)
@@ -61,11 +64,13 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 from collections import Counter
+from contextlib import closing
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -91,6 +96,32 @@ CORPORA = ("shared", "per-question")
 GRAPH_CACHE_DIR = DATA_DIR / "graphs"
 # Bump when extract_eval_graphs.py changes what it writes, so stale caches are not reused.
 GRAPH_CACHE_VERSION = 2
+VECTOR_CACHE = DATA_DIR / "vectors.sqlite"
+VECTOR_TABLES = {
+    "memory": (
+        "memory_embeddings",
+        "memory_id",
+        "SELECT id, content AS key FROM memories",
+    ),
+    "entity": (
+        "entity_embeddings",
+        "entity_id",
+        "SELECT id, kind || char(10) || name AS key FROM entities",
+    ),
+    "edge": (
+        "edge_embeddings",
+        "edge_id",
+        "SELECT e.id, s.name || char(10) || e.relation || char(10) || t.name AS key "
+        "FROM edges e JOIN entities s ON s.id = e.source_id JOIN entities t ON t.id = e.target_id",
+    ),
+}
+RETRIEVAL_KNOBS = (
+    "seed_top_k",
+    "seed_temperature",
+    "memory_seed_weight",
+    "entity_anchor_weight",
+    "damping",
+)
 
 
 def graph_cache_path(dataset: str, model: str) -> Path:
@@ -348,6 +379,61 @@ def graph_arguments(
     return {}
 
 
+def open_with_cache(store: Path) -> sqlite3.Connection:
+    VECTOR_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(store)
+    db.execute("ATTACH DATABASE ? AS cache", (str(VECTOR_CACHE),))
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS cache.vectors (kind TEXT, key TEXT, model TEXT, "
+        "revision TEXT, dimensions INTEGER, vector BLOB, "
+        "PRIMARY KEY (kind, key, model, revision))"
+    )
+    return db
+
+
+def seed_vectors(store: Path, model: str) -> int:
+    """Copy cached vectors for `model` into the store; returns rows seeded."""
+    seeded = 0
+    with closing(open_with_cache(store)) as db, db:
+        for kind, (table, id_column, items) in VECTOR_TABLES.items():
+            seeded += db.execute(
+                f"INSERT OR IGNORE INTO {table} ({id_column}, model, revision, dimensions, vector) "
+                f"SELECT item.id, v.model, v.revision, v.dimensions, v.vector FROM ({items}) item "
+                "JOIN cache.vectors v ON v.kind = ? AND v.key = item.key AND v.model = ?",
+                (kind, model),
+            ).rowcount
+    return seeded
+
+
+def harvest_vectors(store: Path) -> None:
+    with closing(open_with_cache(store)) as db, db:
+        for kind, (table, id_column, items) in VECTOR_TABLES.items():
+            db.execute(
+                "INSERT OR IGNORE INTO cache.vectors "
+                f"SELECT ?, item.key, e.model, e.revision, e.dimensions, e.vector FROM {table} e "
+                f"JOIN ({items}) item ON item.id = e.{id_column}",
+                (kind,),
+            )
+
+
+def embedding_model(mcp: Mcp) -> str:
+    response = mcp.request("resources/read", {"uri": "gmem://embedding"})
+    return json.loads(response["result"]["contents"][0]["text"])["model"]
+
+
+def parse_retrieval(text: str) -> dict[str, str]:
+    """`damping=0.8,seed_top_k=10` -> GRAPHMEM_RETRIEVAL_* overrides; empty is gmem's config."""
+    overrides = {}
+    for pair in filter(None, (part.strip() for part in text.split(","))):
+        knob, _, value = (part.strip() for part in pair.partition("="))
+        if knob not in RETRIEVAL_KNOBS or not value:
+            raise SystemExit(
+                f"--retrieval {pair!r}: expected KNOB=VALUE, KNOB one of {', '.join(RETRIEVAL_KNOBS)}"
+            )
+        overrides[f"GRAPHMEM_RETRIEVAL_{knob.upper()}"] = value
+    return overrides
+
+
 def call(mcp: Mcp, tool: str, arguments: dict) -> dict:
     response = mcp.request("tools/call", {"name": tool, "arguments": arguments})
     result = response.get("result") or {}
@@ -497,6 +583,17 @@ def self_check() -> None:
         "Other",
         "United States",
     ]
+    assert parse_retrieval("") == {}
+    assert parse_retrieval("damping=0.8, seed_top_k=10") == {
+        "GRAPHMEM_RETRIEVAL_DAMPING": "0.8",
+        "GRAPHMEM_RETRIEVAL_SEED_TOP_K": "10",
+    }
+    for bad in ("dampening=0.8", "damping", "damping="):
+        try:
+            parse_retrieval(bad)
+        except SystemExit:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")
     print("self-check OK")
 
 
@@ -554,6 +651,19 @@ def main() -> None:
         help="embedding batch size for reembed (default: gmem's, 1 on CPU / 16 on CUDA)",
     )
     parser.add_argument(
+        "--no-vector-cache",
+        action="store_true",
+        help=f"embed everything from scratch instead of reusing {VECTOR_CACHE.relative_to(REPO_ROOT)}, "
+        "e.g. to time reembed",
+    )
+    parser.add_argument(
+        "--retrieval",
+        action="append",
+        metavar="KNOB=VALUE,...",
+        help="evaluate the same store under this [retrieval] config; repeat for a sweep. "
+        f"Knobs: {', '.join(RETRIEVAL_KNOBS)}. Default: gmem's own config",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=600.0,
@@ -566,6 +676,9 @@ def main() -> None:
     if args.self_check:
         self_check()
         return
+    configs = [
+        (text or "default", parse_retrieval(text)) for text in args.retrieval or [""]
+    ]
 
     release = REPO_ROOT / "target" / "release" / "gmem"
     # Release first: a debug build embeds far too slowly for an eval.
@@ -585,10 +698,19 @@ def main() -> None:
         ["--embedding-batch-size", str(args.batch_size)] if args.batch_size else []
     )
 
-    def start_server(embeddings: bool) -> Mcp:
+    def start_server(embeddings: bool, overrides: dict[str, str] | None = None) -> Mcp:
         # Mcp inherits os.environ; any value but "off" enables embeddings.
         os.environ["GRAPHMEM_EMBEDDINGS"] = "on" if embeddings else "off"
-        mcp = Mcp(binary, home, timeout=args.timeout)
+        saved = {name: os.environ.get(name) for name in overrides or {}}
+        os.environ.update(overrides or {})
+        try:
+            mcp = Mcp(binary, home, timeout=args.timeout)
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name)
+                else:
+                    os.environ[name] = value
         mcp.request("initialize", CLIENT_INFO)
         return mcp
 
@@ -604,7 +726,8 @@ def main() -> None:
     log(f"binary={binary} home={home} questions={args.questions}")
     log(
         f"datasets={args.datasets} corpus={args.corpus} graphs={args.graphs} "
-        f"modes={args.modes} batch_size={args.batch_size}"
+        f"modes={args.modes} batch_size={args.batch_size} "
+        f"configs={[config for config, _ in configs]}"
     )
     rows = []
     try:
@@ -646,40 +769,66 @@ def main() -> None:
                 # (memories, graph, ids) affects the ranking.
                 log(f"{label}: flushing store")
                 gmem("flush", "--yes")
+                embeddings = any(MODES[m][0] for m in modes)
+                use_cache = embeddings and not args.no_vector_cache
                 mcp = start_server(embeddings=False)
                 try:
                     key_by_id = ingest(mcp, label, graph, examples, units, lookups)
+                    model = embedding_model(mcp) if use_cache else ""
                 finally:
                     mcp.close()
-                embeddings = any(MODES[m][0] for m in modes)
                 if embeddings:
+                    store = home / "memory.sqlite"
+                    if use_cache:
+                        seeded = seed_vectors(store, model)
+                        log(f"{label}: seeded {seeded} cached {model} vectors")
                     log(
                         f"{label}: reembedding (batch size {args.batch_size or 'default'})"
                     )
                     started = time.monotonic()
                     summary = gmem(*batch_args, "reembed")
                     log(f"{label}: {summary} in {time.monotonic() - started:.1f}s")
-                mcp = start_server(embeddings=embeddings)
-                try:
-                    for mode in modes:
-                        scores = evaluate(mcp, label, examples, key_by_id, mode)
-                        rows.append(
-                            (dataset, args.corpus, graph, mode, len(examples), scores)
-                        )
-                        log(
-                            f"{label}/{mode}: "
-                            + " ".join(f"{k}={v:.3f}" for k, v in scores.items())
-                        )
-                finally:
-                    mcp.close()
+                    if use_cache:
+                        harvest_vectors(store)
+                for number, (config, overrides) in enumerate(configs):
+                    config_modes = [m for m in modes if MODES[m][0] or number == 0]
+                    if not config_modes:
+                        continue
+                    mcp = start_server(embeddings=embeddings, overrides=overrides)
+                    try:
+                        for mode in config_modes:
+                            scores = evaluate(
+                                mcp, f"{label}/{config}", examples, key_by_id, mode
+                            )
+                            rows.append(
+                                (
+                                    dataset,
+                                    args.corpus,
+                                    graph,
+                                    mode,
+                                    len(examples),
+                                    scores,
+                                    config,
+                                )
+                            )
+                            log(
+                                f"{label}/{config}/{mode}: "
+                                + " ".join(f"{k}={v:.3f}" for k, v in scores.items())
+                            )
+                    finally:
+                        mcp.close()
     finally:
         if not args.home:
             shutil.rmtree(home, ignore_errors=True)
 
-    metrics = list(rows[0][-1]) if rows else []
-    print("\t".join(["dataset", "corpus", "graph", "mode", "n", *metrics]))
-    for *labels, count, scores in rows:
-        print("\t".join([*labels, str(count), *(f"{scores[m]:.3f}" for m in metrics)]))
+    metrics = list(rows[0][5]) if rows else []
+    print("\t".join(["dataset", "corpus", "graph", "mode", "n", *metrics, "config"]))
+    for *labels, count, scores, config in rows:
+        print(
+            "\t".join(
+                [*labels, str(count), *(f"{scores[m]:.3f}" for m in metrics), config]
+            )
+        )
 
 
 if __name__ == "__main__":
