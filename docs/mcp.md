@@ -68,7 +68,10 @@ repository scope from its working directory by running `git rev-parse
 `git` binary is not on `PATH` or the directory is not a Git repository. Explicit
 scopes must be `global` or an absolute `repo:` path.
 
-Embeddings default to `sentence-transformers/msmarco-MiniLM-L6-cos-v5` through Candle. The model is
+Embeddings default to `sentence-transformers/msmarco-MiniLM-L6-cos-v5` through Candle. BERT,
+DistilBERT, Qwen3, and ModernBERT checkpoints are supported; for multilingual
+memories (for example Spanish queries over English memories) use
+`ibm-granite/granite-embedding-97m-multilingual-r2`. The model is
 downloaded and loaded on first use (the first `remember`, `relate`, or
 `recall`) and cached under `models/` in the Graphmem data directory. Content is truncated to the model's
 `max_position_embeddings` (512 tokens for the default model) before

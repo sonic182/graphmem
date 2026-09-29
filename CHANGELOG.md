@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ModernBERT embedding checkpoints with CLS pooling, including the
+  multilingual `ibm-granite/granite-embedding-97m-multilingual-r2`. Set it as
+  `[embedding] model` and run `gmem reembed` to migrate existing vectors.
+
 ## [0.4.0] - 2026-09-28
 
 ### Added
