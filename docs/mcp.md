@@ -85,8 +85,8 @@ large checkout ahead of time, or to see which files could not be indexed, run
   `require()`, `import()`, and `import x = require()`; Ruby `require`,
   `require_relative`, and `load`; PHP `use`, `require`, and `include` (with
   `_once`); Bash `source` and `.`. Loading through other APIs is not listed, so
-  use text search when absence matters. Names are as written (JavaScript,
-  Ruby, and PHP keep their quotes) and cut at 160 characters; use the line
+  use text search when absence matters. Names are as written (quotes are
+  kept where the language has them) and cut at 160 characters; use the line
   range to read a long one.
   Imports nested in functions or modules are listed without their scope.
   Imports are not resolved to files.

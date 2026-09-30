@@ -394,7 +394,7 @@ fn imports_lists_declared_imports_across_supported_languages() {
 }
 
 #[test]
-fn imports_name_the_target_not_comments_or_parentheses() {
+fn imports_list_each_target_once_without_comments_or_parentheses() {
     let sandbox = Sandbox::new("import-targets");
     let cases = [
         (
@@ -412,6 +412,26 @@ fn imports_name_the_target_not_comments_or_parentheses() {
             "targets.php",
             "<?php\nrequire /* c */ \"x.php\";\nrequire('b.php');\nrequire(/* c */ \"p.php\");\n",
             "targets.php\tphp\tcomplete\n2-2\t\"x.php\"\n3-3\t'b.php'\n4-4\t\"p.php\"\n",
+        ),
+        (
+            "targets.rs",
+            "extern crate serde;\nuse std::fmt;\n",
+            "targets.rs\trust\tcomplete\n1-1\tserde\n2-2\tstd::fmt\n",
+        ),
+        (
+            "targets.ts",
+            "import fs = require(\"fs\");\nexport type { T } from \"./t\";\nimport b from \"./b\";\n",
+            "targets.ts\ttypescript\tcomplete\n1-1\t\"fs\"\n2-2\t\"./t\"\n3-3\t\"./b\"\n",
+        ),
+        (
+            "targets.sh",
+            "#!/bin/bash\nsource \"$DIR/x.sh\"\n. ./y.sh\n",
+            "targets.sh\tbash\tcomplete\n2-2\t\"$DIR/x.sh\"\n3-3\t./y.sh\n",
+        ),
+        (
+            "reexport.js",
+            "const é = 1; export * from \"./café\";\nexport { ü } from \"./über\";\n",
+            "reexport.js\tjavascript\tcomplete\n1-1\t\"./café\"\n2-2\t\"./über\"\n",
         ),
     ];
 

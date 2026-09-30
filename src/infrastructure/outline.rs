@@ -304,6 +304,17 @@ fn file_imports<D: Doc>(
     origin: Origin,
     symbols: &mut Vec<CodeSymbol>,
 ) {
+    if !matches!(
+        language,
+        SupportLang::Ruby
+            | SupportLang::Php
+            | SupportLang::Rust
+            | SupportLang::JavaScript
+            | SupportLang::TypeScript
+            | SupportLang::Tsx
+    ) {
+        return;
+    }
     for node in root.dfs() {
         let argument = match (language, node.kind().as_ref()) {
             (SupportLang::Ruby, "call")
