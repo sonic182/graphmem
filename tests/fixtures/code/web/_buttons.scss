@@ -21,3 +21,11 @@ $gap: 8px;
     opacity: 0.8;
   }
 }
+
+$query: "(min-width: 640px)";
+
+@media #{$query} {
+  .wide {
+    padding: $gap;
+  }
+}

@@ -562,11 +562,13 @@ fn styles<D: Doc>(root: Node<'_, D>, origin: Origin, symbols: &mut Vec<CodeSymbo
             "keyframes_statement" => {
                 child("keyframes_name").map(|name| (name.text().into_owned(), "keyframes"))
             }
-            kind @ ("media_statement" | "supports_statement") => {
+            kind @ ("media_statement" | "supports_statement") => child("block").map(|block| {
                 let text = node.text();
-                let name = text.split('{').next().unwrap_or_default().trim().to_owned();
-                Some((name, kind.trim_end_matches("_statement")))
-            }
+                let name = text[..block.range().start - node.range().start]
+                    .trim()
+                    .to_owned();
+                (name, kind.trim_end_matches("_statement"))
+            }),
             kind @ ("mixin_statement" | "function_statement") => node.field("name").map(|name| {
                 (
                     name.text().into_owned(),

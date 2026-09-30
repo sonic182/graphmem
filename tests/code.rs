@@ -295,6 +295,8 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "13-15\tfunction half",
                 "17-23\tselector .button",
                 "20-22\t  selector &:hover",
+                "27-31\tmedia @media #{$query}",
+                "28-30\t  selector .wide",
             ],
         ),
     ];
