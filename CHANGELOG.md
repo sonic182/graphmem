@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `find_symbol` refreshes the index before searching, and reports `total` and
   `truncated`. It also matches last name segments (`ConsentLive`,
   `public.users`), and leaves out imports and template usages unless `kind`
-  asks for them.
+  asks for them. `gmem mcp` keeps serving the memory tools when the code index
+  or its configuration is broken, and a corrupt `code.sqlite` is recreated.
 - Plugin session and subagent guidance points agents to `find_symbol` and
   `code_outline` when those tools are available.
 

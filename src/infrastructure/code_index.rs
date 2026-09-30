@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
 use super::sqlite::{Database, Result, StorageError};
 use crate::domain::{CodeSymbol, Coverage, SourcePoint};
@@ -112,6 +112,30 @@ impl CodeIndex {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        match Self::connect(path) {
+            Err(StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _)))
+                if matches!(
+                    error.code,
+                    ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt
+                ) =>
+            {
+                for suffix in ["", "-wal", "-shm"] {
+                    let mut file = path.as_os_str().to_owned();
+                    file.push(suffix);
+                    match std::fs::remove_file(&file) {
+                        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                            return Err(error.into());
+                        }
+                        _ => {}
+                    }
+                }
+                Self::connect(path)
+            }
+            result => result,
+        }
+    }
+
+    fn connect(path: &Path) -> Result<Self> {
         let connection = Connection::open(path)?;
         connection.execute_batch(
             "PRAGMA foreign_keys = ON;
@@ -208,11 +232,16 @@ impl CodeIndex {
         Ok(())
     }
 
-    pub fn remove_file(&self, checkout: i64, path: &str) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM files WHERE checkout_id = ?1 AND path = ?2",
-            params![checkout, path],
-        )?;
+    pub fn remove_files(&mut self, checkout: i64, paths: &[&str]) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        {
+            let mut delete =
+                transaction.prepare("DELETE FROM files WHERE checkout_id = ?1 AND path = ?2")?;
+            for path in paths {
+                delete.execute(params![checkout, path])?;
+            }
+        }
+        transaction.commit()?;
         Ok(())
     }
 

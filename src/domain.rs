@@ -186,6 +186,7 @@ pub enum Coverage {
     Complete,
     /// Symbols were extracted, but some of the file may be missing from them.
     Partial(String),
+    Skipped(String),
 }
 
 #[cfg(feature = "code")]
@@ -194,13 +195,17 @@ impl Coverage {
         match self {
             Self::Complete => "complete".to_owned(),
             Self::Partial(reason) => format!("partial: {reason}"),
+            Self::Skipped(reason) => format!("skipped: {reason}"),
         }
     }
 
     pub fn from_text(text: &str) -> Self {
-        match text.strip_prefix("partial: ") {
-            Some(reason) => Self::Partial(reason.to_owned()),
-            None => Self::Complete,
+        if let Some(reason) = text.strip_prefix("partial: ") {
+            Self::Partial(reason.to_owned())
+        } else if let Some(reason) = text.strip_prefix("skipped: ") {
+            Self::Skipped(reason.to_owned())
+        } else {
+            Self::Complete
         }
     }
 }

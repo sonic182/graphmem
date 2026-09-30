@@ -53,7 +53,14 @@ impl MemoryServer {
         #[cfg_attr(not(feature = "code"), allow(unused_mut))]
         let mut tool_router = Self::tool_router();
         #[cfg(feature = "code")]
-        let code = CodeService::open_default()?.map(Mutex::new);
+        let code = match CodeService::open_default() {
+            Ok(code) => code.map(Mutex::new),
+            Err(error) => {
+                tracing::warn!(%error, "code tools disabled");
+                eprintln!("warning: code tools disabled: {error}");
+                None
+            }
+        };
         #[cfg(feature = "code")]
         if code.is_some() {
             tool_router += Self::code_router();

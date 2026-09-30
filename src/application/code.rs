@@ -69,7 +69,6 @@ enum Stat {
 
 enum Parsed {
     Rows(FileRows),
-    Skipped,
     Failed(String),
 }
 
@@ -124,7 +123,14 @@ impl CodeService {
             };
             match stat(&root, path, known.get(path)) {
                 Stat::Unchanged => {
-                    report.unchanged += 1;
+                    if known
+                        .get(path)
+                        .is_some_and(|file| matches!(file.coverage, Coverage::Skipped(_)))
+                    {
+                        report.skipped += 1;
+                    } else {
+                        report.unchanged += 1;
+                    }
                     kept.insert(path);
                 }
                 Stat::Changed(stamp) => pending.push((path, stamp)),
@@ -148,11 +154,14 @@ impl CodeService {
                 for ((path, _), parsed) in chunk.iter().zip(parsed) {
                     match parsed {
                         Parsed::Rows(file) => {
+                            if matches!(file.coverage, Coverage::Skipped(_)) {
+                                report.skipped += 1;
+                            } else {
+                                report.indexed += 1;
+                            }
                             rows.push(file);
-                            report.indexed += 1;
                             kept.insert(path);
                         }
-                        Parsed::Skipped => report.skipped += 1,
                         Parsed::Failed(error) => report.failed.push(format!("{path}: {error}")),
                     }
                 }
@@ -160,12 +169,13 @@ impl CodeService {
             }
         }
         progress(pending.len(), pending.len());
-        for path in known.keys() {
-            if !kept.contains(path.as_str()) {
-                self.index.remove_file(checkout, path)?;
-                report.removed += 1;
-            }
-        }
+        let removed = known
+            .keys()
+            .map(String::as_str)
+            .filter(|path| !kept.contains(path))
+            .collect::<Vec<_>>();
+        self.index.remove_files(checkout, &removed)?;
+        report.removed = removed.len();
         Ok(report)
     }
 
@@ -179,28 +189,27 @@ impl CodeService {
         }
         let checkout = self.index.ensure_checkout(&root_key(&root)?)?;
         let known = self.index.file(checkout, &path)?;
-        let skipped = match stat(&root, &path, known.as_ref()) {
-            Stat::Unchanged => false,
+        match stat(&root, &path, known.as_ref()) {
+            Stat::Unchanged => {}
             Stat::Changed(stamp) => match parse_file(&root, &path, stamp) {
-                Parsed::Rows(file) => {
-                    self.index.replace_files(checkout, &[file])?;
-                    false
-                }
-                Parsed::Skipped => true,
+                Parsed::Rows(file) => self.index.replace_files(checkout, &[file])?,
                 Parsed::Failed(error) => return Err(code_error(format!("{path}: {error}"))),
             },
-            Stat::Skipped => true,
-        };
-        if skipped {
-            self.index.remove_file(checkout, &path)?;
-            return Err(code_error(format!(
-                "{path}: not indexed (binary, larger than {MAX_FILE_BYTES} bytes, or not a regular file)"
-            )));
+            Stat::Skipped => {
+                self.index.remove_files(checkout, &[&path])?;
+                return Err(code_error(format!(
+                    "{path}: not indexed (larger than {MAX_FILE_BYTES} bytes, not a regular \
+                     file, or outside the checkout)"
+                )));
+            }
         }
         let file = self
             .index
             .file(checkout, &path)?
             .ok_or(ApplicationError::NotFound("indexed file"))?;
+        if let Coverage::Skipped(reason) = &file.coverage {
+            return Err(code_error(format!("{path}: not indexed ({reason})")));
+        }
         Ok(FileOutline {
             symbols: self.index.symbols(file.id)?,
             path: file.path,
@@ -266,35 +275,40 @@ fn stat(root: &Path, path: &str, known: Option<&IndexedFile>) -> Stat {
     }
     let stamp = FileStamp::of(&metadata);
     if known.is_some_and(|file| file.stamp == stamp) {
-        Stat::Unchanged
-    } else {
-        Stat::Changed(stamp)
+        return Stat::Unchanged;
+    }
+    match root.join(path).canonicalize() {
+        Ok(real) if real.starts_with(root) => Stat::Changed(stamp),
+        _ => Stat::Skipped,
     }
 }
 
 fn parse_file(root: &Path, path: &str, stamp: FileStamp) -> Parsed {
     let absolute = root.join(path);
     let Some(language) = CodeLanguage::for_path(&absolute) else {
-        return Parsed::Skipped;
+        return Parsed::Failed("unsupported file type".to_owned());
     };
     let bytes = match fs::read(&absolute) {
         Ok(bytes) => bytes,
         Err(error) => return Parsed::Failed(error.to_string()),
     };
+    let rows = |coverage, symbols| {
+        Parsed::Rows(FileRows {
+            path: path.to_owned(),
+            language: language.name().to_owned(),
+            stamp,
+            coverage,
+            symbols,
+        })
+    };
     if bytes[..bytes.len().min(8192)].contains(&0) {
-        return Parsed::Skipped;
+        return rows(Coverage::Skipped("binary".to_owned()), Vec::new());
     }
     let Ok(source) = String::from_utf8(bytes) else {
-        return Parsed::Failed("not valid UTF-8".to_owned());
+        return rows(Coverage::Skipped("not valid UTF-8".to_owned()), Vec::new());
     };
     let outline = outline(language, &source);
-    Parsed::Rows(FileRows {
-        path: path.to_owned(),
-        language: language.name().to_owned(),
-        stamp,
-        coverage: outline.coverage,
-        symbols: outline.symbols,
-    })
+    rows(outline.coverage, outline.symbols)
 }
 
 fn checkout_root(directory: &Path) -> Result<PathBuf> {

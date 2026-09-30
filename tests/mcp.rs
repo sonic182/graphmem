@@ -23,6 +23,10 @@ impl Mcp {
     }
 
     fn spawn(home: &Path, directory: &Path, code: &str) -> Self {
+        Self::spawn_with(home, directory, &[("GRAPHMEM_CODE", code)])
+    }
+
+    fn spawn_with(home: &Path, directory: &Path, envs: &[(&str, &str)]) -> Self {
         fs::create_dir_all(home).expect("MCP test home is created");
         fs::write(home.join("config.toml"), "[embedding]\nenabled = false\n")
             .expect("MCP test embeddings are disabled");
@@ -31,7 +35,7 @@ impl Mcp {
             .env("GRAPHMEM_HOME", home)
             .env("GIT_DIR", home.join("not-a-repository"))
             .env("GIT_WORK_TREE", home)
-            .env("GRAPHMEM_CODE", code)
+            .envs(envs.iter().copied())
             .current_dir(directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1364,4 +1368,76 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     assert_eq!(escaped["result"]["isError"], true);
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP code test data is removed");
+}
+
+#[test]
+fn code_failures_leave_the_memory_tools_available() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-code-failure-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let home = root.join("home");
+    let repo = root.join("repo");
+    fs::create_dir_all(&repo).expect("repository is created");
+    fs::write(repo.join("app.py"), "def ping():\n    pass\n").expect("source file is written");
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .status()
+            .expect("git runs")
+            .success()
+    );
+    fs::create_dir_all(&home).expect("home is created");
+    fs::write(home.join("code.sqlite"), "not a database").expect("corrupt index is written");
+
+    let tool_names = |mcp: &mut Mcp| {
+        mcp.request(
+            1,
+            "initialize",
+            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+        );
+        mcp.request(2, "tools/list", json!({}))["result"]["tools"]
+            .as_array()
+            .expect("tool list")
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    let mut mcp = Mcp::spawn_with(&home, &repo, &[("GRAPHMEM_CODE", "on")]);
+    let names = tool_names(&mut mcp);
+    assert!(names.contains(&"recall".to_owned()));
+    assert!(names.contains(&"find_symbol".to_owned()));
+    let outline = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"code_outline","arguments":{"path":"app.py"}}),
+    );
+    assert_eq!(
+        outline["result"]["structuredContent"]["symbols"][0]["name"],
+        "ping"
+    );
+    drop(mcp);
+
+    let mut mcp = Mcp::spawn_with(
+        &home,
+        &repo,
+        &[
+            ("GRAPHMEM_CODE", "on"),
+            ("GRAPHMEM_CODE_INDEX_THREADS", "0"),
+        ],
+    );
+    let names = tool_names(&mut mcp);
+    assert!(names.contains(&"recall".to_owned()));
+    assert!(!names.contains(&"find_symbol".to_owned()));
+    drop(mcp);
+    fs::remove_dir_all(root).expect("MCP code failure test data is removed");
 }

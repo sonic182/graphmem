@@ -290,10 +290,20 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     fs::write(sandbox.repo.join(".gitignore"), "ignored.py\n").expect("gitignore is written");
     fs::write(sandbox.repo.join("ignored.py"), "def hidden():\n    pass\n")
         .expect("ignored file is written");
+    fs::write(
+        sandbox.repo.join("app/latin1.py"),
+        b"def caf\xe9():\n    pass\n",
+    )
+    .expect("Latin-1 file is written");
     assert_eq!(sandbox.run(&["code", "find", "hidden"]), "");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
+    );
+    assert!(
+        sandbox
+            .fail(&["code", "outline", "app/latin1.py"])
+            .contains("not valid UTF-8")
     );
 
     let service = sandbox.repo.join("app/service.py");
@@ -309,7 +319,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 17 unchanged, 0 removed"),
+        reindexed.contains("0 indexed, 17 unchanged, 0 removed, 1 skipped"),
         "{reindexed}"
     );
 
@@ -357,6 +367,17 @@ fn refuses_paths_that_leave_the_checkout() {
             .fail(&["code", "outline", "link.py"])
             .contains("symlinks")
     );
+
+    let vendor = sandbox.repo.join("vendor");
+    fs::create_dir_all(&vendor).expect("vendor directory is created");
+    fs::write(vendor.join("lib.py"), "def vendored():\n    pass\n").expect("vendor file");
+    git(&sandbox.repo, &["add", "vendor"]);
+    fs::remove_dir_all(&vendor).expect("vendor directory is removed");
+    let outside_dir = sandbox.root.join("outside_dir");
+    fs::create_dir_all(&outside_dir).expect("outside directory is created");
+    fs::write(outside_dir.join("lib.py"), "def secret_dir():\n    pass\n")
+        .expect("outside directory file is written");
+    std::os::unix::fs::symlink(&outside_dir, &vendor).expect("directory symlink");
 
     sandbox.run(&["code", "index"]);
     assert_eq!(sandbox.run(&["code", "find", "secret"]), "");

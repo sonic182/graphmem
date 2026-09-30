@@ -110,6 +110,17 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       timing.
 - [ ] Content hash in the stamp if size + mtime ever reports a changed file as
       fresh.
+- [ ] Two binaries with different `INDEX_VERSION`s sharing one
+      `$GRAPHMEM_HOME` (e.g. a plugin and a dev build) wipe each other's
+      `code.sqlite` on open, and a server already running keeps writing its
+      older output into the rebuilt file. Name the file by version
+      (`code-v{N}.sqlite`) or store the version per checkout.
+- [ ] Code tools hold a `std::sync::Mutex` on a Tokio worker for a whole
+      refresh (seconds on a first index); several parallel `find_symbol`
+      calls can stall the memory tools. Run them through `spawn_blocking`.
+- [ ] Checkout rows are never pruned: removed worktrees, temp clones, and any
+      absolute `root` an agent passed keep their rows. Drop checkouts whose
+      root no longer exists, e.g. during `code_index`.
 - [ ] Only then consider references, imports across files, or a call graph.
       Add an edge only when its target can be resolved reliably; carry
       uncertainty/coverage rather than presenting guesses as facts.
