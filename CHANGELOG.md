@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-30
+
+### Fixed
+
+- Windows MSVC builds with the `code` feature use the upstream SCSS grammar
+  build fix, which selects a compiler-compatible warning flag. Other platforms
+  retain the crates.io dependency. CI now checks this feature on Windows before
+  release builds.
+
 ## [0.7.0] - 2026-09-30
 
 ### Added
@@ -169,7 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.7.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.7.1...HEAD
+[0.7.1]: https://github.com/sonic182/graphmem/releases/tag/0.7.1
 [0.7.0]: https://github.com/sonic182/graphmem/releases/tag/0.7.0
 [0.6.0]: https://github.com/sonic182/graphmem/releases/tag/0.6.0
 [0.5.0]: https://github.com/sonic182/graphmem/releases/tag/0.5.0

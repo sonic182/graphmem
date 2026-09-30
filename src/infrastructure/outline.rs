@@ -12,6 +12,8 @@ use ast_grep_outline::{
     extractor::parse_outline_rules,
     model::{OutlineEntry, SymbolType},
 };
+#[cfg(windows)]
+use tree_sitter_scss_windows as tree_sitter_scss;
 
 use crate::domain::{CodeSymbol, Coverage, SourcePoint, nest_symbols};
 

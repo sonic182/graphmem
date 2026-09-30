@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "graphmem"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ast-grep-core",
  "ast-grep-language",
@@ -1628,7 +1628,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tree-sitter-heex",
- "tree-sitter-scss",
+ "tree-sitter-scss 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tree-sitter-scss 1.0.0 (git+https://github.com/tree-sitter-grammars/tree-sitter-scss?rev=9ab738d22bb248771d42e8678d1a307d14990df1)",
  "tree-sitter-sequel",
  "tree-sitter-zig",
 ]
@@ -4458,6 +4459,15 @@ name = "tree-sitter-scss"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33909a9ca86390ebbf3461e9949c4bbe2767d2d024b486306d27616641d4ba24"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-scss"
+version = "1.0.0"
+source = "git+https://github.com/tree-sitter-grammars/tree-sitter-scss?rev=9ab738d22bb248771d42e8678d1a307d14990df1#9ab738d22bb248771d42e8678d1a307d14990df1"
 dependencies = [
  "cc",
  "tree-sitter",
