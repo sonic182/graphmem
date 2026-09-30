@@ -97,6 +97,14 @@ cargo build --features code
 
 On GPUs older than Ampere (compute capability below 8.0, such as GTX 16xx and RTX 20xx), recent toolkits (CUDA 12.9 and 13.x) fail to build: `candle-kernels` 0.11 redefines `__hmax_nan`/`__hmin_nan`, which those headers now provide (`nvcc` fails in `src/compatibility.cuh`). This is tracked upstream in [huggingface/candle#3737](https://github.com/huggingface/candle/issues/3737). Make sure `nvcc` is on `PATH` (on Arch/Manjaro, `/opt/cuda/bin`).
 
+For full performance on the machine that will run it, build for the local CPU so the compiler can use its newest instructions (AVX2, AVX-512, and so on). This speeds up CPU embedding inference in particular. Drop `cuda` from the feature list if you have no CUDA toolkit:
+
+```sh
+RUSTFLAGS="-C target-cpu=native" cargo build --release --features cuda,code
+```
+
+A `target-cpu=native` binary may crash with an illegal instruction on older or different CPUs. Build it on the machine that runs it, and do not ship it. Release artifacts target a generic CPU.
+
 The binary is `target/debug/gmem` or `target/release/gmem`.
 
 ## CLI
