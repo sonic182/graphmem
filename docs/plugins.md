@@ -22,7 +22,7 @@ claude plugin marketplace add sonic182/graphmem
 claude plugin install graphmem@graphmem
 ```
 
-The plugin provides three things: the `graphmem-mcp-for-dev` skill, the `SessionStart`/`SubagentStart` hooks that inject the recall/store and code-navigation guidance into every session and subagent, and the `gmem mcp` server through its bundled `.mcp.json`, which exposes the `remember`/`recall`/`update`/`relate`/`graph`/`inspect`/`forget` tools. Nothing else is needed.
+The plugin provides three things: the `graphmem-mcp-for-dev` and `graphmem-code-analysis` skills, the `SessionStart`/`SubagentStart` hooks that inject the recall/store and code-navigation guidance into every session and subagent, and the `gmem mcp` server through its bundled `.mcp.json`, which exposes the `remember`/`recall`/`update`/`relate`/`graph`/`inspect`/`forget` tools. Nothing else is needed.
 
 After installing, run `/mcp` and confirm the `gmem` server is listed. Claude Code has open bugs where a plugin's `.mcp.json` is not copied into the plugin cache, so if it is missing, register the server explicitly:
 
@@ -59,7 +59,7 @@ codex plugin marketplace add sonic182/graphmem
 codex plugin add graphmem@graphmem
 ```
 
-The plugin provides the `graphmem-mcp-for-dev` skill, the lifecycle hooks, and the `gmem mcp` server through its bundled `.mcp.json`. After installing, run `/mcp` and confirm the `gmem` server is listed; if it is missing, register it explicitly:
+The plugin provides the `graphmem-mcp-for-dev` and `graphmem-code-analysis` skills, the lifecycle hooks, and the `gmem mcp` server through its bundled `.mcp.json`. After installing, run `/mcp` and confirm the `gmem` server is listed; if it is missing, register it explicitly:
 
 ```sh
 codex mcp add gmem -- gmem mcp
@@ -91,7 +91,7 @@ With `gmem` installed, install the plugin directly from GitHub (no npm publicati
 opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
-The plugin provides three things: the `graphmem-mcp-for-dev` skill (registered through `skills.paths`), the recall/store and code-navigation guidance injected into the system prompt (the memory part is also preserved across compaction), and the `gmem mcp` server registered through the plugin `config` hook. An existing user-defined `gmem` MCP entry is left unchanged. Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand, which has known cache/path-resolution issues.
+The plugin provides three things: the `graphmem-mcp-for-dev` and `graphmem-code-analysis` skills (registered through `skills.paths`), the recall/store and code-navigation guidance injected into the system prompt (the memory part is also preserved across compaction), and the `gmem mcp` server registered through the plugin `config` hook. An existing user-defined `gmem` MCP entry is left unchanged. Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand, which has known cache/path-resolution issues.
 
 Pin to a commit for reproducibility, and re-run with `--force` to update:
 
@@ -110,7 +110,7 @@ Restart OpenCode after installing or changing the plugin, then run `opencode mcp
 
 ## pi
 
-pi has no built-in MCP support, so install [`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) and configure `gmem mcp` once in pi's shared MCP config. The Graphmem package itself only adds its skill and session-start guidance.
+pi has no built-in MCP support, so install [`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) and configure `gmem mcp` once in pi's shared MCP config. The Graphmem package itself only adds its skills and session-start guidance.
 
 With `gmem` installed, set up pi:
 
