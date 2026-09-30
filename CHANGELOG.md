@@ -12,11 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gmem reembed` now reports model loading and per-type processing progress on
   stderr during long migrations.
 - Optional `code` Cargo feature (on in release builds): `gmem code
-  index|outline|find` and the read-only `code_outline` and `find_symbol` MCP
-  tools outline Python, JavaScript/JSX, TypeScript/TSX, Elixir (with `~H`),
-  HEEx, EEx, Ruby, PHP, SQL, Bash, and HTML `<script>` from a separate,
-  rebuildable index per Git checkout. `[code] enabled = false` or
-  `GRAPHMEM_CODE=off` hides them.
+  index|outline|find` and the `code_index`, `code_outline`, and `find_symbol`
+  MCP tools outline Rust, Go, Zig, C, C++, Python, JavaScript/JSX,
+  TypeScript/TSX, Elixir (with `~H`), HEEx, EEx, Ruby, PHP, SQL, Bash, and
+  HTML `<script>` from a separate, rebuildable index per Git checkout.
+  `[code] enabled = false` or `GRAPHMEM_CODE=off` hides them.
 
 ## [0.5.0] - 2026-09-29
 

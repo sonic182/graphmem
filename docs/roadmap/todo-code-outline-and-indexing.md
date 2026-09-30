@@ -4,9 +4,9 @@
 
 Let an agent find definitions and navigate source without confusing generated code
 facts with Graphmem's durable, user-verified memories. Target languages:
-Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix (`.ex`, `.exs`, inline
-`~H`, `.heex`, `.eex`, including `.html.heex` and `.html.eex`), Ruby, PHP,
-SQL, Bash, and HTML (`<script>`).
+Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
+(`.ex`, `.exs`, inline `~H`, `.heex`, `.eex`, including `.html.heex` and
+`.html.eex`), Ruby, PHP, SQL, Bash, and HTML (`<script>`).
 
 ## Boundaries
 
@@ -55,6 +55,13 @@ SQL, Bash, and HTML (`<script>`).
       build-dependency pin downgrades the lockfile's `cc`; re-check on upgrades.
 - [x] Bash `function_definition`; HTML `<script>` bodies outlined as
       JavaScript at their file position.
+- [x] Rust, Go, C and C++ reuse ast-grep's grammars and bundled rules. Rust
+      `impl` blocks are named `impl <Type>`, and C++ `namespace` blocks are
+      added so namespaced functions get a parent. `.h` headers are parsed as
+      C++, whose grammar also accepts nearly all C.
+- [x] Zig via `tree-sitter-zig` 1.1.2 (MIT), with a syntax walk: functions,
+      `const X = struct/enum/union/opaque/error{…}` containers, their
+      fields, `@import`s, and `test "…"` blocks. Other constants are left out.
 
 **Gate:** met on `tests/fixtures/code`. Files with syntax errors report
 `partial: syntax errors`, never `complete`.
@@ -80,7 +87,9 @@ SQL, Bash, and HTML (`<script>`).
 - [x] `find_symbol(query, kind?, limit?, root?)`: bounded matches, exact names
       first, with paths, parents and freshness; never a single "resolved"
       target.
-- [x] `gmem code index|outline|find`; progress on stderr. No MCP index tool.
+- [x] `code_index(root?)`: incremental refresh from MCP, bounded like the CLI,
+      with no progress output since stdout carries only JSON-RPC.
+- [x] `gmem code index|outline|find`; progress on stderr.
 
 ## 4. Validate value before expanding
 

@@ -14,6 +14,7 @@ code = [
     "dep:ast-grep-outline",
     "dep:tree-sitter-heex",
     "dep:tree-sitter-sequel",
+    "dep:tree-sitter-zig",
 ]
 
 [[bin]]
@@ -44,13 +45,18 @@ ast-grep-core = { version = "0.45.3", optional = true }
 ast-grep-outline = { version = "0.45.3", optional = true }
 tree-sitter-heex = { version = "0.8.1", optional = true }
 tree-sitter-sequel = { version = "0.3.11", optional = true }
+tree-sitter-zig = { version = "1.1.2", optional = true }
 ast-grep-language = { version = "0.45.3", default-features = false, features = [
     "tree-sitter-bash",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
     "tree-sitter-elixir",
+    "tree-sitter-go",
     "tree-sitter-html",
     "tree-sitter-javascript",
     "tree-sitter-typescript",
     "tree-sitter-python",
     "tree-sitter-ruby",
     "tree-sitter-php",
+    "tree-sitter-rust",
 ], optional = true }

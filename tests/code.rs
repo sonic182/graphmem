@@ -106,9 +106,71 @@ fn git(directory: &Path, args: &[&str]) {
 fn outlines_every_supported_language_with_nesting_and_ranges() {
     let sandbox = Sandbox::new("languages");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("12 indexed"), "{indexed}");
+    assert!(indexed.contains("18 indexed"), "{indexed}");
 
     let expectations: &[(&str, &[&str])] = &[
+        (
+            "native/lib.rs",
+            &[
+                "\trust\tcomplete",
+                "1-1\timport std::fmt",
+                "3-7\tmodule billing",
+                "4-6\t  function charge",
+                "9-11\tstruct Invoice",
+                "13-17\timpl Invoice",
+                "14-16\t  method new",
+                "20-22\t  method fmt",
+                "25-31\tinterface Priced",
+                "28-30\t  method discounted",
+                "34-34\t  enumMember Draft",
+            ],
+        ),
+        (
+            "native/main.go",
+            &[
+                "\tgo\tcomplete",
+                "5-7\tstruct Server",
+                "6-6\t  field Addr",
+                "9-11\tmethod Start",
+                "14-14\t  method Serve",
+                "17-19\tfunction main",
+            ],
+        ),
+        (
+            "native/util.c",
+            &[
+                "\tc\tcomplete",
+                "3-6\tstruct point",
+                "8-8\tenum color",
+                "10-12\tfunction add",
+            ],
+        ),
+        (
+            "native/widget.h",
+            &[
+                "\tcpp\tcomplete",
+                "5-12\tclass Widget",
+                "7-7\t  constructor Widget",
+                "8-8\t  method name",
+            ],
+        ),
+        (
+            "native/widget.cpp",
+            &["3-9\tnamespace ui", "5-7\t  function render"],
+        ),
+        (
+            "native/build.zig",
+            &[
+                "\tzig\tcomplete",
+                "1-1\timport std",
+                "3-10\tstruct Point",
+                "4-4\t  field x",
+                "7-9\t  function sum",
+                "12-12\tenum Mode",
+                "16-18\tfunction main",
+                "20-23\ttest point sum",
+            ],
+        ),
         (
             "lib/demo_web/components/core_components.ex",
             &[
@@ -259,7 +321,7 @@ fn refreshes_edits_and_deletes_and_reports_stale_matches() {
     );
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 11 unchanged, 1 removed"),
+        reindexed.contains("0 indexed, 17 unchanged, 1 removed"),
         "{reindexed}"
     );
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");

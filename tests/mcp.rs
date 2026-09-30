@@ -1308,6 +1308,7 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap().to_owned())
         .collect::<Vec<_>>();
+    assert!(names.contains(&"code_index".to_owned()));
     assert!(names.contains(&"code_outline".to_owned()));
     assert!(names.contains(&"find_symbol".to_owned()));
 
@@ -1321,11 +1322,16 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         unindexed["result"]["content"][0]["text"]
             .as_str()
             .expect("error text")
-            .contains("gmem code index")
+            .contains("code_index")
     );
 
+    let indexed = mcp.request(4, "tools/call", json!({"name":"code_index","arguments":{}}));
+    let report = &indexed["result"]["structuredContent"];
+    assert_eq!(report["indexed"], 1);
+    assert_eq!(report["failed_total"], 0);
+
     let outline = mcp.request(
-        4,
+        7,
         "tools/call",
         json!({"name":"code_outline","arguments":{"path":"lib/billing.ex"}}),
     );
@@ -1347,6 +1353,10 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     assert_eq!(matches[0]["path"], "lib/billing.ex");
     assert_eq!(matches[0]["parent"], "Billing");
     assert_eq!(matches[0]["freshness"], "fresh");
+
+    let reindexed = mcp.request(8, "tools/call", json!({"name":"code_index","arguments":{}}));
+    assert_eq!(reindexed["result"]["structuredContent"]["indexed"], 0);
+    assert_eq!(reindexed["result"]["structuredContent"]["unchanged"], 1);
 
     let escaped = mcp.request(
         6,

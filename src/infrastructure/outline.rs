@@ -18,37 +18,48 @@ use crate::domain::{CodeSymbol, Coverage, SourcePoint, nest_symbols};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeLanguage {
     Bash,
+    C,
+    Cpp,
     Eex,
     Elixir,
+    Go,
     Heex,
     Html,
     JavaScript,
     Php,
     Python,
     Ruby,
+    Rust,
     Sql,
     Tsx,
     TypeScript,
+    Zig,
 }
 
-const LANGUAGE_NAMES: [(CodeLanguage, &str); 12] = [
+const LANGUAGE_NAMES: [(CodeLanguage, &str); 17] = [
     (CodeLanguage::Bash, "bash"),
+    (CodeLanguage::C, "c"),
+    (CodeLanguage::Cpp, "cpp"),
     (CodeLanguage::Eex, "eex"),
     (CodeLanguage::Elixir, "elixir"),
+    (CodeLanguage::Go, "go"),
     (CodeLanguage::Heex, "heex"),
     (CodeLanguage::Html, "html"),
     (CodeLanguage::JavaScript, "javascript"),
     (CodeLanguage::Php, "php"),
     (CodeLanguage::Python, "python"),
     (CodeLanguage::Ruby, "ruby"),
+    (CodeLanguage::Rust, "rust"),
     (CodeLanguage::Sql, "sql"),
     (CodeLanguage::Tsx, "tsx"),
     (CodeLanguage::TypeScript, "typescript"),
+    (CodeLanguage::Zig, "zig"),
 ];
 
 impl CodeLanguage {
     /// Routes by the last extension, so `.html.heex` is HEEx and `.html.eex`
-    /// is EEx rather than HTML.
+    /// is EEx rather than HTML. `.h` headers go to C++, whose grammar also
+    /// accepts nearly all C.
     pub fn for_path(path: &Path) -> Option<Self> {
         let name = path.file_name()?.to_str()?;
         if matches!(name, "Gemfile" | "Rakefile") {
@@ -57,17 +68,24 @@ impl CodeLanguage {
         let (_, extension) = name.rsplit_once('.')?;
         Some(match extension {
             "sh" | "bash" => Self::Bash,
+            "c" => Self::C,
+            "h" | "cc" | "cpp" | "cxx" | "c++" | "hh" | "hpp" | "hxx" | "h++" | "ipp" | "tpp" => {
+                Self::Cpp
+            }
             "eex" | "leex" => Self::Eex,
             "ex" | "exs" => Self::Elixir,
+            "go" => Self::Go,
             "heex" => Self::Heex,
             "html" | "htm" => Self::Html,
             "js" | "mjs" | "cjs" | "jsx" => Self::JavaScript,
             "php" => Self::Php,
             "py" | "pyi" => Self::Python,
             "rb" | "rake" | "gemspec" => Self::Ruby,
+            "rs" => Self::Rust,
             "sql" => Self::Sql,
             "tsx" => Self::Tsx,
             "ts" | "mts" | "cts" => Self::TypeScript,
+            "zig" | "zon" => Self::Zig,
             _ => return None,
         })
     }
@@ -98,20 +116,28 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
     let origin = Origin::default();
     let errors = match language {
         CodeLanguage::Bash => bash(source, &mut symbols),
+        CodeLanguage::C => bundled(SupportLang::C, source, origin, &mut symbols),
+        CodeLanguage::Cpp => {
+            cpp_namespaces(source, &mut symbols);
+            bundled(SupportLang::Cpp, source, origin, &mut symbols)
+        }
         CodeLanguage::Eex => {
             eex(source, &mut symbols);
             false
         }
         CodeLanguage::Elixir => elixir(source, &mut symbols),
+        CodeLanguage::Go => bundled(SupportLang::Go, source, origin, &mut symbols),
         CodeLanguage::Heex => heex(source, origin, &mut symbols),
         CodeLanguage::Html => html(source, &mut symbols),
         CodeLanguage::JavaScript => bundled(SupportLang::JavaScript, source, origin, &mut symbols),
         CodeLanguage::Php => bundled(SupportLang::Php, source, origin, &mut symbols),
         CodeLanguage::Python => bundled(SupportLang::Python, source, origin, &mut symbols),
         CodeLanguage::Ruby => bundled(SupportLang::Ruby, source, origin, &mut symbols),
+        CodeLanguage::Rust => bundled(SupportLang::Rust, source, origin, &mut symbols),
         CodeLanguage::Sql => sql(source, &mut symbols),
         CodeLanguage::Tsx => bundled(SupportLang::Tsx, source, origin, &mut symbols),
         CodeLanguage::TypeScript => bundled(SupportLang::TypeScript, source, origin, &mut symbols),
+        CodeLanguage::Zig => zig(source, &mut symbols),
     };
     nest_symbols(&mut symbols);
     let coverage = if language == CodeLanguage::Eex {
@@ -148,11 +174,15 @@ impl Origin {
     }
 }
 
-const BUNDLED: [SupportLang; 6] = [
+const BUNDLED: [SupportLang; 10] = [
+    SupportLang::C,
+    SupportLang::Cpp,
+    SupportLang::Go,
     SupportLang::JavaScript,
     SupportLang::Php,
     SupportLang::Python,
     SupportLang::Ruby,
+    SupportLang::Rust,
     SupportLang::Tsx,
     SupportLang::TypeScript,
 ];
@@ -228,6 +258,8 @@ fn bundled_items<'r>(
     for item in extractors.extract(node.clone()) {
         let kind = if item.is_import {
             "import".to_owned()
+        } else if item.entry.ast_kind == "impl_item" {
+            "impl".to_owned()
         } else {
             symbol_kind(item.entry.symbol_type)
         };
@@ -262,7 +294,7 @@ fn symbol_kind(symbol_type: SymbolType) -> String {
 fn entry_symbol(entry: &OutlineEntry<'_>, kind: String, origin: Origin) -> CodeSymbol {
     let range = &entry.range;
     CodeSymbol {
-        name: entry.name.to_string(),
+        name: symbol_name(&entry.name),
         kind,
         parent: None,
         start: origin.point(range.start.line, range.start.column),
@@ -275,13 +307,23 @@ fn node_symbol<D: Doc>(node: &Node<'_, D>, name: String, kind: &str, origin: Ori
     let start = node.start_pos();
     let end = node.end_pos();
     CodeSymbol {
-        name,
+        name: symbol_name(&name),
         kind: kind.to_owned(),
         parent: None,
         start: origin.point(start.line(), start.column(node)),
         end: origin.point(end.line(), end.column(node)),
         signature: signature(&node.text()),
     }
+}
+
+/// A multi-line name such as `use a::{b, c}` becomes one line.
+fn symbol_name(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(160)
+        .collect()
 }
 
 fn signature(text: &str) -> String {
@@ -324,6 +366,7 @@ macro_rules! grammar {
 
 grammar!(Heex, tree_sitter_heex::LANGUAGE);
 grammar!(Sql, tree_sitter_sequel::LANGUAGE);
+grammar!(Zig, tree_sitter_zig::LANGUAGE);
 
 fn elixir(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     let grep = SupportLang::Elixir.ast_grep(source);
@@ -475,6 +518,65 @@ fn sql(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
         ));
     }
     has_errors(&root)
+}
+
+/// Zig containers are values (`const Point = struct { ... }`), so a
+/// declaration is a symbol only when its value is a container or an import;
+/// other constants and variables are left out.
+fn zig(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
+    let grep = Zig.ast_grep(source);
+    let root = grep.root();
+    for node in root.dfs() {
+        let symbol = match node.kind().as_ref() {
+            "function_declaration" => node
+                .field("name")
+                .map(|name| (name.text().into_owned(), "function")),
+            "container_field" => node
+                .field("name")
+                .map(|name| (name.text().into_owned(), "field")),
+            "test_declaration" => node
+                .children()
+                .find(|child| matches!(child.kind().as_ref(), "string" | "identifier"))
+                .map(|name| (name.text().trim_matches('"').to_owned(), "test")),
+            "variable_declaration" => zig_declaration(&node),
+            _ => None,
+        };
+        if let Some((name, kind)) = symbol {
+            symbols.push(node_symbol(&node, name, kind, Origin::default()));
+        }
+    }
+    has_errors(&root)
+}
+
+fn zig_declaration<D: Doc>(node: &Node<'_, D>) -> Option<(String, &'static str)> {
+    let name = node.children().find(|child| child.kind() == "identifier")?;
+    let kind = node
+        .children()
+        .find_map(|child| match child.kind().as_ref() {
+            "struct_declaration" => Some("struct"),
+            "enum_declaration" => Some("enum"),
+            "union_declaration" => Some("union"),
+            "opaque_declaration" => Some("opaque"),
+            "error_set_declaration" => Some("error_set"),
+            "builtin_function" if child.text().starts_with("@import") => Some("import"),
+            _ => None,
+        })?;
+    Some((name.text().into_owned(), kind))
+}
+
+/// The bundled C++ rules skip namespaces, which leaves namespaced functions
+/// without a parent.
+fn cpp_namespaces(source: &str, symbols: &mut Vec<CodeSymbol>) {
+    let grep = SupportLang::Cpp.ast_grep(source);
+    for node in grep.root().dfs() {
+        if node.kind() != "namespace_definition" {
+            continue;
+        }
+        let name = node
+            .field("name")
+            .map_or_else(|| "(anonymous)".to_owned(), |name| name.text().into_owned());
+        symbols.push(node_symbol(&node, name, "namespace", Origin::default()));
+    }
 }
 
 fn bash(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {

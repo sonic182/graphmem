@@ -176,7 +176,7 @@ impl CodeService {
         let root = checkout_root(directory)?;
         let Some(checkout) = self.index.checkout(&root_key(&root)?)? else {
             return Err(code_error(format!(
-                "{} is not indexed; run `gmem code index` in it",
+                "{} is not indexed; call the code_index tool or run `gmem code index` in it",
                 root.display()
             )));
         };
