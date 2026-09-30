@@ -1,5 +1,7 @@
 const eventName = process.argv[2];
 
+const CODE = `Code navigation: when the gmem \`find_symbol\` and \`code_outline\` tools are listed, use them to find a definition by name or to list a file's symbols before grepping or reading whole files; they keep their own index fresh. Use \`rg\`/\`ast-grep\` for plain text, call sites, and references, which they do not index.`;
+
 const MAIN = `Graphmem (gmem) is connected as an MCP server for durable project memory.
 
 Recall: before investigating or changing code for a substantive task (coding, debugging, review, refactoring, planning, maintenance), call \`recall\` exactly once with \`limit\` 3 to 5 and a query naming the concrete component, symbol, error, or decision. Natural language and paraphrases work.
@@ -12,11 +14,15 @@ Update, do not duplicate: recall the topic first, and when a stored memory is no
 
 Skip both for logistical or no-code requests, and when Graphmem is unavailable. Never store secrets, private data, speculation, temporary progress updates, raw debugging output, or source code that can be read from the repository.
 
+${CODE}
+
 Load the \`graphmem-mcp-for-dev\` skill for the full contract before storing anything, or before using \`update\`, \`relate\`, \`graph\`, \`inspect\`, or \`forget\`.`;
 
 const SUBAGENT = `Graphmem (gmem) is connected as an MCP server for durable project memory.
 
 If your task involves code, call \`recall\` exactly once with \`limit\` 3 to 5 and a query naming the concrete component, symbol, error, or decision. Treat a weak or off-topic result as "nothing known" and continue from the code.
+
+${CODE}
 
 Do not call \`remember\`, \`update\`, \`relate\`, or \`forget\`. Report what you found and let the main agent decide what is durable enough to store, so parallel agents do not write duplicate or unverified memories.`;
 

@@ -64,6 +64,14 @@ pub struct RuntimeConfig {
     pub worker_threads: usize,
 }
 
+#[cfg(feature = "code")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodeConfig {
+    pub enabled: bool,
+    pub max_files: usize,
+    pub index_threads: Option<usize>,
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("configuration error: {0}")]
@@ -79,6 +87,24 @@ struct FileConfig {
     embedding: Option<FileEmbeddingConfig>,
     retrieval: Option<FileRetrievalConfig>,
     runtime: Option<FileRuntimeConfig>,
+    #[cfg(feature = "code")]
+    code: Option<toml::Value>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Default, Deserialize)]
+struct FileCodeConfig {
+    enabled: Option<bool>,
+    max_files: Option<usize>,
+    index_threads: Option<FileThreads>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FileThreads {
+    Count(usize),
+    Name(String),
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -232,6 +258,51 @@ pub fn runtime_config(data_dir: &Path) -> Result<RuntimeConfig, ConfigError> {
         ));
     }
     Ok(RuntimeConfig { worker_threads })
+}
+
+#[cfg(feature = "code")]
+pub fn code_config(data_dir: &Path) -> Result<CodeConfig, ConfigError> {
+    let file: FileCodeConfig = read_file_config(data_dir)?
+        .code
+        .map(toml::Value::try_into)
+        .transpose()?
+        .unwrap_or_default();
+    let max_files = env_number("GRAPHMEM_CODE_MAX_FILES")?
+        .or(file.max_files)
+        .unwrap_or(20_000);
+    if max_files == 0 {
+        return Err(ConfigError::Invalid(
+            "code.max_files must be at least 1".to_owned(),
+        ));
+    }
+    let index_threads = match (env_value("GRAPHMEM_CODE_INDEX_THREADS"), file.index_threads) {
+        (Some(value), _) | (None, Some(FileThreads::Name(value))) => index_threads(&value)?,
+        (None, Some(FileThreads::Count(count))) => index_threads(&count.to_string())?,
+        (None, None) => None,
+    };
+    Ok(CodeConfig {
+        enabled: env::var("GRAPHMEM_CODE")
+            .ok()
+            .map(|value| value != "off")
+            .or(file.enabled)
+            .unwrap_or(true),
+        max_files,
+        index_threads,
+    })
+}
+
+#[cfg(feature = "code")]
+fn index_threads(value: &str) -> Result<Option<usize>, ConfigError> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("auto") {
+        return Ok(None);
+    }
+    match value.parse::<usize>() {
+        Ok(count) if count >= 1 => Ok(Some(count)),
+        _ => Err(ConfigError::Invalid(
+            "code.index_threads must be \"auto\" or a positive integer".to_owned(),
+        )),
+    }
 }
 
 fn env_value(name: &str) -> Option<String> {

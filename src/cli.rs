@@ -57,10 +57,14 @@ struct Cli {
 enum Command {
     Remember(RememberArgs),
     List(ListArgs),
-    Show { id: i64 },
+    Show {
+        id: i64,
+    },
     Search(SearchArgs),
     Graph(GraphArgs),
-    Forget { id: i64 },
+    Forget {
+        id: i64,
+    },
     Flush(FlushArgs),
     Scopes,
     Reembed,
@@ -69,6 +73,27 @@ enum Command {
     Version,
     Mcp,
     Tui,
+    /// Outline and find symbols in the current Git checkout.
+    #[cfg(feature = "code")]
+    #[command(subcommand)]
+    Code(CodeCommand),
+}
+
+#[cfg(feature = "code")]
+#[derive(Subcommand)]
+enum CodeCommand {
+    /// Index the Git checkout containing PATH (default: the current directory).
+    Index { path: Option<std::path::PathBuf> },
+    /// List the symbols in FILE, re-indexing it first if it changed.
+    Outline { file: String },
+    /// Find indexed symbols by name, exact matches first.
+    Find {
+        query: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
 }
 
 #[derive(Args)]
@@ -242,6 +267,85 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         Command::Version => println!("gmem {}", env!("CARGO_PKG_VERSION")),
         Command::Mcp => crate::mcp::run(overrides).await?,
         Command::Tui => crate::tui::run(overrides)?,
+        #[cfg(feature = "code")]
+        Command::Code(command) => run_code(command)?,
+    }
+    Ok(())
+}
+
+#[cfg(feature = "code")]
+fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
+    let Some(mut service) = graphmem::application::code::CodeService::open_default()? else {
+        return Err("code tools are disabled ([code] enabled = false or GRAPHMEM_CODE=off)".into());
+    };
+    let directory = std::env::current_dir()?;
+    match command {
+        CodeCommand::Index { path } => {
+            let mut last_update = Instant::now();
+            let report = service.index(&path.unwrap_or(directory), |done, total| {
+                if done == total || last_update.elapsed() >= Duration::from_secs(2) {
+                    eprintln!("indexed {done}/{total} files");
+                    last_update = Instant::now();
+                }
+            })?;
+            println!(
+                "{}: {} indexed, {} unchanged, {} removed, {} skipped",
+                report.root.display(),
+                report.indexed,
+                report.unchanged,
+                report.removed,
+                report.skipped
+            );
+            if report.truncated {
+                eprintln!("warning: too many source files; the rest were not indexed");
+            }
+            for failure in &report.failed {
+                eprintln!("failed: {failure}");
+            }
+        }
+        CodeCommand::Outline { file } => {
+            let outline = service.outline(&directory, &file)?;
+            println!(
+                "{}\t{}\t{}",
+                outline.path,
+                outline.language,
+                outline.coverage.as_text()
+            );
+            for symbol in &outline.symbols {
+                let depth =
+                    std::iter::successors(symbol.parent, |&parent| outline.symbols[parent].parent)
+                        .count();
+                println!(
+                    "{}-{}\t{}{} {}",
+                    symbol.start.line,
+                    symbol.end.line,
+                    "  ".repeat(depth),
+                    symbol.kind,
+                    symbol.name
+                );
+            }
+        }
+        CodeCommand::Find { query, kind, limit } => {
+            let found = service.find_symbol(&directory, &query, kind.as_deref(), limit)?;
+            if found.truncated {
+                eprintln!("warning: too many source files; some were not indexed");
+            }
+            if found.total > found.hits.len() {
+                eprintln!("showing {} of {} matches", found.hits.len(), found.total);
+            }
+            for hit in found.hits {
+                println!(
+                    "{}:{}:{}\t{}\t{}\t{}\t{}",
+                    hit.path,
+                    hit.symbol.start.line,
+                    hit.symbol.start.column,
+                    hit.symbol.kind,
+                    hit.symbol.name,
+                    hit.parent.unwrap_or_default(),
+                    hit.freshness.as_str()
+                );
+            }
+        }
     }
     Ok(())
 }

@@ -41,7 +41,7 @@ jobs:
               exit 1
             }
           fi
-      - run: cargo build --release --locked
+      - run: cargo build --release --locked --features code
       - name: Package and smoke-test archive
         run: |
           name="gmem-${{ steps.version.outputs.version }}-${{ matrix.target }}"

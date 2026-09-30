@@ -23,6 +23,6 @@ jobs:
       - run: cargo check --workspace --all-targets --message-format=short
       # Not --all-features: the cuda feature only switches candle to cudarc,
       # whose build script needs nvcc, and gates no code of ours to lint.
-      - run: cargo clippy --workspace --all-targets --message-format=short -- -D warnings
-      - run: cargo nextest run --workspace --no-fail-fast --no-tests=pass
+      - run: cargo clippy --workspace --all-targets --features code --message-format=short -- -D warnings
+      - run: cargo nextest run --workspace --features code --no-fail-fast --no-tests=pass
       - run: cargo test --lib granite_modernbert_batch_matches_single_and_crosses_languages -- --ignored

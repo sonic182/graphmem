@@ -19,14 +19,31 @@ impl Mcp {
     }
 
     fn start_in(home: &Path, directory: &Path) -> Self {
+        Self::spawn(home, directory, "off")
+    }
+
+    fn spawn(home: &Path, directory: &Path, code: &str) -> Self {
+        Self::spawn_with(home, directory, &[("GRAPHMEM_CODE", code)])
+    }
+
+    fn spawn_with(home: &Path, directory: &Path, envs: &[(&str, &str)]) -> Self {
+        Self::spawn_with_config(home, directory, envs, "[embedding]\nenabled = false\n")
+    }
+
+    fn spawn_with_config(
+        home: &Path,
+        directory: &Path,
+        envs: &[(&str, &str)],
+        config: &str,
+    ) -> Self {
         fs::create_dir_all(home).expect("MCP test home is created");
-        fs::write(home.join("config.toml"), "[embedding]\nenabled = false\n")
-            .expect("MCP test embeddings are disabled");
+        fs::write(home.join("config.toml"), config).expect("MCP test config is written");
         let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
             .env("GRAPHMEM_HOME", home)
             .env("GIT_DIR", home.join("not-a-repository"))
             .env("GIT_WORK_TREE", home)
+            .envs(envs.iter().copied())
             .current_dir(directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -92,6 +109,7 @@ fn serves_memory_lifecycle_over_stdio() {
     assert!(instructions.contains("two separate local stores"));
     assert!(instructions.contains("unscoped entity graph"));
     assert!(instructions.contains("Embeddings are disabled"));
+    assert!(!instructions.contains("find_symbol"));
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
@@ -1252,4 +1270,188 @@ fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
     );
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP test data is removed");
+}
+
+#[cfg(feature = "code")]
+#[test]
+fn code_tools_are_listed_by_default_and_outline_the_checkout() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-code-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let home = root.join("home");
+    let repo = root.join("repo");
+    fs::create_dir_all(repo.join("lib")).expect("repository is created");
+    fs::write(
+        repo.join("lib/billing.ex"),
+        "defmodule Billing do\n  def charge(amount), do: amount\nend\n",
+    )
+    .expect("source file is written");
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .status()
+            .expect("git runs")
+            .success()
+    );
+    let mut mcp = Mcp::spawn(&home, &repo, "on");
+    let initialized = mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    assert!(
+        initialized["result"]["instructions"]
+            .as_str()
+            .expect("server instructions")
+            .contains("find_symbol")
+    );
+    let tools = mcp.request(2, "tools/list", json!({}));
+    let names = tools["result"]["tools"]
+        .as_array()
+        .expect("tool list")
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert!(!names.contains(&"code_index".to_owned()));
+    assert!(names.contains(&"code_outline".to_owned()));
+    assert!(names.contains(&"find_symbol".to_owned()));
+
+    let unindexed = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"find_symbol","arguments":{"query":"charge"}}),
+    );
+    let unindexed = &unindexed["result"]["structuredContent"];
+    assert_eq!(unindexed["matches"][0]["name"], "charge/1");
+    assert_eq!(unindexed["total"], 1);
+    assert_eq!(unindexed["truncated"], false);
+
+    let outline = mcp.request(
+        7,
+        "tools/call",
+        json!({"name":"code_outline","arguments":{"path":"lib/billing.ex"}}),
+    );
+    let outline = &outline["result"]["structuredContent"];
+    assert_eq!(outline["coverage"], "complete");
+    assert_eq!(outline["total"], 2);
+    assert_eq!(outline["symbols"][0]["name"], "Billing");
+    assert_eq!(outline["symbols"][1]["name"], "charge/1");
+    assert_eq!(outline["symbols"][1]["parent"], 0);
+    assert_eq!(outline["symbols"][1]["start_line"], 2);
+
+    let found = mcp.request(
+        5,
+        "tools/call",
+        json!({"name":"find_symbol","arguments":{"query":"charge"}}),
+    );
+    let matches = &found["result"]["structuredContent"]["matches"];
+    assert_eq!(matches.as_array().expect("matches").len(), 1);
+    assert_eq!(matches[0]["path"], "lib/billing.ex");
+    assert_eq!(matches[0]["parent"], "Billing");
+    assert_eq!(matches[0]["freshness"], "fresh");
+
+    let escaped = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"code_outline","arguments":{"path":"../home/config.toml"}}),
+    );
+    assert_eq!(escaped["result"]["isError"], true);
+    drop(mcp);
+    fs::remove_dir_all(root).expect("MCP code test data is removed");
+}
+
+#[test]
+fn code_failures_leave_the_memory_tools_available() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-code-failure-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let home = root.join("home");
+    let repo = root.join("repo");
+    fs::create_dir_all(&repo).expect("repository is created");
+    fs::write(repo.join("app.py"), "def ping():\n    pass\n").expect("source file is written");
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .status()
+            .expect("git runs")
+            .success()
+    );
+    fs::create_dir_all(&home).expect("home is created");
+    fs::write(home.join("code.sqlite"), "not a database").expect("corrupt index is written");
+
+    let tool_names = |mcp: &mut Mcp| {
+        mcp.request(
+            1,
+            "initialize",
+            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+        );
+        mcp.request(2, "tools/list", json!({}))["result"]["tools"]
+            .as_array()
+            .expect("tool list")
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    let mut mcp = Mcp::spawn_with(&home, &repo, &[("GRAPHMEM_CODE", "on")]);
+    let names = tool_names(&mut mcp);
+    assert!(names.contains(&"recall".to_owned()));
+    assert!(names.contains(&"find_symbol".to_owned()));
+    let outline = mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"code_outline","arguments":{"path":"app.py"}}),
+    );
+    assert_eq!(
+        outline["result"]["structuredContent"]["symbols"][0]["name"],
+        "ping"
+    );
+    drop(mcp);
+
+    let mut mcp = Mcp::spawn_with(
+        &home,
+        &repo,
+        &[
+            ("GRAPHMEM_CODE", "on"),
+            ("GRAPHMEM_CODE_INDEX_THREADS", "0"),
+        ],
+    );
+    let names = tool_names(&mut mcp);
+    assert!(names.contains(&"recall".to_owned()));
+    assert!(!names.contains(&"find_symbol".to_owned()));
+    drop(mcp);
+
+    for invalid in ["max_files = -1", "enabled = 'yes'", "index_threads = false"] {
+        for code in ["on", "off"] {
+            let config = format!("[embedding]\nenabled = false\n[code]\n{invalid}\n");
+            let mut mcp = Mcp::spawn_with_config(&home, &repo, &[("GRAPHMEM_CODE", code)], &config);
+            let names = tool_names(&mut mcp);
+            assert!(names.contains(&"recall".to_owned()), "{invalid}, {code}");
+            assert!(
+                !names.contains(&"find_symbol".to_owned()),
+                "{invalid}, {code}"
+            );
+            let stats = mcp.request(3, "tools/call", json!({"name":"stats","arguments":{}}));
+            assert!(stats["result"]["structuredContent"].is_object(), "{stats}");
+        }
+    }
+    fs::remove_dir_all(root).expect("MCP code failure test data is removed");
 }

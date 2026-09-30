@@ -1,3 +1,6 @@
+#[cfg(feature = "code")]
+pub mod code;
+
 use std::{collections::HashMap, path::Path};
 
 use thiserror::Error;
@@ -32,6 +35,9 @@ pub enum ApplicationError {
         "embeddings are disabled; set [embedding] enabled = true (or unset GRAPHMEM_EMBEDDINGS) to reembed"
     )]
     EmbeddingsDisabled,
+    #[cfg(feature = "code")]
+    #[error("{0}")]
+    Code(String),
 }
 
 pub struct RememberRequest {

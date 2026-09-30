@@ -1,13 +1,17 @@
 default: verify
 
-check package="graphmem":
+check package="graphmem" features="code":
+    cargo check -p {{package}} --all-targets --features "{{features}}" --message-format=short
+
+lint package="graphmem" features="code":
+    cargo clippy -p {{package}} --all-targets --features "{{features}}" --message-format=short -- -D warnings
+
+test package="graphmem" features="code":
+    cargo nextest run -p {{package}} --features "{{features}}" --no-fail-fast --no-tests=pass
+
+# The default build, without optional features, must keep compiling.
+check-lean package="graphmem":
     cargo check -p {{package}} --all-targets --message-format=short
-
-lint package="graphmem":
-    cargo clippy -p {{package}} --all-targets --message-format=short -- -D warnings
-
-test package="graphmem":
-    cargo nextest run -p {{package}} --no-fail-fast --no-tests=pass
 
 fmt:
     cargo fmt --all
@@ -32,4 +36,4 @@ ra:
 migrate package="graphmem":
     cargo run -p {{package}} --quiet -- migrate
 
-verify: fmt-check check lint test
+verify: fmt-check check check-lean lint test

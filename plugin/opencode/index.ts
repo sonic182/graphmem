@@ -12,6 +12,8 @@ Update, do not duplicate: recall the topic first, and when a stored memory is no
 
 Skip both for logistical or no-code requests, and when Graphmem is unavailable. Never store secrets, private data, speculation, temporary progress updates, raw debugging output, or source code that can be read from the repository.
 
+Code navigation: when the gmem \`find_symbol\` and \`code_outline\` tools are listed, use them to find a definition by name or to list a file's symbols before grepping or reading whole files; they keep their own index fresh. Use \`rg\`/\`ast-grep\` for plain text, call sites, and references, which they do not index.
+
 Load the \`graphmem-mcp-for-dev\` skill for the full contract before storing anything, or before using \`update\`, \`relate\`, \`graph\`, \`inspect\`, or \`forget\`.`;
 
 const COMPACTION = `Graphmem (gmem) MCP memory guidance: keep durable decisions, conventions, constraints, and resolved failure causes across compaction. Recall the topic before storing a duplicate, and revise a superseded memory with \`update\` rather than storing a competing one; attach entities and relations on remember.`;

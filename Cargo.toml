@@ -8,6 +8,15 @@ autobins = false
 [features]
 default = []
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+code = [
+    "dep:ast-grep-core",
+    "dep:ast-grep-language",
+    "dep:ast-grep-outline",
+    "dep:tree-sitter-heex",
+    "dep:tree-sitter-sequel",
+    "dep:tree-sitter-zig",
+    "dep:rayon",
+]
 
 [[bin]]
 name = "gmem"
@@ -33,3 +42,23 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 ratatui = "0.30.2"
 pulldown-cmark = "0.13"
+ast-grep-core = { version = "0.45.3", optional = true }
+ast-grep-outline = { version = "0.45.3", optional = true }
+tree-sitter-heex = { version = "0.8.1", optional = true }
+tree-sitter-sequel = { version = "0.3.11", optional = true }
+tree-sitter-zig = { version = "1.1.2", optional = true }
+rayon = { version = "1.12", optional = true }
+ast-grep-language = { version = "0.45.3", default-features = false, features = [
+    "tree-sitter-bash",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-elixir",
+    "tree-sitter-go",
+    "tree-sitter-html",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-python",
+    "tree-sitter-ruby",
+    "tree-sitter-php",
+    "tree-sitter-rust",
+], optional = true }
