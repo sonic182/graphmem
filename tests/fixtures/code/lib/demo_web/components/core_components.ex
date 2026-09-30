@@ -38,3 +38,5 @@ defmodule DemoWeb.CoreComponents do
     def version, do: "1"
   end
 end
+
+require Logger

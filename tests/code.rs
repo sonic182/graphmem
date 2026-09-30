@@ -318,6 +318,61 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
 }
 
 #[test]
+fn imports_lists_declared_imports_across_supported_languages() {
+    let sandbox = Sandbox::new("imports");
+    let expectations = [
+        ("native/lib.rs", "std::fmt"),
+        ("native/main.go", "fmt"),
+        ("native/util.c", "stdio.h"),
+        ("native/widget.h", "string"),
+        ("native/widget.cpp", "widget.h"),
+        ("native/build.zig", "std"),
+        ("app/service.py", "os"),
+        ("app/service.py", "pathlib"),
+        ("web/cart.jsx", "react"),
+        ("web/api.ts", "./client"),
+        (
+            "lib/demo_web/components/core_components.ex",
+            "Phoenix.Component",
+        ),
+        (
+            "lib/demo_web/components/core_components.ex",
+            "Phoenix.LiveView.JS",
+        ),
+        (
+            "lib/demo_web/components/core_components.ex",
+            "DemoWeb.CoreComponents",
+        ),
+        ("lib/demo_web/components/core_components.ex", "Logger"),
+        ("web/theme.css", "reset.css"),
+        ("web/_buttons.scss", "sass:math"),
+        ("web/_buttons.scss", "sass:color"),
+    ];
+
+    for (file, import) in expectations {
+        let output = sandbox.run(&["code", "imports", file]);
+        assert!(
+            output.lines().any(|line| line.contains(import)),
+            "{file}: expected import {import:?} in\n{output}"
+        );
+    }
+
+    let empty = sandbox.run(&["code", "imports", "db/schema.sql"]);
+    assert_eq!(empty.lines().count(), 1, "{empty}");
+
+    let partial = sandbox.run(&[
+        "code",
+        "imports",
+        "lib/demo_web/templates/page/index.html.eex",
+    ]);
+    assert!(
+        partial.contains("partial: EEx directives only"),
+        "{partial}"
+    );
+    assert_eq!(partial.lines().count(), 1, "{partial}");
+}
+
+#[test]
 fn nested_definitions_without_bundled_members_are_outlined_and_found() {
     let sandbox = Sandbox::new("nested-definitions");
     let cases = [

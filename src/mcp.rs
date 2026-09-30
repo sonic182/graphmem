@@ -616,11 +616,11 @@ impl MemoryServer {
     #[cfg(feature = "code")]
     fn code_note(&self) -> &'static str {
         if self.code.is_some() {
-            " find_symbol finds definitions by name and code_outline lists a file's symbols with \
-             line ranges, through a separate code index of the Git checkout that both keep fresh \
-             themselves (never through memory). Use them before grepping or reading whole files \
-             to locate code; use text search for call sites and references, which they do not \
-             index."
+            " find_symbol finds definitions by name, code_outline lists a file's symbols, and \
+             code_imports lists its declared imports, through a separate code index of the Git \
+             checkout that they keep fresh themselves (never through memory). Use them before \
+             grepping or reading whole files to locate code; use text search for call sites and \
+             references, which they do not index."
         } else {
             ""
         }
@@ -642,6 +642,24 @@ struct CodeOutlineInput {
     #[serde(default)]
     offset: Option<usize>,
     /// Maximum symbols to return, 1 to 500. Defaults to 200.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Absolute path inside the Git checkout to read. Omit to use the
+    /// server's startup directory.
+    #[serde(default)]
+    root: Option<String>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CodeImportsInput {
+    /// File whose declared imports are listed, relative to the checkout root;
+    /// an absolute path inside it also works.
+    path: String,
+    /// Index of the first import to return. Defaults to 0.
+    #[serde(default)]
+    offset: Option<usize>,
+    /// Maximum imports to return, 1 to 500. Defaults to 200.
     #[serde(default)]
     limit: Option<usize>,
     /// Absolute path inside the Git checkout to read. Omit to use the
@@ -697,6 +715,30 @@ struct CodeOutlineOutput {
     coverage: String,
     total: usize,
     symbols: Vec<CodeSymbolRecord>,
+    /// Offset of the next page, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_offset: Option<usize>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct CodeImportRecord {
+    name: String,
+    start_line: usize,
+    end_line: usize,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct CodeImportsOutput {
+    path: String,
+    imports: Vec<CodeImportRecord>,
+    /// "complete", or "partial: <reason>" when syntax errors or template
+    /// limits may hide imports.
+    coverage: String,
+    /// The requested file is refreshed before imports are returned.
+    freshness: String,
+    total: usize,
     /// Offset of the next page, when there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
     next_offset: Option<usize>,
@@ -786,6 +828,55 @@ impl MemoryServer {
             coverage: outline.coverage.as_text(),
             total,
             symbols,
+            next_offset: (next_offset < total).then_some(next_offset),
+        }))
+    }
+
+    #[tool(
+        name = "code_imports",
+        description = "List the imports declared in one source file without resolving them to \
+             other files. The file is refreshed first. Returns each import's name and 1-based \
+             start and end lines, along with parser coverage and freshness. Supports optional \
+             offset, limit (1 to 500, default 200), and root (an absolute directory inside a \
+             checkout; defaults to the server's startup directory)."
+    )]
+    async fn code_imports(
+        &self,
+        Parameters(input): Parameters<CodeImportsInput>,
+    ) -> Result<Json<CodeImportsOutput>, CallToolResult> {
+        let limit = input.limit.unwrap_or(200);
+        if !(1..=500).contains(&limit) {
+            return Err(tool_error("limit must be between 1 and 500"));
+        }
+        let offset = input.offset.unwrap_or(0);
+        let directory = code_directory(input.root)?;
+        let path = input.path;
+        let outline = self
+            .run_code(move |code| code.outline(&directory, &path))
+            .await?;
+        let imports = outline
+            .symbols
+            .into_iter()
+            .filter(|symbol| symbol.kind == "import")
+            .collect::<Vec<_>>();
+        let total = imports.len();
+        let imports = imports
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|symbol| CodeImportRecord {
+                name: symbol.name,
+                start_line: symbol.start.line,
+                end_line: symbol.end.line,
+            })
+            .collect();
+        let next_offset = offset.saturating_add(limit);
+        Ok(Json(CodeImportsOutput {
+            path: outline.path,
+            imports,
+            coverage: outline.coverage.as_text(),
+            freshness: "fresh".to_owned(),
+            total,
             next_offset: (next_offset < total).then_some(next_offset),
         }))
     }

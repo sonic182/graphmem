@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `gmem code imports <FILE>` and the MCP `code_imports` tool list declared
+  imports with their source ranges without resolving them to files.
+
 ### Fixed
 
 - The MCP `find_symbol` and `code_outline` tools refresh the code index on the

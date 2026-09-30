@@ -5,3 +5,5 @@ export interface Order {
 export async function fetchOrder(id: string): Promise<Order> {
   return { id };
 }
+
+import type { Client } from "./client";

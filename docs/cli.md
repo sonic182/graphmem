@@ -255,6 +255,9 @@ into `$GRAPHMEM_HOME/code.sqlite`, which can be deleted and rebuilt at any time.
 - `gmem code outline <FILE>` prints `path`, language, and coverage, then one
   line per symbol as `start-end<TAB>kind name`, indented by nesting. The file
   is re-indexed first if it changed.
+- `gmem code imports <FILE>` prints `path`, language, and coverage, then one
+  `start-end<TAB>name` line per declared import. The file is re-indexed first
+  if it changed. Imports are reported as written; paths are not resolved.
 - `gmem code find <QUERY> [--kind KIND] [--limit N]` refreshes the index, then
   prints `path:line:column<TAB>kind<TAB>name<TAB>parent<TAB>freshness` for
   each match: exact names first, then names ending in `.QUERY`, then

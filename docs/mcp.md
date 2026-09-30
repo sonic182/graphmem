@@ -50,7 +50,7 @@ The server exposes eight memory tools:
 
 ## Code navigation tools
 
-Binaries built with `--features code` (release binaries are) add two tools,
+Binaries built with `--features code` (release binaries are) add three tools,
 listed unless `[code] enabled = false` or `GRAPHMEM_CODE=off`; the
 `initialize` instructions then add a short note on when to use them. They use
 a separate, rebuildable index (`$GRAPHMEM_HOME/code.sqlite`) keyed by Git
@@ -59,7 +59,7 @@ memories, and `recall` ranking is unaffected. A corrupt `code.sqlite` is
 recreated; if the index still cannot be opened or `[code]` is invalid, the
 server logs a warning on stderr and starts with the memory tools only.
 
-There is no MCP index tool: both tools refresh the index on demand, re-reading
+There is no MCP index tool: the tools refresh the index on demand, re-reading
 only files whose size or modification time changed. To build the index of a
 large checkout ahead of time, or to see which files could not be indexed, run
 `gmem code index` in it.
@@ -74,6 +74,13 @@ large checkout ahead of time, or to see which files could not be indexed, run
   always matches it. `coverage` is `complete`, or `partial: <reason>` when
   syntax errors or template limits may hide symbols. Paths containing `..`,
   symlinks, and paths that resolve outside the checkout are refused.
+- `code_imports`: lists the imports declared in `path`, with optional `offset`
+  and `limit` (1 to 500, default 200), and `root` using the same path rules as
+  `code_outline`. Each import has a `name`, `start_line`, and `end_line`;
+  `total` and `next_offset` describe pagination. The file is refreshed before
+  returning results, so `freshness` is `fresh`; `coverage` reports whether the
+  parser may have missed imports. Imports are reported as declared and are not
+  resolved to files.
 - `find_symbol`: finds definitions by `query`, with optional `kind`, `limit`
   (1 to 100, default 20), and `root`. It refreshes the checkout's index first
   (only changed files are re-read), so a checkout that was never indexed is

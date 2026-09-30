@@ -1300,6 +1300,13 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         "defmodule Billing do\n  def charge(amount), do: amount\nend\n",
     )
     .expect("source file is written");
+    fs::write(
+        repo.join("lib/imports.rs"),
+        "use alpha::One;\nuse beta::{\n    Two,\n    Three,\n};\nuse gamma::Four;\n",
+    )
+    .expect("import source file is written");
+    fs::write(repo.join("lib/partial.html.eex"), "<%= @value %>\n")
+        .expect("partial source file is written");
     assert!(
         Command::new("git")
             .args(["init", "-q"])
@@ -1332,6 +1339,7 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         .collect::<Vec<_>>();
     assert!(!names.contains(&"code_index".to_owned()));
     assert!(names.contains(&"code_outline".to_owned()));
+    assert!(names.contains(&"code_imports".to_owned()));
     assert!(names.contains(&"find_symbol".to_owned()));
 
     let unindexed = mcp.request(
@@ -1356,6 +1364,53 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     assert_eq!(outline["symbols"][1]["name"], "charge/1");
     assert_eq!(outline["symbols"][1]["parent"], 0);
     assert_eq!(outline["symbols"][1]["start_line"], 2);
+
+    let imports = mcp.request(
+        8,
+        "tools/call",
+        json!({
+            "name":"code_imports",
+            "arguments":{"path":"lib/imports.rs","offset":1,"limit":1}
+        }),
+    );
+    let imports = &imports["result"]["structuredContent"];
+    assert_eq!(imports["path"], "lib/imports.rs");
+    assert_eq!(imports["coverage"], "complete");
+    assert_eq!(imports["freshness"], "fresh");
+    assert_eq!(imports["total"], 3);
+    assert_eq!(imports["next_offset"], 2);
+    assert_eq!(imports["imports"].as_array().unwrap().len(), 1);
+    assert!(
+        imports["imports"][0]["name"]
+            .as_str()
+            .unwrap()
+            .contains("beta")
+    );
+    assert_eq!(imports["imports"][0]["start_line"], 2);
+    assert_eq!(imports["imports"][0]["end_line"], 5);
+
+    fs::write(repo.join("lib/imports.rs"), "use updated::Only;\n")
+        .expect("import source file is updated");
+    let refreshed = mcp.request(
+        9,
+        "tools/call",
+        json!({"name":"code_imports","arguments":{"path":"lib/imports.rs"}}),
+    );
+    let refreshed = &refreshed["result"]["structuredContent"];
+    assert_eq!(refreshed["total"], 1);
+    assert_eq!(refreshed["imports"][0]["name"], "updated::Only");
+    assert_eq!(refreshed["freshness"], "fresh");
+    assert!(refreshed.get("next_offset").is_none());
+
+    let partial = mcp.request(
+        10,
+        "tools/call",
+        json!({"name":"code_imports","arguments":{"path":"lib/partial.html.eex"}}),
+    );
+    let partial = &partial["result"]["structuredContent"];
+    assert_eq!(partial["coverage"], "partial: EEx directives only");
+    assert_eq!(partial["total"], 0);
+    assert_eq!(partial["imports"].as_array().unwrap().len(), 0);
 
     let found = mcp.request(
         5,
