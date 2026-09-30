@@ -326,7 +326,14 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
             }
         }
         CodeCommand::Find { query, kind, limit } => {
-            for hit in service.find_symbol(&directory, &query, kind.as_deref(), limit)? {
+            let found = service.find_symbol(&directory, &query, kind.as_deref(), limit)?;
+            if found.truncated {
+                eprintln!("warning: too many source files; some were not indexed");
+            }
+            if found.total > found.hits.len() {
+                eprintln!("showing {} of {} matches", found.hits.len(), found.total);
+            }
+            for hit in found.hits {
                 println!(
                     "{}:{}:{}\t{}\t{}\t{}\t{}",
                     hit.path,

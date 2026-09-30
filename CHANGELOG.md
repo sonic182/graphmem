@@ -16,7 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP tools outline Rust, Go, Zig, C, C++, Python, JavaScript/JSX,
   TypeScript/TSX, Elixir (with `~H`), HEEx, EEx, Ruby, PHP, SQL, Bash, and
   HTML `<script>` from a separate, rebuildable index per Git checkout.
-  `[code] enabled = false` or `GRAPHMEM_CODE=off` hides them.
+  `[code] enabled = false` or `GRAPHMEM_CODE=off` hides them, and
+  `[code] max_files` (or `GRAPHMEM_CODE_MAX_FILES`, default 20,000) bounds the
+  files indexed per checkout. Indexing parses files in parallel, on
+  `[code] index_threads` threads (`"auto"` or a number; also
+  `GRAPHMEM_CODE_INDEX_THREADS`).
+  `find_symbol` refreshes the index before searching, and reports `total` and
+  `truncated`. It also matches last name segments (`ConsentLive`,
+  `public.users`), and leaves out imports and template usages unless `kind`
+  asks for them.
 
 ## [0.5.0] - 2026-09-29
 

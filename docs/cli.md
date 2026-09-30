@@ -247,15 +247,20 @@ into `$GRAPHMEM_HOME/code.sqlite`, which can be deleted and rebuilt at any time.
 - `gmem code index [PATH]` indexes the tracked and untracked, non-ignored
   source files of the checkout containing `PATH` (default: the current
   directory). Unchanged files are skipped by size and modification time, and
-  files that disappeared are removed. Symlinks, binary files, `*.min.js`,
-  files over 1 MiB, and anything past the first 20,000 source files are not
-  indexed. Progress goes to stderr.
+  files that disappeared are removed. Changed files are parsed in parallel by
+  `[code] index_threads` threads (`"auto"` by default: the CPUs available to
+  the process; also `GRAPHMEM_CODE_INDEX_THREADS`). Symlinks, binary files, `*.min.js`, files over 1 MiB, and anything
+  past the first `[code] max_files` source files (default 20,000; also
+  `GRAPHMEM_CODE_MAX_FILES`) are not indexed. Progress goes to stderr.
 - `gmem code outline <FILE>` prints `path`, language, and coverage, then one
   line per symbol as `start-end<TAB>kind name`, indented by nesting. The file
   is re-indexed first if it changed.
-- `gmem code find <QUERY> [--kind KIND] [--limit N]` prints
-  `path:line:column<TAB>kind<TAB>name<TAB>parent<TAB>freshness` for each
-  indexed match, exact names first.
+- `gmem code find <QUERY> [--kind KIND] [--limit N]` refreshes the index, then
+  prints `path:line:column<TAB>kind<TAB>name<TAB>parent<TAB>freshness` for
+  each match: exact names first, then names ending in `.QUERY`, then
+  prefixes. Imports and template usages (`import`, `component`, `slot`,
+  `expression`) appear only with `--kind`. When more matches exist than
+  `--limit`, stderr says `showing N of TOTAL matches`.
 
 ```sh
 gmem code index

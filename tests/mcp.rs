@@ -1317,17 +1317,15 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         "tools/call",
         json!({"name":"find_symbol","arguments":{"query":"charge"}}),
     );
-    assert_eq!(unindexed["result"]["isError"], true);
-    assert!(
-        unindexed["result"]["content"][0]["text"]
-            .as_str()
-            .expect("error text")
-            .contains("code_index")
-    );
+    let unindexed = &unindexed["result"]["structuredContent"];
+    assert_eq!(unindexed["matches"][0]["name"], "charge/1");
+    assert_eq!(unindexed["total"], 1);
+    assert_eq!(unindexed["truncated"], false);
 
     let indexed = mcp.request(4, "tools/call", json!({"name":"code_index","arguments":{}}));
     let report = &indexed["result"]["structuredContent"];
-    assert_eq!(report["indexed"], 1);
+    assert_eq!(report["indexed"], 0);
+    assert_eq!(report["unchanged"], 1);
     assert_eq!(report["failed_total"], 0);
 
     let outline = mcp.request(

@@ -185,9 +185,11 @@ worker_threads = 4
 
 [code]
 enabled = true         # only in builds with --features code
+max_files = 20000      # source files indexed per checkout
+index_threads = "auto" # or a number of parsing threads
 ```
 
-`[code] enabled = false` (or `GRAPHMEM_CODE=off`) hides `gmem code` and the code MCP tools in a binary built with them.
+`[code] enabled = false` (or `GRAPHMEM_CODE=off`) hides `gmem code` and the code MCP tools in a binary built with them. Raise `max_files` (or set `GRAPHMEM_CODE_MAX_FILES`) for a larger checkout; the first index then takes longer. `index_threads` (or `GRAPHMEM_CODE_INDEX_THREADS`) sets how many threads parse files while indexing. `"auto"` uses the CPUs the process may run on, honoring CPU affinity and cgroup quotas such as a container's `--cpus` limit. The threads exist only while changed files are being parsed.
 
 `backend = "auto"` selects CUDA when available and otherwise uses CPU. `GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded and loaded on first use (the first `remember`, `relate`, recall, or `reembed`) and cached locally. `remember` stores its embeddings in the same transaction, so it fails and stores nothing if the model cannot load or embed. `batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE` and the `--embedding-batch-size` flag. Under the same precedence (env > flag > file), the environment wins over the flag and the flag wins over `config.toml`, for one `gmem` run including `gmem mcp`.
 

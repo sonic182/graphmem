@@ -606,9 +606,9 @@ impl MemoryServer {
     fn code_note(&self) -> &'static str {
         if self.code.is_some() {
             " code_index, code_outline, and find_symbol navigate source through a separate, \
-             rebuildable code index of the Git checkout, never through memory. find_symbol \
-             needs code_index (or `gmem code index`) to have run in that checkout; code_outline \
-             re-indexes the file it reads."
+             rebuildable code index of the Git checkout, never through memory. find_symbol and \
+             code_outline refresh the index themselves, so there is no need to decide when to \
+             re-index; code_index only warms up a large checkout ahead of time."
         } else {
             ""
         }
@@ -641,11 +641,13 @@ struct CodeOutlineInput {
 #[cfg(feature = "code")]
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FindSymbolInput {
-    /// Symbol name or name prefix, e.g. "fetch_user", "UserController", or
-    /// "render/2" for an Elixir function of arity 2.
+    /// Symbol name, name prefix, or last name segments, e.g. "fetch_user",
+    /// "ConsentLive" for "MyAppWeb.ConsentLive", or "render/2" for an Elixir
+    /// function of arity 2.
     query: String,
-    /// Optional kind filter, e.g. "function", "class", "module", "component",
-    /// "table".
+    /// Optional kind filter, e.g. "function", "class", "module", "table".
+    /// Usages are returned only when asked for: "import" (import lines),
+    /// "component" and "slot" (HEEx tags), "expression" (EEx directives).
     #[serde(default)]
     kind: Option<String>,
     /// Maximum matches to return, 1 to 100. Defaults to 20.
@@ -711,6 +713,11 @@ struct SymbolMatchRecord {
 #[derive(Debug, Serialize, JsonSchema)]
 struct FindSymbolOutput {
     matches: Vec<SymbolMatchRecord>,
+    /// Number of matches, including those beyond `limit`.
+    total: usize,
+    /// True when the checkout has more source files than the index accepts,
+    /// so a definition may be missing.
+    truncated: bool,
 }
 
 #[cfg(feature = "code")]
@@ -746,13 +753,13 @@ struct CodeIndexOutput {
 impl MemoryServer {
     #[tool(
         name = "code_index",
-        description = "Build or refresh the code index of a Git checkout, which find_symbol \
-             searches. Incremental: files unchanged since the last run (same size and \
-             modification time) are skipped and deleted files are removed, so re-running it is \
-             cheap. Indexes tracked and untracked, non-ignored source files; skips symlinks, \
-             binaries, *.min.js, files over 1 MiB, and anything past 20,000 source files \
-             (truncated is then true). Call it before find_symbol in a new checkout, and after \
-             large edits or branch switches."
+        description = "Build or refresh the code index of a Git checkout. Optional: find_symbol \
+             refreshes the index itself; call this only to warm up a large checkout that was \
+             never indexed. Incremental: files unchanged since the last run (same size and \
+             modification time) are skipped and deleted files are removed. Indexes tracked and \
+             untracked, non-ignored source files; skips symlinks, binaries, *.min.js, files over \
+             1 MiB, and anything past 20,000 source files by default (`[code] max_files`; \
+             truncated is then true)."
     )]
     fn code_index(
         &self,
@@ -837,12 +844,14 @@ impl MemoryServer {
 
     #[tool(
         name = "find_symbol",
-        description = "Find definitions by name in the Git checkout's code index, which \
-             code_index (or `gmem code index`) builds. Exact names come first (an Elixir name \
-             also matches name/arity), then prefix matches; matching ignores case. Returns every \
-             match with its path, line range, and enclosing symbol, and never picks one as the \
-             resolved target. freshness is \"stale\" when the file changed since indexing and \
-             \"missing\" when it was deleted: call code_outline on it or code_index again."
+        description = "Find definitions by name in a Git checkout. Refreshes the checkout's code \
+             index first (only changed files are re-read), so results cover every source file. \
+             Exact names come first (an Elixir name also matches name/arity), then names ending \
+             in .query (ConsentLive finds MyAppWeb.ConsentLive), then prefix matches; matching \
+             ignores case. Imports and HEEx component/slot usages are left out unless asked for \
+             with kind. Returns every match with its path, line range, and enclosing symbol, and \
+             never picks one as the resolved target; total counts matches beyond limit, and \
+             truncated means the checkout exceeded the index's file limit."
     )]
     fn find_symbol(
         &self,
@@ -853,11 +862,12 @@ impl MemoryServer {
             return Err(tool_error("limit must be between 1 and 100"));
         }
         let directory = code_directory(input.root)?;
-        let hits = self
+        let found = self
             .code()?
             .find_symbol(&directory, &input.query, input.kind.as_deref(), limit)
             .map_err(|error| tool_error(error.to_string()))?;
-        let matches = hits
+        let matches = found
+            .hits
             .into_iter()
             .map(|hit| SymbolMatchRecord {
                 path: hit.path,
@@ -873,7 +883,11 @@ impl MemoryServer {
                 signature: hit.symbol.signature,
             })
             .collect();
-        Ok(Json(FindSymbolOutput { matches }))
+        Ok(Json(FindSymbolOutput {
+            matches,
+            total: found.total,
+            truncated: found.truncated,
+        }))
     }
 }
 

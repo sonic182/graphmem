@@ -9,3 +9,10 @@ export class CartStore {
     this.items.push(item);
   }
 }
+
+export default {
+  mounted() {
+    this.el.focus();
+  },
+  updated: () => {},
+};

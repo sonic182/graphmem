@@ -10,3 +10,5 @@ CREATE VIEW active_accounts AS SELECT id FROM accounts;
 CREATE FUNCTION account_count() RETURNS BIGINT AS $$
   SELECT count(*) FROM accounts;
 $$ LANGUAGE sql;
+
+\unrestrict pgdumpkey

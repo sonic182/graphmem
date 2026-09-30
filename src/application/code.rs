@@ -4,24 +4,27 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use rayon::{ThreadPoolBuilder, prelude::*};
+
 use super::{ApplicationError, Result};
 use crate::{
     domain::{CodeSymbol, Coverage, Freshness},
     infrastructure::{
-        code_index::{CodeIndex, FileStamp, IndexedFile},
+        code_index::{CodeIndex, FileRows, FileStamp, IndexedFile},
         config::code_config,
         outline::{CodeLanguage, outline},
         repository::{git_repository, list_files},
     },
 };
 
-// ponytail: fixed bounds; move them to `[code]` if real repositories hit them.
-const MAX_FILES: usize = 20_000;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
+const WRITE_BATCH: usize = 256;
 pub const MAX_FIND_LIMIT: usize = 100;
 
 pub struct CodeService {
     index: CodeIndex,
+    max_files: usize,
+    index_threads: Option<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -32,7 +35,14 @@ pub struct IndexReport {
     pub removed: usize,
     pub skipped: usize,
     pub failed: Vec<String>,
-    /// More than `MAX_FILES` source files were found; the rest were ignored.
+    /// More than `[code] max_files` source files were found; the rest were
+    /// ignored.
+    pub truncated: bool,
+}
+
+pub struct FoundSymbols {
+    pub hits: Vec<SymbolHit>,
+    pub total: usize,
     pub truncated: bool,
 }
 
@@ -51,9 +61,14 @@ pub struct SymbolHit {
     pub symbol: CodeSymbol,
 }
 
-enum Refresh {
+enum Stat {
     Unchanged,
-    Indexed,
+    Changed(FileStamp),
+    Skipped,
+}
+
+enum Parsed {
+    Rows(FileRows),
     Skipped,
     Failed(String),
 }
@@ -64,11 +79,14 @@ impl CodeService {
     pub fn open_default() -> Result<Option<Self>> {
         let path = CodeIndex::default_path()?;
         let data_dir = path.parent().unwrap_or(Path::new("."));
-        if !code_config(data_dir)?.enabled {
+        let config = code_config(data_dir)?;
+        if !config.enabled {
             return Ok(None);
         }
         Ok(Some(Self {
             index: CodeIndex::open(&path)?,
+            max_files: config.max_files,
+            index_threads: config.index_threads,
         }))
     }
 
@@ -86,10 +104,10 @@ impl CodeService {
         paths.retain(|path| CodeLanguage::for_path(path).is_some() && !is_minified(path));
         let mut report = IndexReport {
             root: root.clone(),
-            truncated: paths.len() > MAX_FILES,
+            truncated: paths.len() > self.max_files,
             ..IndexReport::default()
         };
-        paths.truncate(MAX_FILES);
+        paths.truncate(self.max_files);
 
         let known = self
             .index
@@ -98,27 +116,50 @@ impl CodeService {
             .map(|file| (file.path.clone(), file))
             .collect::<HashMap<_, _>>();
         let mut kept = HashSet::new();
-        for (done, path) in paths.iter().enumerate() {
-            progress(done, paths.len());
+        let mut pending = Vec::new();
+        for path in &paths {
             let Some(path) = path.to_str() else {
                 report.skipped += 1;
                 continue;
             };
-            match self.refresh(checkout, &root, path, known.get(path))? {
-                Refresh::Unchanged => report.unchanged += 1,
-                Refresh::Indexed => report.indexed += 1,
-                Refresh::Skipped => {
-                    report.skipped += 1;
-                    continue;
+            match stat(&root, path, known.get(path)) {
+                Stat::Unchanged => {
+                    report.unchanged += 1;
+                    kept.insert(path);
                 }
-                Refresh::Failed(error) => {
-                    report.failed.push(format!("{path}: {error}"));
-                    continue;
-                }
+                Stat::Changed(stamp) => pending.push((path, stamp)),
+                Stat::Skipped => report.skipped += 1,
             }
-            kept.insert(path);
         }
-        progress(paths.len(), paths.len());
+        if !pending.is_empty() {
+            let pool = ThreadPoolBuilder::new()
+                .num_threads(self.thread_count())
+                .build()
+                .map_err(|error| code_error(format!("indexing threads: {error}")))?;
+            for (batch, chunk) in pending.chunks(WRITE_BATCH).enumerate() {
+                progress(batch * WRITE_BATCH, pending.len());
+                let parsed = pool.install(|| {
+                    chunk
+                        .par_iter()
+                        .map(|(path, stamp)| parse_file(&root, path, *stamp))
+                        .collect::<Vec<_>>()
+                });
+                let mut rows = Vec::with_capacity(chunk.len());
+                for ((path, _), parsed) in chunk.iter().zip(parsed) {
+                    match parsed {
+                        Parsed::Rows(file) => {
+                            rows.push(file);
+                            report.indexed += 1;
+                            kept.insert(path);
+                        }
+                        Parsed::Skipped => report.skipped += 1,
+                        Parsed::Failed(error) => report.failed.push(format!("{path}: {error}")),
+                    }
+                }
+                self.index.replace_files(checkout, &rows)?;
+            }
+        }
+        progress(pending.len(), pending.len());
         for path in known.keys() {
             if !kept.contains(path.as_str()) {
                 self.index.remove_file(checkout, path)?;
@@ -138,15 +179,23 @@ impl CodeService {
         }
         let checkout = self.index.ensure_checkout(&root_key(&root)?)?;
         let known = self.index.file(checkout, &path)?;
-        match self.refresh(checkout, &root, &path, known.as_ref())? {
-            Refresh::Unchanged | Refresh::Indexed => {}
-            Refresh::Skipped => {
-                self.index.remove_file(checkout, &path)?;
-                return Err(code_error(format!(
-                    "{path}: not indexed (binary, larger than {MAX_FILE_BYTES} bytes, or not a regular file)"
-                )));
-            }
-            Refresh::Failed(error) => return Err(code_error(format!("{path}: {error}"))),
+        let skipped = match stat(&root, &path, known.as_ref()) {
+            Stat::Unchanged => false,
+            Stat::Changed(stamp) => match parse_file(&root, &path, stamp) {
+                Parsed::Rows(file) => {
+                    self.index.replace_files(checkout, &[file])?;
+                    false
+                }
+                Parsed::Skipped => true,
+                Parsed::Failed(error) => return Err(code_error(format!("{path}: {error}"))),
+            },
+            Stat::Skipped => true,
+        };
+        if skipped {
+            self.index.remove_file(checkout, &path)?;
+            return Err(code_error(format!(
+                "{path}: not indexed (binary, larger than {MAX_FILE_BYTES} bytes, or not a regular file)"
+            )));
         }
         let file = self
             .index
@@ -160,30 +209,27 @@ impl CodeService {
         })
     }
 
-    /// Symbols whose name matches `query`, exact names first. Several matches
-    /// are returned as they are; none is picked as "the" definition.
+    /// Symbols whose name matches `query`, exact names first, after refreshing
+    /// the checkout's index so no file is missed. Several matches are returned
+    /// as they are; none is picked as "the" definition.
     pub fn find_symbol(
-        &self,
+        &mut self,
         directory: &Path,
         query: &str,
         kind: Option<&str>,
         limit: usize,
-    ) -> Result<Vec<SymbolHit>> {
+    ) -> Result<FoundSymbols> {
         let query = query.trim();
         if query.is_empty() {
             return Err(code_error("query must not be empty"));
         }
-        let root = checkout_root(directory)?;
-        let Some(checkout) = self.index.checkout(&root_key(&root)?)? else {
-            return Err(code_error(format!(
-                "{} is not indexed; call the code_index tool or run `gmem code index` in it",
-                root.display()
-            )));
-        };
-        let matches = self
-            .index
-            .find(checkout, query, kind, limit.clamp(1, MAX_FIND_LIMIT))?;
-        Ok(matches
+        let report = self.index(directory, |_, _| {})?;
+        let root = report.root;
+        let checkout = self.index.ensure_checkout(&root_key(&root)?)?;
+        let (matches, total) =
+            self.index
+                .find(checkout, query, kind, limit.clamp(1, MAX_FIND_LIMIT))?;
+        let hits = matches
             .into_iter()
             .map(|found| SymbolHit {
                 freshness: match fs::symlink_metadata(root.join(&found.path)) {
@@ -196,51 +242,59 @@ impl CodeService {
                 parent: found.parent,
                 symbol: found.symbol,
             })
-            .collect())
+            .collect();
+        Ok(FoundSymbols {
+            hits,
+            total,
+            truncated: report.truncated,
+        })
     }
 
-    fn refresh(
-        &mut self,
-        checkout: i64,
-        root: &Path,
-        path: &str,
-        known: Option<&IndexedFile>,
-    ) -> Result<Refresh> {
-        let absolute = root.join(path);
-        let Ok(metadata) = fs::symlink_metadata(&absolute) else {
-            return Ok(Refresh::Skipped);
-        };
-        if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES {
-            return Ok(Refresh::Skipped);
-        }
-        let stamp = FileStamp::of(&metadata);
-        if known.is_some_and(|file| file.stamp == stamp) {
-            return Ok(Refresh::Unchanged);
-        }
-        let Some(language) = CodeLanguage::for_path(&absolute) else {
-            return Ok(Refresh::Skipped);
-        };
-        let bytes = match fs::read(&absolute) {
-            Ok(bytes) => bytes,
-            Err(error) => return Ok(Refresh::Failed(error.to_string())),
-        };
-        if bytes[..bytes.len().min(8192)].contains(&0) {
-            return Ok(Refresh::Skipped);
-        }
-        let Ok(source) = String::from_utf8(bytes) else {
-            return Ok(Refresh::Failed("not valid UTF-8".to_owned()));
-        };
-        let outline = outline(language, &source);
-        self.index.replace_file(
-            checkout,
-            path,
-            language.name(),
-            stamp,
-            &outline.coverage,
-            &outline.symbols,
-        )?;
-        Ok(Refresh::Indexed)
+    fn thread_count(&self) -> usize {
+        self.index_threads.unwrap_or_else(|| {
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+        })
     }
+}
+
+fn stat(root: &Path, path: &str, known: Option<&IndexedFile>) -> Stat {
+    let Ok(metadata) = fs::symlink_metadata(root.join(path)) else {
+        return Stat::Skipped;
+    };
+    if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES {
+        return Stat::Skipped;
+    }
+    let stamp = FileStamp::of(&metadata);
+    if known.is_some_and(|file| file.stamp == stamp) {
+        Stat::Unchanged
+    } else {
+        Stat::Changed(stamp)
+    }
+}
+
+fn parse_file(root: &Path, path: &str, stamp: FileStamp) -> Parsed {
+    let absolute = root.join(path);
+    let Some(language) = CodeLanguage::for_path(&absolute) else {
+        return Parsed::Skipped;
+    };
+    let bytes = match fs::read(&absolute) {
+        Ok(bytes) => bytes,
+        Err(error) => return Parsed::Failed(error.to_string()),
+    };
+    if bytes[..bytes.len().min(8192)].contains(&0) {
+        return Parsed::Skipped;
+    }
+    let Ok(source) = String::from_utf8(bytes) else {
+        return Parsed::Failed("not valid UTF-8".to_owned());
+    };
+    let outline = outline(language, &source);
+    Parsed::Rows(FileRows {
+        path: path.to_owned(),
+        language: language.name().to_owned(),
+        stamp,
+        coverage: outline.coverage,
+        symbols: outline.symbols,
+    })
 }
 
 fn checkout_root(directory: &Path) -> Result<PathBuf> {

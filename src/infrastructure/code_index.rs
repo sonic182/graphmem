@@ -7,7 +7,9 @@ use crate::domain::{CodeSymbol, Coverage, SourcePoint};
 
 /// Bump when the schema or the extracted symbols change; a mismatch rebuilds
 /// the index from scratch, since it can always be regenerated from source.
-const INDEX_VERSION: i64 = 1;
+const INDEX_VERSION: i64 = 2;
+
+const USAGE_KINDS: &str = "'import', 'component', 'slot', 'expression'";
 
 const SCHEMA: &str = "
     DROP TABLE IF EXISTS symbols;
@@ -75,6 +77,15 @@ pub struct IndexedFile {
 }
 
 #[derive(Debug, Clone)]
+pub struct FileRows {
+    pub path: String,
+    pub language: String,
+    pub stamp: FileStamp,
+    pub coverage: Coverage,
+    pub symbols: Vec<CodeSymbol>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SymbolMatch {
     pub path: String,
     pub language: String,
@@ -116,15 +127,6 @@ impl CodeIndex {
         Ok(Self { connection })
     }
 
-    pub fn checkout(&self, root: &str) -> Result<Option<i64>> {
-        Ok(self
-            .connection
-            .query_row("SELECT id FROM checkouts WHERE root = ?1", [root], |row| {
-                row.get(0)
-            })
-            .optional()?)
-    }
-
     pub fn ensure_checkout(&self, root: &str) -> Result<i64> {
         self.connection.execute(
             "INSERT INTO checkouts (root) VALUES (?1) ON CONFLICT (root) DO NOTHING",
@@ -160,54 +162,46 @@ impl CodeIndex {
             .optional()?)
     }
 
-    /// Replaces one file's symbols atomically, so a reader never sees a file
-    /// half-indexed.
-    pub fn replace_file(
-        &mut self,
-        checkout: i64,
-        path: &str,
-        language: &str,
-        stamp: FileStamp,
-        coverage: &Coverage,
-        symbols: &[CodeSymbol],
-    ) -> Result<()> {
+    /// Replaces the symbols of several files in one transaction, so a reader
+    /// never sees a file half-indexed.
+    pub fn replace_files(&mut self, checkout: i64, files: &[FileRows]) -> Result<()> {
         let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "DELETE FROM files WHERE checkout_id = ?1 AND path = ?2",
-            params![checkout, path],
-        )?;
-        transaction.execute(
-            "INSERT INTO files (checkout_id, path, language, size, modified_ns, coverage)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                checkout,
-                path,
-                language,
-                stamp.size,
-                stamp.modified_ns,
-                coverage.as_text()
-            ],
-        )?;
-        let file = transaction.last_insert_rowid();
         {
-            let mut insert = transaction.prepare(
+            let mut delete =
+                transaction.prepare("DELETE FROM files WHERE checkout_id = ?1 AND path = ?2")?;
+            let mut insert_file = transaction.prepare(
+                "INSERT INTO files (checkout_id, path, language, size, modified_ns, coverage)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            let mut insert_symbol = transaction.prepare(
                 "INSERT INTO symbols (file_id, ordinal, parent_ordinal, name, kind,
                      start_line, start_column, end_line, end_column, signature)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
-            for (ordinal, symbol) in symbols.iter().enumerate() {
-                insert.execute(params![
-                    file,
-                    ordinal as i64,
-                    symbol.parent.map(|parent| parent as i64),
-                    symbol.name,
-                    symbol.kind,
-                    symbol.start.line as i64,
-                    symbol.start.column as i64,
-                    symbol.end.line as i64,
-                    symbol.end.column as i64,
-                    symbol.signature,
+            for rows in files {
+                delete.execute(params![checkout, rows.path])?;
+                let file = insert_file.insert(params![
+                    checkout,
+                    rows.path,
+                    rows.language,
+                    rows.stamp.size,
+                    rows.stamp.modified_ns,
+                    rows.coverage.as_text()
                 ])?;
+                for (ordinal, symbol) in rows.symbols.iter().enumerate() {
+                    insert_symbol.execute(params![
+                        file,
+                        ordinal as i64,
+                        symbol.parent.map(|parent| parent as i64),
+                        symbol.name,
+                        symbol.kind,
+                        symbol.start.line as i64,
+                        symbol.start.column as i64,
+                        symbol.end.line as i64,
+                        symbol.end.column as i64,
+                        symbol.signature,
+                    ])?;
+                }
             }
         }
         transaction.commit()?;
@@ -235,33 +229,38 @@ impl CodeIndex {
     }
 
     /// Exact names first (for Elixir, `name` also matches `name/arity`), then
-    /// prefix matches; both ignore ASCII case.
+    /// names ending in `.query` (`ConsentLive` finds `App.ConsentLive`), then
+    /// prefix matches; all ignore ASCII case. Returns up to `limit` matches
+    /// and the total number of matches.
     pub fn find(
         &self,
         checkout: i64,
         query: &str,
         kind: Option<&str>,
         limit: usize,
-    ) -> Result<Vec<SymbolMatch>> {
+    ) -> Result<(Vec<SymbolMatch>, usize)> {
         let escaped = query
             .replace('\\', "\\\\")
             .replace('%', "\\%")
             .replace('_', "\\_");
-        let mut statement = self.connection.prepare(
+        let mut statement = self.connection.prepare(&format!(
             "SELECT s.name, s.kind, s.parent_ordinal, s.start_line, s.start_column,
                     s.end_line, s.end_column, s.signature,
-                    f.path, f.language, f.size, f.modified_ns, p.name
+                    f.path, f.language, f.size, f.modified_ns, p.name, COUNT(*) OVER ()
              FROM symbols s
              JOIN files f ON f.id = s.file_id
              LEFT JOIN symbols p ON p.file_id = s.file_id AND p.ordinal = s.parent_ordinal
              WHERE f.checkout_id = ?1
-               AND s.name LIKE ?2 ESCAPE '\\'
-               AND (?5 IS NULL OR s.kind = ?5)
+               AND (s.name LIKE ?2 ESCAPE '\\' OR s.name LIKE ?7 ESCAPE '\\')
+               AND ((?5 IS NULL AND s.kind NOT IN ({USAGE_KINDS})) OR s.kind = ?5)
              ORDER BY
-               CASE WHEN s.name = ?3 OR s.name LIKE ?4 ESCAPE '\\' THEN 0 ELSE 1 END,
+               CASE WHEN s.name = ?3 OR s.name LIKE ?4 ESCAPE '\\' THEN 0
+                    WHEN s.name LIKE ?7 ESCAPE '\\' THEN 1
+                    ELSE 2 END,
                length(s.name), f.path, s.start_line
-             LIMIT ?6",
-        )?;
+             LIMIT ?6"
+        ))?;
+        let mut total = 0;
         let matches = statement
             .query_map(
                 params![
@@ -270,23 +269,33 @@ impl CodeIndex {
                     query,
                     format!("{escaped}/%"),
                     kind,
-                    limit as i64
+                    limit as i64,
+                    format!("%.{escaped}"),
                 ],
                 |row| {
-                    Ok(SymbolMatch {
-                        symbol: symbol(row)?,
-                        path: row.get(8)?,
-                        language: row.get(9)?,
-                        stamp: FileStamp {
-                            size: row.get(10)?,
-                            modified_ns: row.get(11)?,
+                    Ok((
+                        SymbolMatch {
+                            symbol: symbol(row)?,
+                            path: row.get(8)?,
+                            language: row.get(9)?,
+                            stamp: FileStamp {
+                                size: row.get(10)?,
+                                modified_ns: row.get(11)?,
+                            },
+                            parent: row.get(12)?,
                         },
-                        parent: row.get(12)?,
-                    })
+                        row.get::<_, i64>(13)? as usize,
+                    ))
                 },
             )?
+            .map(|found| {
+                found.map(|(found, count)| {
+                    total = count;
+                    found
+                })
+            })
             .collect::<rusqlite::Result<_>>()?;
-        Ok(matches)
+        Ok((matches, total))
     }
 }
 

@@ -129,17 +129,24 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
         CodeLanguage::Go => bundled(SupportLang::Go, source, origin, &mut symbols),
         CodeLanguage::Heex => heex(source, origin, &mut symbols),
         CodeLanguage::Html => html(source, &mut symbols),
-        CodeLanguage::JavaScript => bundled(SupportLang::JavaScript, source, origin, &mut symbols),
+        CodeLanguage::JavaScript => {
+            javascript(SupportLang::JavaScript, source, origin, &mut symbols)
+        }
         CodeLanguage::Php => bundled(SupportLang::Php, source, origin, &mut symbols),
         CodeLanguage::Python => bundled(SupportLang::Python, source, origin, &mut symbols),
         CodeLanguage::Ruby => bundled(SupportLang::Ruby, source, origin, &mut symbols),
         CodeLanguage::Rust => bundled(SupportLang::Rust, source, origin, &mut symbols),
         CodeLanguage::Sql => sql(source, &mut symbols),
-        CodeLanguage::Tsx => bundled(SupportLang::Tsx, source, origin, &mut symbols),
-        CodeLanguage::TypeScript => bundled(SupportLang::TypeScript, source, origin, &mut symbols),
+        CodeLanguage::Tsx => javascript(SupportLang::Tsx, source, origin, &mut symbols),
+        CodeLanguage::TypeScript => {
+            javascript(SupportLang::TypeScript, source, origin, &mut symbols)
+        }
         CodeLanguage::Zig => zig(source, &mut symbols),
     };
     nest_symbols(&mut symbols);
+    if language == CodeLanguage::Elixir {
+        qualify_nested_modules(&mut symbols);
+    }
     let coverage = if language == CodeLanguage::Eex {
         Coverage::Partial("EEx directives only".to_owned())
     } else if errors {
@@ -406,7 +413,8 @@ fn elixir_definition<D: Doc>(node: &Node<'_, D>) -> Option<(String, &'static str
         return None;
     }
     let kind = match target.text().as_ref() {
-        "defmodule" | "defprotocol" | "defimpl" => "module",
+        "defmodule" | "defprotocol" => "module",
+        "defimpl" => "impl",
         "def" | "defp" | "defdelegate" => "function",
         "defmacro" | "defmacrop" => "macro",
         "defguard" | "defguardp" => "guard",
@@ -416,10 +424,21 @@ fn elixir_definition<D: Doc>(node: &Node<'_, D>) -> Option<(String, &'static str
     let arguments = node.children().find(|child| child.kind() == "arguments")?;
     let first = arguments.children().find(|child| child.is_named())?;
     let name = match kind {
-        "module" | "import" => first.text().into_owned(),
+        "module" | "impl" | "import" => first.text().into_owned(),
         _ => elixir_function_name(&first)?,
     };
     Some((name, kind))
+}
+
+fn qualify_nested_modules(symbols: &mut [CodeSymbol]) {
+    for index in 0..symbols.len() {
+        let Some(parent) = symbols[index].parent else {
+            continue;
+        };
+        if symbols[index].kind == "module" && symbols[parent].kind == "module" {
+            symbols[index].name = format!("{}.{}", symbols[parent].name, symbols[index].name);
+        }
+    }
 }
 
 /// `name/arity` for `name(args)`, `name(args) when guard`, or bare `name`.
@@ -517,7 +536,12 @@ fn sql(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
             Origin::default(),
         ));
     }
-    has_errors(&root)
+    root.dfs().any(|node| {
+        node.kind() == "keyword_create"
+            && !node
+                .parent()
+                .is_some_and(|parent| parent.kind().starts_with("create_"))
+    })
 }
 
 /// Zig containers are values (`const Point = struct { ... }`), so a
@@ -564,6 +588,53 @@ fn zig_declaration<D: Doc>(node: &Node<'_, D>) -> Option<(String, &'static str)>
     Some((name.text().into_owned(), kind))
 }
 
+fn javascript(
+    language: SupportLang,
+    source: &str,
+    origin: Origin,
+    symbols: &mut Vec<CodeSymbol>,
+) -> bool {
+    let errors = bundled(language, source, origin, symbols);
+    if !source.contains("export default") {
+        return errors;
+    }
+    let grep = language.ast_grep(source);
+    for export in grep.root().children() {
+        let Some(object) = export
+            .field("value")
+            .filter(|_| export.kind() == "export_statement")
+            .filter(|value| value.kind() == "object")
+        else {
+            continue;
+        };
+        symbols.push(node_symbol(&export, "default".to_owned(), "object", origin));
+        for member in object.children() {
+            let name = match member.kind().as_ref() {
+                "method_definition" => member.field("name"),
+                "pair" => member
+                    .field("value")
+                    .filter(|value| {
+                        matches!(
+                            value.kind().as_ref(),
+                            "function_expression" | "function" | "arrow_function"
+                        )
+                    })
+                    .and(member.field("key")),
+                _ => None,
+            };
+            if let Some(name) = name {
+                symbols.push(node_symbol(
+                    &member,
+                    name.text().into_owned(),
+                    "method",
+                    origin,
+                ));
+            }
+        }
+    }
+    errors
+}
+
 /// The bundled C++ rules skip namespaces, which leaves namespaced functions
 /// without a parent.
 fn cpp_namespaces(source: &str, symbols: &mut Vec<CodeSymbol>) {
@@ -607,7 +678,7 @@ fn html(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     for script in root.dfs().filter(|node| node.kind() == "script_element") {
         if let Some(content) = script.children().find(|child| child.kind() == "raw_text") {
             let origin = Origin::default().inside(&content);
-            errors |= bundled(SupportLang::JavaScript, &content.text(), origin, symbols);
+            errors |= javascript(SupportLang::JavaScript, &content.text(), origin, symbols);
         }
     }
     errors

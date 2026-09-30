@@ -51,7 +51,10 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       directive as an `expression`; coverage is always
       `partial: EEx directives only`.
 - [x] SQL via `tree-sitter-sequel` 0.3.11 (MIT): every `create_*` statement
-      (table, view, index, function, trigger, type, …). Its `cc ~1.2.1`
+      (table, view, index, function, trigger, type, …). Coverage is partial
+      only when a `CREATE` keyword falls outside a parsed `create_*`
+      statement: pg_dump's `\restrict` lines and unsupported column defaults
+      are errors the grammar reports but they hide no symbol. Its `cc ~1.2.1`
       build-dependency pin downgrades the lockfile's `cc`; re-check on upgrades.
 - [x] Bash `function_definition`; HTML `<script>` bodies outlined as
       JavaScript at their file position.
@@ -75,18 +78,23 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       coverage, and symbols (name, kind, parent, start/end, signature). A
       schema/extractor version in `PRAGMA user_version` rebuilds the index on
       mismatch. Bump `INDEX_VERSION` whenever extraction output changes.
-- [x] Refresh is explicit (`gmem code index`) or per file on demand
-      (`code_outline`). Each file's rows are replaced in one transaction;
-      deleted files are removed. `find_symbol` reports `stale` or `missing`
-      per match instead of trusting old rows.
+- [x] Refresh is incremental and automatic: `find_symbol` refreshes the whole
+      checkout (a no-op run stats files only: 0.18 s at 20,000 files) and
+      `code_outline` refreshes its file. Changed files are parsed in parallel
+      on a rayon pool that lives only for that run (`[code] index_threads`,
+      `"auto"` = `available_parallelism`) and written 256 per transaction;
+      deleted files are removed.
+- [x] `[code] max_files` / `GRAPHMEM_CODE_MAX_FILES` replaces the fixed
+      20,000-file bound.
 
 ## 3. Expose a small read-only interface
 
 - [x] `code_outline(path, offset?, limit?, root?)`: paginated symbols with
       ranges and coverage, always fresh.
-- [x] `find_symbol(query, kind?, limit?, root?)`: bounded matches, exact names
-      first, with paths, parents and freshness; never a single "resolved"
-      target.
+- [x] `find_symbol(query, kind?, limit?, root?)`: bounded matches with a
+      `total`, exact names first, then last-segment and prefix matches, with
+      paths and parents; never a single "resolved" target. Imports and
+      template usages only when `kind` asks for them.
 - [x] `code_index(root?)`: incremental refresh from MCP, bounded like the CLI,
       with no progress output since stdout carries only JSON-RPC.
 - [x] `gmem code index|outline|find`; progress on stderr.

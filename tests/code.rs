@@ -184,7 +184,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "21-21\t    component .icon",
                 "25-25\t  function icon_class/1",
                 "27-31\t  macro __using__/1",
-                "33-39\t  module Helpers",
+                "33-39\t  module DemoWeb.CoreComponents.Helpers",
                 "34-36\t    function hide/2",
                 "38-38\t    function version/0",
             ],
@@ -222,6 +222,9 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "3-5\tfunction Cart",
                 "7-11\tclass CartStore",
                 "8-10\t  method add",
+                "13-18\tobject default",
+                "14-16\t  method mounted",
+                "17-17\t  method updated",
             ],
         ),
         (
@@ -251,6 +254,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
         (
             "db/schema.sql",
             &[
+                "\tsql\tcomplete",
                 "1-4\ttable accounts",
                 "6-6\tindex accounts_email_idx",
                 "8-8\tview active_accounts",
@@ -281,17 +285,14 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
 }
 
 #[test]
-fn refreshes_edits_and_deletes_and_reports_stale_matches() {
+fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     let sandbox = Sandbox::new("refresh");
     fs::write(sandbox.repo.join(".gitignore"), "ignored.py\n").expect("gitignore is written");
     fs::write(sandbox.repo.join("ignored.py"), "def hidden():\n    pass\n")
         .expect("ignored file is written");
-    sandbox.run(&["code", "index"]);
     assert_eq!(sandbox.run(&["code", "find", "hidden"]), "");
-
-    let found = sandbox.run(&["code", "find", "load_config"]);
     assert_eq!(
-        found,
+        sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
     );
 
@@ -299,32 +300,38 @@ fn refreshes_edits_and_deletes_and_reports_stale_matches() {
     let mut source = fs::read_to_string(&service).expect("service is readable");
     source.insert_str(0, "\n\n");
     fs::write(&service, source).expect("service is edited");
-    assert!(
-        sandbox
-            .run(&["code", "find", "load_config"])
-            .ends_with("\tstale\n")
-    );
-
-    // Outlining a changed file re-indexes it first.
-    let outline = sandbox.run(&["code", "outline", "app/service.py"]);
-    assert!(outline.contains("11-12\tfunction load_config"), "{outline}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:11:1\tfunction\tload_config\t\tfresh\n"
     );
 
     fs::remove_file(sandbox.repo.join("scripts/deploy.sh")).expect("script is deleted");
-    assert!(
-        sandbox
-            .run(&["code", "find", "deploy"])
-            .contains("\tmissing\n")
-    );
+    assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 17 unchanged, 1 removed"),
+        reindexed.contains("0 indexed, 17 unchanged, 0 removed"),
         "{reindexed}"
     );
-    assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
+
+    assert_eq!(
+        sandbox.run(&["code", "find", "Helpers"]),
+        "lib/demo_web/components/core_components.ex:33:3\tmodule\t\
+         DemoWeb.CoreComponents.Helpers\tDemoWeb.CoreComponents\tfresh\n"
+    );
+    let icons = sandbox.run(&["code", "find", "icon"]);
+    assert!(
+        icons
+            .starts_with("lib/demo_web/components/core_components.ex:25:3\tfunction\ticon_class/1"),
+        "{icons}"
+    );
+    assert!(!icons.contains("\tcomponent\t"), "{icons}");
+    assert_eq!(
+        sandbox
+            .run(&["code", "find", ".icon", "--kind", "component"])
+            .lines()
+            .count(),
+        2
+    );
 }
 
 #[cfg(unix)]
@@ -395,5 +402,26 @@ fn config_can_disable_the_code_tools() {
         sandbox
             .fail(&["code", "index"])
             .contains("code tools are disabled")
+    );
+
+    fs::write(
+        sandbox.home.join("config.toml"),
+        "[embedding]\nenabled = false\n[code]\nmax_files = 1\nindex_threads = 2\n",
+    )
+    .expect("config is written");
+    let output = sandbox.gmem(&sandbox.repo, &["code", "index"]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 indexed"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("too many source files"));
+
+    fs::write(
+        sandbox.home.join("config.toml"),
+        "[embedding]\nenabled = false\n[code]\nindex_threads = 0\n",
+    )
+    .expect("config is written");
+    assert!(
+        sandbox
+            .fail(&["code", "index"])
+            .contains("\"auto\" or a positive integer")
     );
 }
