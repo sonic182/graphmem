@@ -57,17 +57,26 @@ impl Mcp {
         }
     }
 
-    fn request(&mut self, id: u64, method: &str, params: Value) -> Value {
+    /// Writes a request without waiting for its response.
+    fn send(&mut self, id: u64, method: &str, params: Value) {
         let request = json!({"jsonrpc":"2.0", "id": id, "method": method, "params": params});
         let stdin = self.stdin.as_mut().expect("MCP stdin");
         writeln!(stdin, "{request}").expect("request is written");
         stdin.flush().expect("request is flushed");
+    }
+
+    /// Reads the next JSON-RPC message from the server.
+    fn recv(&mut self) -> Value {
         let mut line = String::new();
+        self.stdout.read_line(&mut line).expect("response is read");
+        assert!(!line.is_empty(), "MCP server closed stdout");
+        serde_json::from_str(&line).expect("response is JSON")
+    }
+
+    fn request(&mut self, id: u64, method: &str, params: Value) -> Value {
+        self.send(id, method, params);
         loop {
-            line.clear();
-            self.stdout.read_line(&mut line).expect("response is read");
-            assert!(!line.is_empty(), "MCP server closed stdout");
-            let response: Value = serde_json::from_str(&line).expect("response is JSON");
+            let response = self.recv();
             if response.get("id") == Some(&json!(id)) {
                 return response;
             }
@@ -1454,4 +1463,115 @@ fn code_failures_leave_the_memory_tools_available() {
         }
     }
     fs::remove_dir_all(root).expect("MCP code failure test data is removed");
+}
+
+/// A first index of a large checkout takes seconds. It must run off the Tokio
+/// workers, or the tools that do not touch the code index wait behind it.
+#[cfg(feature = "code")]
+#[test]
+fn code_refresh_does_not_block_memory_tools() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "graphmem-mcp-code-blocking-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let repo = root.join("repo");
+    fs::create_dir_all(&repo).expect("repository is created");
+    for file in 0..4000 {
+        let source = (0..10)
+            .map(|function| format!("def handler_{file}_{function}(value):\n    return value\n"))
+            .collect::<String>();
+        fs::write(repo.join(format!("module_{file}.py")), source).expect("source file is written");
+    }
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .status()
+            .expect("git runs")
+            .success()
+    );
+
+    // A fresh home per server, so each one starts with an empty code index.
+    // With the fewest workers, a handler that blocks one starves every tool.
+    for (workers, code_calls) in [("1", 1), ("2", 3)] {
+        let home = root.join(format!("home-{workers}"));
+        let mut mcp = Mcp::spawn_with(
+            &home,
+            &repo,
+            &[
+                ("GRAPHMEM_CODE", "on"),
+                ("GRAPHMEM_CODE_INDEX_THREADS", "1"),
+                ("GRAPHMEM_TOKIO_WORKER_THREADS", workers),
+            ],
+        );
+        mcp.request(
+            1,
+            "initialize",
+            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+        );
+        let code_index = rusqlite::Connection::open(home.join("code.sqlite"))
+            .expect("code index database is available");
+        code_index
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .expect("code index reads wait for writes");
+        // Code calls take ids 10.., the memory call id 2.
+        for call in 0..code_calls {
+            let (name, arguments) = match call {
+                0 | 1 => ("find_symbol", json!({"query":"handler_0_0"})),
+                _ => ("code_outline", json!({"path":"module_1.py"})),
+            };
+            mcp.send(
+                10 + call,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            );
+        }
+        let indexing_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let indexed_files: i64 = code_index
+                .query_row("SELECT count(*) FROM files", [], |row| row.get(0))
+                .expect("code index progress is readable");
+            if indexed_files > 0 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < indexing_deadline,
+                "code index did not begin indexing files"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        drop(code_index);
+        mcp.send(2, "tools/call", json!({"name":"stats","arguments":{}}));
+
+        // The code calls contend for the index lock in no fixed order, so a
+        // cheap `code_outline` (id 12) may answer early. The slow refresh is
+        // in `find_symbol` (ids 10 and 11), which must not answer before stats.
+        let mut answered = Vec::new();
+        for _ in 0..=code_calls {
+            let response = mcp.recv();
+            assert_ne!(response["result"]["isError"], true, "{response}");
+            assert!(
+                response["result"]["structuredContent"].is_object(),
+                "{response}"
+            );
+            answered.push(response["id"].as_u64().expect("response id"));
+        }
+        let stats = answered
+            .iter()
+            .position(|&id| id == 2)
+            .expect("stats answered");
+        assert!(
+            answered[..stats].iter().all(|&id| id == 12),
+            "stats waited behind the code index with {workers} worker(s): {answered:?}"
+        );
+        drop(mcp);
+    }
+    fs::remove_dir_all(root).expect("MCP code blocking test data is removed");
 }

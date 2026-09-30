@@ -1,7 +1,11 @@
+#[cfg(feature = "code")]
+use std::sync::Arc;
 use std::{
     path::Path,
     sync::{Mutex, MutexGuard},
 };
+#[cfg(feature = "code")]
+use tokio::sync::Mutex as AsyncMutex;
 
 #[cfg(feature = "code")]
 use graphmem::application::code::{CodeService, MAX_FIND_LIMIT};
@@ -42,7 +46,7 @@ pub struct MemoryServer {
     embedding: EmbeddingConfig,
     tool_router: ToolRouter<Self>,
     #[cfg(feature = "code")]
-    code: Option<Mutex<CodeService>>,
+    code: Option<Arc<AsyncMutex<CodeService>>>,
 }
 
 impl MemoryServer {
@@ -54,7 +58,7 @@ impl MemoryServer {
         let mut tool_router = Self::tool_router();
         #[cfg(feature = "code")]
         let code = match CodeService::open_default() {
-            Ok(code) => code.map(Mutex::new),
+            Ok(code) => code.map(|code| Arc::new(AsyncMutex::new(code))),
             Err(error) => {
                 tracing::warn!(%error, "code tools disabled");
                 eprintln!("warning: code tools disabled: {error}");
@@ -742,7 +746,7 @@ impl MemoryServer {
              TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, Bash, CSS, SCSS, \
              and HTML/HEEx <script> and <style>."
     )]
-    fn code_outline(
+    async fn code_outline(
         &self,
         Parameters(input): Parameters<CodeOutlineInput>,
     ) -> Result<Json<CodeOutlineOutput>, CallToolResult> {
@@ -752,10 +756,10 @@ impl MemoryServer {
         }
         let offset = input.offset.unwrap_or(0);
         let directory = code_directory(input.root)?;
+        let path = input.path;
         let outline = self
-            .code()?
-            .outline(&directory, &input.path)
-            .map_err(|error| tool_error(error.to_string()))?;
+            .run_code(move |code| code.outline(&directory, &path))
+            .await?;
         let total = outline.symbols.len();
         let symbols = outline
             .symbols
@@ -797,7 +801,7 @@ impl MemoryServer {
              never picks one as the resolved target; total counts matches beyond limit, and \
              truncated means the checkout exceeded the index's file limit."
     )]
-    fn find_symbol(
+    async fn find_symbol(
         &self,
         Parameters(input): Parameters<FindSymbolInput>,
     ) -> Result<Json<FindSymbolOutput>, CallToolResult> {
@@ -806,10 +810,10 @@ impl MemoryServer {
             return Err(tool_error("limit must be between 1 and 100"));
         }
         let directory = code_directory(input.root)?;
+        let FindSymbolInput { query, kind, .. } = input;
         let found = self
-            .code()?
-            .find_symbol(&directory, &input.query, input.kind.as_deref(), limit)
-            .map_err(|error| tool_error(error.to_string()))?;
+            .run_code(move |code| code.find_symbol(&directory, &query, kind.as_deref(), limit))
+            .await?;
         let matches = found
             .hits
             .into_iter()
@@ -837,12 +841,24 @@ impl MemoryServer {
 
 #[cfg(feature = "code")]
 impl MemoryServer {
-    fn code(&self) -> Result<MutexGuard<'_, CodeService>, CallToolResult> {
-        self.code
-            .as_ref()
-            .ok_or_else(|| tool_error("code tools are disabled"))?
-            .lock()
-            .map_err(|_| tool_error("code index lock is poisoned"))
+    /// Waits asynchronously for the index, then runs `work` on the blocking
+    /// pool. Refreshing the index shells out to Git, parses files, and writes
+    /// SQLite for seconds on a first index; callers waiting for the index must
+    /// not occupy blocking-pool threads either.
+    async fn run_code<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut CodeService) -> graphmem::application::Result<T> + Send + 'static,
+    ) -> Result<T, CallToolResult> {
+        let code = self
+            .code
+            .clone()
+            .ok_or_else(|| tool_error("code tools are disabled"))?;
+        let mut service = code.lock_owned().await;
+        tokio::task::spawn_blocking(move || {
+            work(&mut service).map_err(|error| tool_error(error.to_string()))
+        })
+        .await
+        .map_err(|error| tool_error(format!("code index task failed: {error}")))?
     }
 }
 

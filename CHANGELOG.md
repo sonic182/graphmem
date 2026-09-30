@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The MCP `find_symbol` and `code_outline` tools refresh the code index on the
+  blocking thread pool instead of a Tokio worker. A long first index, or calls
+  queued behind it, no longer stalls the memory tools.
+
 ## [0.7.1] - 2026-09-30
 
 ### Fixed
