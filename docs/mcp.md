@@ -50,26 +50,20 @@ The server exposes eight memory tools:
 
 ## Code navigation tools
 
-Binaries built with `--features code` (release binaries are) add three tools,
-listed unless `[code] enabled = false` or `GRAPHMEM_CODE=off`. They use a
-separate, rebuildable index (`$GRAPHMEM_HOME/code.sqlite`) keyed by Git
+Binaries built with `--features code` (release binaries are) add two tools,
+listed unless `[code] enabled = false` or `GRAPHMEM_CODE=off`; the
+`initialize` instructions then add a short note on when to use them. They use
+a separate, rebuildable index (`$GRAPHMEM_HOME/code.sqlite`) keyed by Git
 checkout root, so each linked worktree has its own. They never read or write
 memories, and `recall` ranking is unaffected. A corrupt `code.sqlite` is
 recreated; if the index still cannot be opened or `[code]` is invalid, the
 server logs a warning on stderr and starts with the memory tools only.
 
-- `code_index`: builds or refreshes the index of the checkout containing the
-  optional `root` (an absolute directory; defaults to the server's startup
-  directory), the same as `gmem code index`. It is optional, since
-  `find_symbol` refreshes the index itself; use it to warm up a large checkout
-  ahead of time. It is incremental: files with the same size and modification
-  time are skipped and deleted files are removed. It returns `root`,
-  `indexed`, `unchanged`, `removed`, `skipped` (symlinks, files outside the
-  checkout or over 1 MiB, and binary or non-UTF-8 files, which are not re-read
-  until they change), `truncated` (more source files than `[code] max_files`,
-  20,000 by default), `failed` (the first 20 `path: reason` read errors), and
-  `failed_total`. No progress is reported, since
-  stdout carries only JSON-RPC.
+There is no MCP index tool: both tools refresh the index on demand, re-reading
+only files whose size or modification time changed. To build the index of a
+large checkout ahead of time, or to see which files could not be indexed, run
+`gmem code index` in it.
+
 - `code_outline`: lists the definitions in `path` (relative to the checkout
   root, or absolute inside it), with optional `offset`, `limit` (1 to 500,
   default 200), and `root` (an absolute directory inside another checkout;

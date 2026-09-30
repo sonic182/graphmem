@@ -612,10 +612,11 @@ impl MemoryServer {
     #[cfg(feature = "code")]
     fn code_note(&self) -> &'static str {
         if self.code.is_some() {
-            " code_index, code_outline, and find_symbol navigate source through a separate, \
-             rebuildable code index of the Git checkout, never through memory. find_symbol and \
-             code_outline refresh the index themselves, so there is no need to decide when to \
-             re-index; code_index only warms up a large checkout ahead of time."
+            " find_symbol finds definitions by name and code_outline lists a file's symbols with \
+             line ranges, through a separate code index of the Git checkout that both keep fresh \
+             themselves (never through memory). Use them before grepping or reading whole files \
+             to locate code; use text search for call sites and references, which they do not \
+             index."
         } else {
             ""
         }
@@ -728,72 +729,8 @@ struct FindSymbolOutput {
 }
 
 #[cfg(feature = "code")]
-#[derive(Debug, Deserialize, JsonSchema)]
-struct CodeIndexInput {
-    /// Absolute path inside the Git checkout to index. Omit to use the
-    /// server's startup directory.
-    #[serde(default)]
-    root: Option<String>,
-}
-
-#[cfg(feature = "code")]
-const MAX_REPORTED_FAILURES: usize = 20;
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct CodeIndexOutput {
-    /// Checkout root that was indexed.
-    root: String,
-    indexed: usize,
-    unchanged: usize,
-    removed: usize,
-    skipped: usize,
-    /// True when the checkout had more source files than the index accepts.
-    truncated: bool,
-    /// The first files that could not be indexed, as "path: reason".
-    failed: Vec<String>,
-    failed_total: usize,
-}
-
-#[cfg(feature = "code")]
 #[tool_router(router = code_router)]
 impl MemoryServer {
-    #[tool(
-        name = "code_index",
-        description = "Build or refresh the code index of a Git checkout. Optional: find_symbol \
-             refreshes the index itself; call this only to warm up a large checkout that was \
-             never indexed. Incremental: files unchanged since the last run (same size and \
-             modification time) are skipped and deleted files are removed. Indexes tracked and \
-             untracked, non-ignored source files; skips symlinks, binaries, *.min.js, files over \
-             1 MiB, and anything past 20,000 source files by default (`[code] max_files`; \
-             truncated is then true)."
-    )]
-    fn code_index(
-        &self,
-        Parameters(input): Parameters<CodeIndexInput>,
-    ) -> Result<Json<CodeIndexOutput>, CallToolResult> {
-        let directory = code_directory(input.root)?;
-        let report = self
-            .code()?
-            .index(&directory, |_, _| {})
-            .map_err(|error| tool_error(error.to_string()))?;
-        let failed_total = report.failed.len();
-        Ok(Json(CodeIndexOutput {
-            root: report.root.display().to_string(),
-            indexed: report.indexed,
-            unchanged: report.unchanged,
-            removed: report.removed,
-            skipped: report.skipped,
-            truncated: report.truncated,
-            failed: report
-                .failed
-                .into_iter()
-                .take(MAX_REPORTED_FAILURES)
-                .collect(),
-            failed_total,
-        }))
-    }
-
     #[tool(
         name = "code_outline",
         description = "List the definitions in one source file of a Git checkout: modules, \

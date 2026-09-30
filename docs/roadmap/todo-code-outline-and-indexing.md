@@ -95,8 +95,8 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       `total`, exact names first, then last-segment and prefix matches, with
       paths and parents; never a single "resolved" target. Imports and
       template usages only when `kind` asks for them.
-- [x] `code_index(root?)`: incremental refresh from MCP, bounded like the CLI,
-      with no progress output since stdout carries only JSON-RPC.
+- [x] No MCP index tool: `find_symbol` and `code_outline` refresh on demand;
+      `gmem code index` warms up a checkout from the CLI.
 - [x] `gmem code index|outline|find`; progress on stderr.
 
 ## 4. Validate value before expanding
@@ -120,7 +120,7 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       calls can stall the memory tools. Run them through `spawn_blocking`.
 - [ ] Checkout rows are never pruned: removed worktrees, temp clones, and any
       absolute `root` an agent passed keep their rows. Drop checkouts whose
-      root no longer exists, e.g. during `code_index`.
+      root no longer exists, e.g. during a refresh.
 - [ ] Only then consider references, imports across files, or a call graph.
       Add an edge only when its target can be resolved reliably; carry
       uncertainty/coverage rather than presenting guesses as facts.
