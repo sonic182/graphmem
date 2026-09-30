@@ -37,7 +37,8 @@ definitions and imports only: never call sites, references, types, or text.
 Matching ignores case and ranks in this order:
 
 1. Exact name. An Elixir name also matches `name/arity`: `render` finds
-   `render/2`, and `render/2` finds only that arity.
+   `render/2`. Querying `render/2` ranks that arity first but can also return
+   prefix matches such as `render/20`; verify the returned name for an exact arity.
 2. Name ending in `.query`: `ConsentLive` finds `MyAppWeb.ConsentLive`, `users`
    finds `public.users`, and `btn-primary` finds the CSS rule named
    `.btn, .btn-primary`.
