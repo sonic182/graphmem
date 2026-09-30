@@ -739,8 +739,8 @@ impl MemoryServer {
              and re-indexes it when it changed, so the result is never stale. coverage is \
              \"partial: <reason>\" when syntax errors or template limits may hide symbols. \
              Supports Rust, Go, Zig, C, C++ (including .h), Python, JavaScript/JSX, \
-             TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, Bash, and HTML \
-             <script>."
+             TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, Bash, CSS, SCSS, \
+             and HTML/HEEx <script> and <style>."
     )]
     fn code_outline(
         &self,

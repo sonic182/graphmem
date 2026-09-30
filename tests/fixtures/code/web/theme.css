@@ -1,0 +1,22 @@
+@import "reset.css";
+
+:root {
+  --brand: #056ef0;
+}
+
+.btn,
+.btn-primary {
+  color: var(--brand);
+}
+
+@media (min-width: 640px) {
+  .card {
+    padding: 1rem;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}

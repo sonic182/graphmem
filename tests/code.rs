@@ -106,7 +106,7 @@ fn git(directory: &Path, args: &[&str]) {
 fn outlines_every_supported_language_with_nesting_and_ranges() {
     let sandbox = Sandbox::new("languages");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("18 indexed"), "{indexed}");
+    assert!(indexed.contains("20 indexed"), "{indexed}");
 
     let expectations: &[(&str, &[&str])] = &[
         (
@@ -197,6 +197,8 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "2-5\t  component .header",
                 "4-4\t    slot :subtitle",
                 "6-6\t  component .button",
+                "10-12\tfunction track",
+                "15-17\tselector .welcome",
             ],
         ),
         (
@@ -265,7 +267,38 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             "scripts/deploy.sh",
             &["4-6\tfunction build", "8-10\tfunction deploy"],
         ),
-        ("public/index.html", &["6-8\tfunction refreshStatus"]),
+        (
+            "public/index.html",
+            &["6-8\tfunction refreshStatus", "11-13\tselector .status"],
+        ),
+        (
+            "web/theme.css",
+            &[
+                "\tcss\tcomplete",
+                "1-1\timport reset.css",
+                "3-5\tselector :root",
+                "4-4\t  variable --brand",
+                "7-10\tselector .btn, .btn-primary",
+                "12-16\tmedia @media (min-width: 640px)",
+                "13-15\t  selector .card",
+                "18-22\tkeyframes spin",
+            ],
+        ),
+        (
+            "web/_buttons.scss",
+            &[
+                "\tscss\tcomplete",
+                "1-1\timport sass:math",
+                "3-3\tvariable $gap",
+                "5-7\tselector %control",
+                "9-11\tmixin pill",
+                "13-15\tfunction half",
+                "17-23\tselector .button",
+                "20-22\t  selector &:hover",
+                "27-31\tmedia @media #{$query}",
+                "28-30\t  selector .wide",
+            ],
+        ),
     ];
     for (path, lines) in expectations {
         let outline = sandbox.run(&["code", "outline", path]);
@@ -330,7 +363,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     )
     .expect("untracked non-UTF-8 filename is written");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("18 indexed"), "{indexed}");
+    assert!(indexed.contains("20 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
@@ -372,7 +405,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 17 unchanged, 0 removed, 1 skipped"),
+        reindexed.contains("0 indexed, 19 unchanged, 0 removed, 1 skipped"),
         "{reindexed}"
     );
 

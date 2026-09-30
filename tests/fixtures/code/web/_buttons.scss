@@ -1,0 +1,31 @@
+@use "sass:math";
+
+$gap: 8px;
+
+%control {
+  border: 0;
+}
+
+@mixin pill($radius) {
+  border-radius: $radius;
+}
+
+@function half($value) {
+  @return math.div($value, 2);
+}
+
+.button {
+  @include pill(half($gap));
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+$query: "(min-width: 640px)";
+
+@media #{$query} {
+  .wide {
+    padding: $gap;
+  }
+}
