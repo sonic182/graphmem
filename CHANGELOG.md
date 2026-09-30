@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as imports. `.min.css` files are skipped like `.min.js`.
 - HTML `<style>` and HEEx (including `~H`) `<script>` and `<style>` bodies are
   outlined at their position in the file.
+- `graphmem-code-analysis` skill in the Claude Code, Codex, OpenCode, and pi
+  plugins. It covers which of `find_symbol` and `code_outline` fits a task,
+  how to read `coverage`, `truncated`, and `freshness`, and when to fall back
+  to `rg` or `ast-grep` for call sites and references. The session guidance
+  points agents to it.
 
 ## [0.6.0] - 2026-09-30
 

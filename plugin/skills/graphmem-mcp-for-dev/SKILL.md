@@ -29,6 +29,8 @@ Read the result critically. `recall` always returns its best candidates, even wh
 
 Do not repeatedly recall the same context within a task. Use `stats` only to diagnose the local store, not as a routine step.
 
+The code tools `find_symbol` and `code_outline` are covered by the `graphmem-code-analysis` skill. Never store symbol locations or outlines as memories; they are derivable from the code.
+
 Before saving a fact on the same topic, recall it first. Prefer the existing memory when it is still correct, and `update` it when it is not, rather than adding a duplicate.
 
 ## Store durable engineering context
