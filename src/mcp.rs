@@ -4,6 +4,8 @@ use std::{
     path::Path,
     sync::{Mutex, MutexGuard},
 };
+#[cfg(feature = "code")]
+use tokio::sync::Mutex as AsyncMutex;
 
 #[cfg(feature = "code")]
 use graphmem::application::code::{CodeService, MAX_FIND_LIMIT};
@@ -44,7 +46,7 @@ pub struct MemoryServer {
     embedding: EmbeddingConfig,
     tool_router: ToolRouter<Self>,
     #[cfg(feature = "code")]
-    code: Option<Arc<Mutex<CodeService>>>,
+    code: Option<Arc<AsyncMutex<CodeService>>>,
 }
 
 impl MemoryServer {
@@ -56,7 +58,7 @@ impl MemoryServer {
         let mut tool_router = Self::tool_router();
         #[cfg(feature = "code")]
         let code = match CodeService::open_default() {
-            Ok(code) => code.map(|code| Arc::new(Mutex::new(code))),
+            Ok(code) => code.map(|code| Arc::new(AsyncMutex::new(code))),
             Err(error) => {
                 tracing::warn!(%error, "code tools disabled");
                 eprintln!("warning: code tools disabled: {error}");
@@ -839,10 +841,10 @@ impl MemoryServer {
 
 #[cfg(feature = "code")]
 impl MemoryServer {
-    /// Runs `work` on the blocking pool with the index locked. Refreshing the
-    /// index shells out to Git, parses files, and writes SQLite for seconds on
-    /// a first index, and waiting for the lock blocks a thread too, so none of
-    /// that may run on a Tokio worker. The lock never crosses an `.await`.
+    /// Waits asynchronously for the index, then runs `work` on the blocking
+    /// pool. Refreshing the index shells out to Git, parses files, and writes
+    /// SQLite for seconds on a first index; callers waiting for the index must
+    /// not occupy blocking-pool threads either.
     async fn run_code<T: Send + 'static>(
         &self,
         work: impl FnOnce(&mut CodeService) -> graphmem::application::Result<T> + Send + 'static,
@@ -851,10 +853,8 @@ impl MemoryServer {
             .code
             .clone()
             .ok_or_else(|| tool_error("code tools are disabled"))?;
+        let mut service = code.lock_owned().await;
         tokio::task::spawn_blocking(move || {
-            let mut service = code
-                .lock()
-                .map_err(|_| tool_error("code index lock is poisoned"))?;
             work(&mut service).map_err(|error| tool_error(error.to_string()))
         })
         .await
