@@ -356,7 +356,7 @@ fn checkout_path(root: &Path, path: &str) -> Result<String> {
 fn is_minified(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".min.js"))
+        .is_some_and(|name| name.ends_with(".min.js") || name.ends_with(".min.css"))
 }
 
 fn code_error(message: impl Into<String>) -> ApplicationError {

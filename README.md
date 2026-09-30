@@ -95,7 +95,8 @@ cargo build --release --features cuda
 With the code navigation tools (`gmem code`, and the `code_outline` and
 `find_symbol` MCP tools; release binaries include them).
 They outline Rust, Go, Zig, C, C++, Python, JavaScript/TypeScript,
-Elixir/Phoenix templates, Ruby, PHP, SQL, Bash, and HTML `<script>`, and add
+Elixir/Phoenix templates, Ruby, PHP, SQL, Bash, CSS, SCSS, and HTML
+`<script>`/`<style>`, and add
 about 20 MB to the binary:
 
 ```sh

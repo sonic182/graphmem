@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The code index outlines CSS and SCSS: rule sets (named by their selector
+  list), `@media`, `@supports`, `@keyframes`, SCSS `@mixin` and `@function`,
+  `--custom` properties and `$variables`, and `@import`, `@use`, and `@forward`
+  as imports. `.min.css` files are skipped like `.min.js`.
+- HTML `<style>` and HEEx (including `~H`) `<script>` and `<style>` bodies are
+  outlined at their position in the file.
+
 ## [0.6.0] - 2026-09-30
 
 ### Added

@@ -6,7 +6,8 @@ Let an agent find definitions and navigate source without confusing generated co
 facts with Graphmem's durable, user-verified memories. Target languages:
 Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
 (`.ex`, `.exs`, inline `~H`, `.heex`, `.eex`, including `.html.heex` and
-`.html.eex`), Ruby, PHP, SQL, Bash, and HTML (`<script>`).
+`.html.eex`), Ruby, PHP, SQL, Bash, CSS, SCSS, and HTML (`<script>`,
+`<style>`).
 
 ## Boundaries
 
@@ -58,6 +59,14 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       build-dependency pin downgrades the lockfile's `cc`; re-check on upgrades.
 - [x] Bash `function_definition`; HTML `<script>` bodies outlined as
       JavaScript at their file position.
+- [x] CSS via ast-grep's grammar and SCSS via `tree-sitter-scss` 1.0.0 (MIT),
+      with one syntax walk: rule sets named by their selector list,
+      `@media`/`@supports`, `@keyframes`, `@mixin`/`@function`, `--custom` and
+      `$scss` variables, and `@import`/`@use`/`@forward` as imports. HTML
+      `<style>` and HEEx `<script>`/`<style>` bodies (including `~H`) are
+      outlined at their file position; HEEx has no raw-text node, so the body
+      is sliced between the start and end tags. The SCSS grammar rejects
+      `@extend %placeholder`, which makes coverage partial.
 - [x] Rust, Go, C and C++ reuse ast-grep's grammars and bundled rules. Rust
       `impl` blocks are named `impl <Type>`, and C++ `namespace` blocks are
       added so namespaced functions get a parent. `.h` headers are parsed as

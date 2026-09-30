@@ -20,6 +20,7 @@ pub enum CodeLanguage {
     Bash,
     C,
     Cpp,
+    Css,
     Eex,
     Elixir,
     Go,
@@ -30,16 +31,18 @@ pub enum CodeLanguage {
     Python,
     Ruby,
     Rust,
+    Scss,
     Sql,
     Tsx,
     TypeScript,
     Zig,
 }
 
-const LANGUAGE_NAMES: [(CodeLanguage, &str); 17] = [
+const LANGUAGE_NAMES: [(CodeLanguage, &str); 19] = [
     (CodeLanguage::Bash, "bash"),
     (CodeLanguage::C, "c"),
     (CodeLanguage::Cpp, "cpp"),
+    (CodeLanguage::Css, "css"),
     (CodeLanguage::Eex, "eex"),
     (CodeLanguage::Elixir, "elixir"),
     (CodeLanguage::Go, "go"),
@@ -50,6 +53,7 @@ const LANGUAGE_NAMES: [(CodeLanguage, &str); 17] = [
     (CodeLanguage::Python, "python"),
     (CodeLanguage::Ruby, "ruby"),
     (CodeLanguage::Rust, "rust"),
+    (CodeLanguage::Scss, "scss"),
     (CodeLanguage::Sql, "sql"),
     (CodeLanguage::Tsx, "tsx"),
     (CodeLanguage::TypeScript, "typescript"),
@@ -72,6 +76,7 @@ impl CodeLanguage {
             "h" | "cc" | "cpp" | "cxx" | "c++" | "hh" | "hpp" | "hxx" | "h++" | "ipp" | "tpp" => {
                 Self::Cpp
             }
+            "css" => Self::Css,
             "eex" | "leex" => Self::Eex,
             "ex" | "exs" => Self::Elixir,
             "go" => Self::Go,
@@ -82,6 +87,7 @@ impl CodeLanguage {
             "py" | "pyi" => Self::Python,
             "rb" | "rake" | "gemspec" => Self::Ruby,
             "rs" => Self::Rust,
+            "scss" => Self::Scss,
             "sql" => Self::Sql,
             "tsx" => Self::Tsx,
             "ts" | "mts" | "cts" => Self::TypeScript,
@@ -121,6 +127,11 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
             cpp_namespaces(source, &mut symbols);
             bundled(SupportLang::Cpp, source, origin, &mut symbols)
         }
+        CodeLanguage::Css => styles(
+            SupportLang::Css.ast_grep(source).root(),
+            origin,
+            &mut symbols,
+        ),
         CodeLanguage::Eex => {
             eex(source, &mut symbols);
             false
@@ -136,6 +147,7 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
         CodeLanguage::Python => bundled(SupportLang::Python, source, origin, &mut symbols),
         CodeLanguage::Ruby => bundled(SupportLang::Ruby, source, origin, &mut symbols),
         CodeLanguage::Rust => bundled(SupportLang::Rust, source, origin, &mut symbols),
+        CodeLanguage::Scss => styles(Scss.ast_grep(source).root(), origin, &mut symbols),
         CodeLanguage::Sql => sql(source, &mut symbols),
         CodeLanguage::Tsx => javascript(SupportLang::Tsx, source, origin, &mut symbols),
         CodeLanguage::TypeScript => {
@@ -177,6 +189,14 @@ impl Origin {
         Self {
             line: self.line + start.line(),
             column: if start.line() == 0 { self.column } else { 0 } + start.column(node),
+        }
+    }
+
+    fn after<D: Doc>(self, node: &Node<'_, D>) -> Self {
+        let end = node.end_pos();
+        Self {
+            line: self.line + end.line(),
+            column: if end.line() == 0 { self.column } else { 0 } + end.column(node),
         }
     }
 }
@@ -369,6 +389,7 @@ macro_rules! grammar {
 }
 
 grammar!(Heex, tree_sitter_heex::LANGUAGE);
+grammar!(Scss, tree_sitter_scss::language());
 grammar!(Sql, tree_sitter_sequel::LANGUAGE);
 grammar!(Zig, tree_sitter_zig::LANGUAGE);
 
@@ -508,6 +529,70 @@ fn heex(source: &str, origin: Origin, symbols: &mut Vec<CodeSymbol>) -> bool {
             name.text().into_owned()
         };
         symbols.push(node_symbol(&node, name, kind, origin));
+    }
+    let mut errors = has_errors(&root);
+    for tag in root.dfs().filter(|node| node.kind() == "tag") {
+        let (Some(start), Some(end)) = (
+            tag.children().find(|child| child.kind() == "start_tag"),
+            tag.children().find(|child| child.kind() == "end_tag"),
+        ) else {
+            continue;
+        };
+        let Some(name) = start.children().find(|child| child.kind() == "tag_name") else {
+            continue;
+        };
+        let content = &source[start.range().end..end.range().start];
+        let origin = origin.after(&start);
+        errors |= match name.text().as_ref() {
+            "script" => javascript(SupportLang::JavaScript, content, origin, symbols),
+            "style" => styles(SupportLang::Css.ast_grep(content).root(), origin, symbols),
+            _ => false,
+        };
+    }
+    errors
+}
+
+/// SCSS extends the CSS grammar, so one walk covers both.
+fn styles<D: Doc>(root: Node<'_, D>, origin: Origin, symbols: &mut Vec<CodeSymbol>) -> bool {
+    for node in root.dfs() {
+        let child = |kind: &str| node.children().find(|child| child.kind() == kind);
+        let node_kind = node.kind();
+        let symbol = match node_kind.as_ref() {
+            "rule_set" => child("selectors").map(|name| (name.text().into_owned(), "selector")),
+            "keyframes_statement" => {
+                child("keyframes_name").map(|name| (name.text().into_owned(), "keyframes"))
+            }
+            kind @ ("media_statement" | "supports_statement") => {
+                let text = node.text();
+                let name = text.split('{').next().unwrap_or_default().trim().to_owned();
+                Some((name, kind.trim_end_matches("_statement")))
+            }
+            kind @ ("mixin_statement" | "function_statement") => node.field("name").map(|name| {
+                (
+                    name.text().into_owned(),
+                    kind.trim_end_matches("_statement"),
+                )
+            }),
+            "declaration" => node
+                .children()
+                .next()
+                .filter(|name| {
+                    name.kind() == "property_name"
+                        && (name.text().starts_with("--") || name.text().starts_with('$'))
+                })
+                .map(|name| (name.text().into_owned(), "variable")),
+            "import_statement" | "use_statement" | "forward_statement" => {
+                let name = child("string_value").map_or_else(
+                    || node.text().trim_end_matches(';').to_owned(),
+                    |path| path.text().trim_matches(['"', '\'']).to_owned(),
+                );
+                Some((name, "import"))
+            }
+            _ => None,
+        };
+        if let Some((name, kind)) = symbol {
+            symbols.push(node_symbol(&node, name, kind, origin));
+        }
     }
     has_errors(&root)
 }
@@ -666,17 +751,27 @@ fn bash(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     has_errors(&root)
 }
 
-/// Outlines the JavaScript inside `<script>` elements; markup itself yields no
-/// symbols.
+/// Outlines the JavaScript inside `<script>` and the CSS inside `<style>`
+/// elements; markup itself yields no symbols.
 fn html(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     let grep = SupportLang::Html.ast_grep(source);
     let root = grep.root();
     let mut errors = has_errors(&root);
-    for script in root.dfs().filter(|node| node.kind() == "script_element") {
-        if let Some(content) = script.children().find(|child| child.kind() == "raw_text") {
-            let origin = Origin::default().inside(&content);
-            errors |= javascript(SupportLang::JavaScript, &content.text(), origin, symbols);
+    for element in root.dfs() {
+        let kind = element.kind();
+        if !matches!(kind.as_ref(), "script_element" | "style_element") {
+            continue;
         }
+        let Some(content) = element.children().find(|child| child.kind() == "raw_text") else {
+            continue;
+        };
+        let origin = Origin::default().inside(&content);
+        let text = content.text();
+        errors |= if kind == "script_element" {
+            javascript(SupportLang::JavaScript, &text, origin, symbols)
+        } else {
+            styles(SupportLang::Css.ast_grep(&text).root(), origin, symbols)
+        };
     }
     errors
 }
