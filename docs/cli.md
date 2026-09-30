@@ -257,7 +257,11 @@ into `$GRAPHMEM_HOME/code.sqlite`, which can be deleted and rebuilt at any time.
   is re-indexed first if it changed.
 - `gmem code imports <FILE>` prints `path`, language, and coverage, then one
   `start-end<TAB>name` line per declared import. The file is re-indexed first
-  if it changed. Imports are reported as written; paths are not resolved.
+  if it changed. Imports are reported as written (quotes included where the
+  language has them), cut at 160 characters, and not resolved to files. Only
+  import forms the parser recognises are listed, even when coverage is
+  `complete`; see `code_imports` in [mcp.md](mcp.md#code-navigation-tools) for
+  the forms, and use text search for loading through other APIs.
 - `gmem code find <QUERY> [--kind KIND] [--limit N]` refreshes the index, then
   prints `path:line:column<TAB>kind<TAB>name<TAB>parent<TAB>freshness` for
   each match: exact names first, then names ending in `.QUERY`, then

@@ -67,7 +67,9 @@ the way you expected.
   `"expression"`). Use `find_symbol` with `kind: "import"` to locate matching
   import declarations across the checkout, or `code_imports` to list every
   import declared by one file. Imports are syntax only: neither tool resolves
-  an imported name to a file or dependency.
+  an imported name to a file or dependency. Only import forms the parser
+  recognises are listed, even when `coverage` is `complete`; loading through
+  other APIs is not: `rg` for those when absence matters.
 - `coverage: partial: <reason>` means symbols may be missing from the outline.
   EEx is always partial (directives only), and the SCSS grammar rejects
   `@extend %placeholder`. Fall back to reading or `rg` for the gap.

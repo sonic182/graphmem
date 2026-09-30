@@ -34,3 +34,5 @@ pub enum Status {
     Draft,
     Paid,
 }
+
+extern crate serde;

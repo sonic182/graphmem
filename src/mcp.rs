@@ -734,10 +734,9 @@ struct CodeImportsOutput {
     path: String,
     imports: Vec<CodeImportRecord>,
     /// "complete", or "partial: <reason>" when syntax errors or template
-    /// limits may hide imports.
+    /// limits may hide imports. "complete" does not mean every import form
+    /// is recognised: only the forms the parser knows are listed.
     coverage: String,
-    /// The requested file is refreshed before imports are returned.
-    freshness: String,
     total: usize,
     /// Offset of the next page, when there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -836,9 +835,11 @@ impl MemoryServer {
         name = "code_imports",
         description = "List the imports declared in one source file without resolving them to \
              other files. The file is refreshed first. Returns each import's name and 1-based \
-             start and end lines, along with parser coverage and freshness. Supports optional \
-             offset, limit (1 to 500, default 200), and root (an absolute directory inside a \
-             checkout; defaults to the server's startup directory)."
+             start and end lines, along with parser coverage. Only import forms the parser \
+             recognises are listed, so when absence matters also use text search for code \
+             loaded through other APIs. Supports optional offset, limit \
+             (1 to 500, default 200), and root (an absolute directory inside a checkout; \
+             defaults to the server's startup directory)."
     )]
     async fn code_imports(
         &self,
@@ -854,18 +855,13 @@ impl MemoryServer {
         let outline = self
             .run_code(move |code| code.outline(&directory, &path))
             .await?;
+        let total = outline.imports().count();
         let imports = outline
-            .symbols
-            .into_iter()
-            .filter(|symbol| symbol.kind == "import")
-            .collect::<Vec<_>>();
-        let total = imports.len();
-        let imports = imports
-            .into_iter()
+            .imports()
             .skip(offset)
             .take(limit)
             .map(|symbol| CodeImportRecord {
-                name: symbol.name,
+                name: symbol.name.clone(),
                 start_line: symbol.start.line,
                 end_line: symbol.end.line,
             })
@@ -875,7 +871,6 @@ impl MemoryServer {
             path: outline.path,
             imports,
             coverage: outline.coverage.as_text(),
-            freshness: "fresh".to_owned(),
             total,
             next_offset: (next_offset < total).then_some(next_offset),
         }))

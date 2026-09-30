@@ -344,6 +344,21 @@ fn imports_lists_declared_imports_across_supported_languages() {
             "DemoWeb.CoreComponents",
         ),
         ("lib/demo_web/components/core_components.ex", "Logger"),
+        ("app/models/invoice.rb", "helper"),
+        ("app/models/invoice.rb", "tasks.rb"),
+        ("src/Report.php", "vendor/autoload.php"),
+        ("src/Report.php", "bootstrap.php"),
+        ("src/Report.php", "helpers.php"),
+        ("src/Report.php", "legacy.php"),
+        ("scripts/deploy.sh", "./lib.sh"),
+        ("scripts/deploy.sh", "./other.sh"),
+        ("web/cart.jsx", "node:fs"),
+        ("web/cart.jsx", "./lazy"),
+        ("web/cart.jsx", "./totals"),
+        ("web/cart.jsx", "./star"),
+        ("web/api.ts", "fs-extra"),
+        ("web/api.ts", "./rows"),
+        ("native/lib.rs", "serde"),
         ("web/theme.css", "reset.css"),
         ("web/_buttons.scss", "sass:math"),
         ("web/_buttons.scss", "sass:color"),
@@ -352,8 +367,14 @@ fn imports_lists_declared_imports_across_supported_languages() {
     for (file, import) in expectations {
         let output = sandbox.run(&["code", "imports", file]);
         assert!(
-            output.lines().any(|line| line.contains(import)),
-            "{file}: expected import {import:?} in\n{output}"
+            output.lines().skip(1).any(|line| {
+                line.split_once('\t').is_some_and(|(range, name)| {
+                    range.split_once('-').is_some_and(|(start, end)| {
+                        start.parse::<usize>().is_ok() && end.parse::<usize>().is_ok()
+                    }) && name.contains(import)
+                })
+            }),
+            "{file}: expected `start-end<TAB>name` line with {import:?} in\n{output}"
         );
     }
 

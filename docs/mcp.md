@@ -78,9 +78,18 @@ large checkout ahead of time, or to see which files could not be indexed, run
   and `limit` (1 to 500, default 200), and `root` using the same path rules as
   `code_outline`. Each import has a `name`, `start_line`, and `end_line`;
   `total` and `next_offset` describe pagination. The file is refreshed before
-  returning results, so `freshness` is `fresh`; `coverage` reports whether the
-  parser may have missed imports. Imports are reported as declared and are not
-  resolved to files.
+  returning results. `coverage` is `partial` only when syntax errors or
+  template limits may hide imports; `complete` does not mean every way of
+  loading code is recognised. Listed forms include Rust `use` and
+  `extern crate`; JavaScript/TypeScript `import`, `export ... from`,
+  `require()`, `import()`, and `import x = require()`; Ruby `require`,
+  `require_relative`, and `load`; PHP `use`, `require`, and `include` (with
+  `_once`); Bash `source` and `.`. Loading through other APIs is not listed, so
+  use text search when absence matters. Names are as written (JavaScript,
+  Ruby, and PHP keep their quotes) and cut at 160 characters; use the line
+  range to read a long one.
+  Imports nested in functions or modules are listed without their scope.
+  Imports are not resolved to files.
 - `find_symbol`: finds definitions by `query`, with optional `kind`, `limit`
   (1 to 100, default 20), and `root`. It refreshes the checkout's index first
   (only changed files are re-read), so a checkout that was never indexed is

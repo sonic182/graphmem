@@ -10,7 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `gmem code imports <FILE>` and the MCP `code_imports` tool list declared
-  imports with their source ranges without resolving them to files.
+  imports with their source ranges without resolving them to files. Ruby
+  `require_relative`/`load`, PHP `require`/`include`, Bash `source`, Rust
+  `extern crate`, and JavaScript/TypeScript `require()`, `import()`,
+  `export ... from`, and `import x = require()` are listed too.
 
 ### Fixed
 

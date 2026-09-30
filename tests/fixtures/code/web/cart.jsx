@@ -16,3 +16,8 @@ export default {
   },
   updated: () => {},
 };
+
+const fs = require("node:fs");
+const lazy = () => import("./lazy");
+export { total } from "./totals";
+export * from "./star";

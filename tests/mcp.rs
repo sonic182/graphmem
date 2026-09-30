@@ -1376,7 +1376,7 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     let imports = &imports["result"]["structuredContent"];
     assert_eq!(imports["path"], "lib/imports.rs");
     assert_eq!(imports["coverage"], "complete");
-    assert_eq!(imports["freshness"], "fresh");
+    assert!(imports.get("freshness").is_none());
     assert_eq!(imports["total"], 3);
     assert_eq!(imports["next_offset"], 2);
     assert_eq!(imports["imports"].as_array().unwrap().len(), 1);
@@ -1399,7 +1399,7 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     let refreshed = &refreshed["result"]["structuredContent"];
     assert_eq!(refreshed["total"], 1);
     assert_eq!(refreshed["imports"][0]["name"], "updated::Only");
-    assert_eq!(refreshed["freshness"], "fresh");
+    assert!(refreshed.get("freshness").is_none());
     assert!(refreshed.get("next_offset").is_none());
 
     let partial = mcp.request(

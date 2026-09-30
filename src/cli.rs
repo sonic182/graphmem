@@ -335,11 +335,7 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
                 outline.language,
                 outline.coverage.as_text()
             );
-            for symbol in outline
-                .symbols
-                .into_iter()
-                .filter(|symbol| symbol.kind == "import")
-            {
+            for symbol in outline.imports() {
                 println!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name);
             }
         }

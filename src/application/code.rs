@@ -53,6 +53,13 @@ pub struct FileOutline {
     pub symbols: Vec<CodeSymbol>,
 }
 
+impl FileOutline {
+    /// The declared imports, in source order.
+    pub fn imports(&self) -> impl Iterator<Item = &CodeSymbol> {
+        self.symbols.iter().filter(|symbol| symbol.kind == "import")
+    }
+}
+
 pub struct SymbolHit {
     pub path: String,
     pub language: String,
