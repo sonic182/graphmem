@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-30
+
 ### Added
 
 - The code index outlines CSS and SCSS: rule sets (named by their selector
@@ -167,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.6.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.7.0...HEAD
+[0.7.0]: https://github.com/sonic182/graphmem/releases/tag/0.7.0
 [0.6.0]: https://github.com/sonic182/graphmem/releases/tag/0.6.0
 [0.5.0]: https://github.com/sonic182/graphmem/releases/tag/0.5.0
 [0.4.0]: https://github.com/sonic182/graphmem/releases/tag/0.4.0
