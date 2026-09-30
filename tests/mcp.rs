@@ -1516,6 +1516,11 @@ fn code_refresh_does_not_block_memory_tools() {
             "initialize",
             json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
         );
+        let code_index = rusqlite::Connection::open(home.join("code.sqlite"))
+            .expect("code index database is available");
+        code_index
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .expect("code index reads wait for writes");
         // Code calls take ids 10.., the memory call id 2.
         for call in 0..code_calls {
             let (name, arguments) = match call {
@@ -1528,7 +1533,21 @@ fn code_refresh_does_not_block_memory_tools() {
                 json!({"name":name,"arguments":arguments}),
             );
         }
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        let indexing_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let indexed_files: i64 = code_index
+                .query_row("SELECT count(*) FROM files", [], |row| row.get(0))
+                .expect("code index progress is readable");
+            if indexed_files > 0 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < indexing_deadline,
+                "code index did not begin indexing files"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        drop(code_index);
         mcp.send(2, "tools/call", json!({"name":"stats","arguments":{}}));
 
         // The code calls contend for the index lock in no fixed order, so a
