@@ -24,7 +24,7 @@ pub fn git_repository(directory: &Path) -> Option<GitRepository> {
 /// Tracked and untracked, non-ignored files, relative to `checkout_root`.
 #[cfg(feature = "code")]
 pub fn list_files(checkout_root: &Path) -> Option<Vec<PathBuf>> {
-    let output = git(
+    let output = git_output(
         checkout_root,
         &[
             "ls-files",
@@ -36,14 +36,19 @@ pub fn list_files(checkout_root: &Path) -> Option<Vec<PathBuf>> {
     )?;
     Some(
         output
-            .split('\0')
+            .split(|&byte| byte == 0)
             .filter(|path| !path.is_empty())
+            .filter_map(|path| std::str::from_utf8(path).ok())
             .map(PathBuf::from)
             .collect(),
     )
 }
 
 fn git(directory: &Path, args: &[&str]) -> Option<String> {
+    String::from_utf8(git_output(directory, args)?).ok()
+}
+
+fn git_output(directory: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new("git")
         .args(args)
         .current_dir(directory)
@@ -54,9 +59,5 @@ fn git(directory: &Path, args: &[&str]) -> Option<String> {
         .env_remove("GIT_PREFIX")
         .output()
         .ok()?;
-    if output.status.success() {
-        String::from_utf8(output.stdout).ok()
-    } else {
-        None
-    }
+    output.status.success().then_some(output.stdout)
 }

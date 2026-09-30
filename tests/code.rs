@@ -285,6 +285,59 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
 }
 
 #[test]
+fn nested_definitions_without_bundled_members_are_outlined_and_found() {
+    let sandbox = Sandbox::new("nested-definitions");
+    let cases = [
+        (
+            "app/factory.py",
+            "def factory():\n    def helper():\n        pass\n    return helper\n",
+            "2-3\t  function helper",
+            "helper",
+            "app/factory.py:2:5\tfunction\thelper\tfactory\tfresh\n",
+        ),
+        (
+            "native/constants.rs",
+            "mod settings {\n    const RETRIES: u8 = 3;\n}\n",
+            "2-2\t  constant RETRIES",
+            "RETRIES",
+            "native/constants.rs:2:5\tconstant\tRETRIES\tsettings\tfresh\n",
+        ),
+    ];
+    for (path, source, symbol, query, expected) in cases {
+        fs::write(sandbox.repo.join(path), source).expect("nested source is written");
+        let outline = sandbox.run(&["code", "outline", path]);
+        assert!(outline.contains("\tcomplete\n"), "{outline}");
+        assert!(
+            outline.contains(symbol),
+            "{path}: missing {symbol} in {outline}"
+        );
+        assert_eq!(sandbox.run(&["code", "find", query]), expected);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_filenames_do_not_abort_checkout_discovery() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    let sandbox = Sandbox::new("non-utf8-filenames");
+    fs::write(sandbox.repo.join(OsStr::from_bytes(b"bad\xff.txt")), "text")
+        .expect("tracked non-UTF-8 filename is written");
+    git(&sandbox.repo, &["add", "."]);
+    fs::write(
+        sandbox.repo.join(OsStr::from_bytes(b"bad\xfe.py")),
+        "def skipped():\n    pass\n",
+    )
+    .expect("untracked non-UTF-8 filename is written");
+    let indexed = sandbox.run(&["code", "index"]);
+    assert!(indexed.contains("18 indexed"), "{indexed}");
+    assert_eq!(
+        sandbox.run(&["code", "find", "load_config"]),
+        "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
+    );
+}
+
+#[test]
 fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     let sandbox = Sandbox::new("refresh");
     fs::write(sandbox.repo.join(".gitignore"), "ignored.py\n").expect("gitignore is written");

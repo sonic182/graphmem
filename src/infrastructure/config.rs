@@ -88,7 +88,7 @@ struct FileConfig {
     retrieval: Option<FileRetrievalConfig>,
     runtime: Option<FileRuntimeConfig>,
     #[cfg(feature = "code")]
-    code: Option<FileCodeConfig>,
+    code: Option<toml::Value>,
 }
 
 #[cfg(feature = "code")]
@@ -262,7 +262,11 @@ pub fn runtime_config(data_dir: &Path) -> Result<RuntimeConfig, ConfigError> {
 
 #[cfg(feature = "code")]
 pub fn code_config(data_dir: &Path) -> Result<CodeConfig, ConfigError> {
-    let file = read_file_config(data_dir)?.code.unwrap_or_default();
+    let file: FileCodeConfig = read_file_config(data_dir)?
+        .code
+        .map(toml::Value::try_into)
+        .transpose()?
+        .unwrap_or_default();
     let max_files = env_number("GRAPHMEM_CODE_MAX_FILES")?
         .or(file.max_files)
         .unwrap_or(20_000);

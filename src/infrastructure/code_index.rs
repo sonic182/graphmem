@@ -7,7 +7,7 @@ use crate::domain::{CodeSymbol, Coverage, SourcePoint};
 
 /// Bump when the schema or the extracted symbols change; a mismatch rebuilds
 /// the index from scratch, since it can always be regenerated from source.
-const INDEX_VERSION: i64 = 2;
+const INDEX_VERSION: i64 = 3;
 
 const USAGE_KINDS: &str = "'import', 'component', 'slot', 'expression'";
 

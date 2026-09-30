@@ -27,9 +27,17 @@ impl Mcp {
     }
 
     fn spawn_with(home: &Path, directory: &Path, envs: &[(&str, &str)]) -> Self {
+        Self::spawn_with_config(home, directory, envs, "[embedding]\nenabled = false\n")
+    }
+
+    fn spawn_with_config(
+        home: &Path,
+        directory: &Path,
+        envs: &[(&str, &str)],
+        config: &str,
+    ) -> Self {
         fs::create_dir_all(home).expect("MCP test home is created");
-        fs::write(home.join("config.toml"), "[embedding]\nenabled = false\n")
-            .expect("MCP test embeddings are disabled");
+        fs::write(home.join("config.toml"), config).expect("MCP test config is written");
         let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
             .arg("mcp")
             .env("GRAPHMEM_HOME", home)
@@ -1430,5 +1438,20 @@ fn code_failures_leave_the_memory_tools_available() {
     assert!(names.contains(&"recall".to_owned()));
     assert!(!names.contains(&"find_symbol".to_owned()));
     drop(mcp);
+
+    for invalid in ["max_files = -1", "enabled = 'yes'", "index_threads = false"] {
+        for code in ["on", "off"] {
+            let config = format!("[embedding]\nenabled = false\n[code]\n{invalid}\n");
+            let mut mcp = Mcp::spawn_with_config(&home, &repo, &[("GRAPHMEM_CODE", code)], &config);
+            let names = tool_names(&mut mcp);
+            assert!(names.contains(&"recall".to_owned()), "{invalid}, {code}");
+            assert!(
+                !names.contains(&"find_symbol".to_owned()),
+                "{invalid}, {code}"
+            );
+            let stats = mcp.request(3, "tools/call", json!({"name":"stats","arguments":{}}));
+            assert!(stats["result"]["structuredContent"].is_object(), "{stats}");
+        }
+    }
     fs::remove_dir_all(root).expect("MCP code failure test data is removed");
 }

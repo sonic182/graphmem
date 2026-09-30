@@ -275,9 +275,6 @@ fn bundled_items<'r>(
             let kind = symbol_kind(member.entry.symbol_type);
             symbols.push(entry_symbol(&member.entry, kind, origin));
         }
-        if item.members.is_empty() {
-            continue;
-        }
         let range = &item.entry.range.byte_offset;
         let Some(item_node) = node
             .get_inner_node()
