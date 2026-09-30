@@ -20,9 +20,27 @@ Under the hood, Graphmem stores scoped notes and linked entities in SQLite. Reca
 
 ## Install
 
-**Install it with your AI agent** (Claude Code, Codex, OpenCode, ...) by asking something like:
+**Install it with your AI agent** (Claude Code, Codex, OpenCode, ...): paste this prompt.
 
-> Download the latest `gmem` release binary from https://github.com/sonic182/graphmem for my platform into `~/.cargo/bin`, verify it against `SHA256SUMS`, make sure `~/.cargo/bin` is on my `PATH` in my shell rc file (zsh, bash, fish, ...), then check it works with `gmem version`.
+```text
+Install gmem (Graphmem) for me:
+1. Download the latest gmem release binary for my platform from
+   https://github.com/sonic182/graphmem/releases/latest into ~/.cargo/bin.
+2. Verify it against the release's SHA256SUMS.
+3. Make sure ~/.cargo/bin is on my PATH in my shell rc file (zsh, bash, fish, ...).
+4. Check it works with `gmem version`.
+
+Stop after that. Then ask me whether I also want the Graphmem plugin
+(Claude Code, Codex, OpenCode, pi; it registers the MCP server automatically)
+or only the MCP server config. Install neither until I answer.
+
+If I want the plugin, run
+`curl --silent https://raw.githubusercontent.com/sonic182/graphmem/refs/heads/master/docs/plugins.md`
+and follow the steps for my agent.
+
+For more references, run
+`curl --silent https://raw.githubusercontent.com/sonic182/graphmem/refs/heads/master/README.md`
+```
 
 Or do it by hand: download the **CPU binary** for your platform from [GitHub Releases](https://github.com/sonic182/graphmem/releases/latest):
 
