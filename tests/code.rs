@@ -394,6 +394,34 @@ fn imports_lists_declared_imports_across_supported_languages() {
 }
 
 #[test]
+fn imports_name_the_target_not_comments_or_parentheses() {
+    let sandbox = Sandbox::new("import-targets");
+    let cases = [
+        (
+            "targets.js",
+            "const a = require(/* c */ \"x\");\nrequire(\n  // why\n  \"y\");\n\
+             foo.require(\"no\");\nrequire.resolve(\"res\");\n",
+            "targets.js\tjavascript\tcomplete\n1-1\t\"x\"\n2-4\t\"y\"\n",
+        ),
+        (
+            "targets.rb",
+            "require_relative(# c\n  \"x\")\nobj.load \"no\"\n",
+            "targets.rb\truby\tcomplete\n1-2\t\"x\"\n",
+        ),
+        (
+            "targets.php",
+            "<?php\nrequire /* c */ \"x.php\";\nrequire('b.php');\nrequire(/* c */ \"p.php\");\n",
+            "targets.php\tphp\tcomplete\n2-2\t\"x.php\"\n3-3\t'b.php'\n4-4\t\"p.php\"\n",
+        ),
+    ];
+
+    for (file, source, expected) in cases {
+        fs::write(sandbox.repo.join(file), source).expect("source is written");
+        assert_eq!(sandbox.run(&["code", "imports", file]), expected, "{file}");
+    }
+}
+
+#[test]
 fn nested_definitions_without_bundled_members_are_outlined_and_found() {
     let sandbox = Sandbox::new("nested-definitions");
     let cases = [

@@ -276,10 +276,21 @@ fn bundled(
     has_errors(&root)
 }
 
-fn first_argument<'r, D: Doc>(call: &Node<'r, D>) -> Option<Node<'r, D>> {
-    call.field("arguments")?
+/// The first real child of `parent`: comments are named nodes too, and PHP
+/// wraps `require('x')` in a parenthesized expression.
+fn target<'r, D: Doc>(parent: &Node<'r, D>) -> Option<Node<'r, D>> {
+    let node = parent
         .children()
-        .find(|child| child.is_named())
+        .find(|child| child.is_named() && !child.kind().contains("comment"))?;
+    if node.kind() == "parenthesized_expression" {
+        target(&node)
+    } else {
+        Some(node)
+    }
+}
+
+fn first_argument<'r, D: Doc>(call: &Node<'r, D>) -> Option<Node<'r, D>> {
+    target(&call.field("arguments")?)
 }
 
 /// Imports of other files that the bundled rules miss: Ruby `require_relative`
@@ -309,7 +320,7 @@ fn file_imports<D: Doc>(
                 | "require_once_expression"
                 | "include_expression"
                 | "include_once_expression",
-            ) => node.children().find(|child| child.is_named()),
+            ) => target(&node),
             (SupportLang::Rust, "extern_crate_declaration") => node.field("name"),
             (
                 SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx,
