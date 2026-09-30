@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows MSVC builds with the `code` feature use the upstream SCSS grammar
+  build fix, which selects a compiler-compatible warning flag. Other platforms
+  retain the crates.io dependency. CI now checks this feature on Windows before
+  release builds.
+
 ## [0.7.0] - 2026-09-30
 
 ### Added
