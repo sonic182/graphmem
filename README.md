@@ -88,6 +88,13 @@ cargo build --features cuda
 cargo build --release --features cuda
 ```
 
+With the code navigation tools (`gmem code`, and the `code_outline` and
+`find_symbol` MCP tools; release binaries include them):
+
+```sh
+cargo build --features code
+```
+
 On GPUs older than Ampere (compute capability below 8.0, such as GTX 16xx and RTX 20xx), recent toolkits (CUDA 12.9 and 13.x) fail to build: `candle-kernels` 0.11 redefines `__hmax_nan`/`__hmin_nan`, which those headers now provide (`nvcc` fails in `src/compatibility.cuh`). This is tracked upstream in [huggingface/candle#3737](https://github.com/huggingface/candle/issues/3737). Make sure `nvcc` is on `PATH` (on Arch/Manjaro, `/opt/cuda/bin`).
 
 The binary is `target/debug/gmem` or `target/release/gmem`.
@@ -164,7 +171,12 @@ damping = 0.5
 
 [runtime]
 worker_threads = 4
+
+[code]
+enabled = true         # only in builds with --features code
 ```
+
+`[code] enabled = false` (or `GRAPHMEM_CODE=off`) hides `gmem code` and the code MCP tools in a binary built with them.
 
 `backend = "auto"` selects CUDA when available and otherwise uses CPU. `GRAPHMEM_EMBEDDINGS=off` disables embeddings globally. The model is downloaded and loaded on first use (the first `remember`, `relate`, recall, or `reembed`) and cached locally. `remember` stores its embeddings in the same transaction, so it fails and stores nothing if the model cannot load or embed. `batch_size` also reads `GRAPHMEM_EMBEDDING_BATCH_SIZE` and the `--embedding-batch-size` flag. Under the same precedence (env > flag > file), the environment wins over the flag and the flag wins over `config.toml`, for one `gmem` run including `gmem mcp`.
 

@@ -3,6 +3,8 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
+#[cfg(feature = "code")]
+use graphmem::application::code::{CodeService, MAX_FIND_LIMIT};
 use graphmem::{
     Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
     StoreStats,
@@ -16,7 +18,7 @@ use graphmem::{
 use rmcp::schemars::JsonSchema;
 use rmcp::{
     ErrorData as McpError, Json, RoleServer, ServerHandler, ServiceExt,
-    handler::server::wrapper::Parameters,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
         CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
         ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
@@ -38,6 +40,9 @@ pub struct MemoryServer {
     memory: Mutex<MemoryService>,
     default_scope: String,
     embedding: EmbeddingConfig,
+    tool_router: ToolRouter<Self>,
+    #[cfg(feature = "code")]
+    code: Option<Mutex<CodeService>>,
 }
 
 impl MemoryServer {
@@ -45,10 +50,21 @@ impl MemoryServer {
         let service = MemoryService::open_default(overrides)?;
         let embedding = service.embedding_config().clone();
         let default_scope = current_scope();
+        #[cfg_attr(not(feature = "code"), allow(unused_mut))]
+        let mut tool_router = Self::tool_router();
+        #[cfg(feature = "code")]
+        let code = CodeService::open_default()?.map(Mutex::new);
+        #[cfg(feature = "code")]
+        if code.is_some() {
+            tool_router += Self::code_router();
+        }
         Ok(Self {
             memory: Mutex::new(service),
             default_scope,
             embedding,
+            tool_router,
+            #[cfg(feature = "code")]
+            code,
         })
     }
 
@@ -505,7 +521,7 @@ impl MemoryServer {
     }
 }
 
-#[tool_handler(name = "gmem")]
+#[tool_handler(name = "gmem", router = self.tool_router)]
 impl ServerHandler for MemoryServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
@@ -520,9 +536,10 @@ impl ServerHandler for MemoryServer {
                  unscoped entity graph. Omitted scopes use the Git repository containing the \
                  server's startup working directory (shared by linked worktrees) and include \
                  global memories during recall; outside a Git repository they use global. \
-                 Default scope: {}. Pass global or repo:/absolute/path to choose a scope. {}",
+                 Default scope: {}. Pass global or repo:/absolute/path to choose a scope. {}{}",
             self.default_scope,
-            embedding_note(&self.embedding)
+            embedding_note(&self.embedding),
+            self.code_note()
         ))
     }
 
@@ -581,6 +598,236 @@ impl MemoryServer {
             ResourceContents::text(body, uri).with_mime_type("application/json"),
         ])
         .into())
+    }
+}
+
+impl MemoryServer {
+    #[cfg(feature = "code")]
+    fn code_note(&self) -> &'static str {
+        if self.code.is_some() {
+            " code_outline and find_symbol navigate source through a separate, rebuildable \
+             code index of the Git checkout, never through memory. find_symbol needs `gmem code \
+             index` to have run in that checkout; code_outline re-indexes the file it reads."
+        } else {
+            ""
+        }
+    }
+
+    #[cfg(not(feature = "code"))]
+    fn code_note(&self) -> &'static str {
+        ""
+    }
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CodeOutlineInput {
+    /// File to outline, relative to the checkout root; an absolute path inside
+    /// the checkout also works.
+    path: String,
+    /// Index of the first symbol to return. Defaults to 0.
+    #[serde(default)]
+    offset: Option<usize>,
+    /// Maximum symbols to return, 1 to 500. Defaults to 200.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Absolute path inside the Git checkout to read. Omit to use the
+    /// server's startup directory.
+    #[serde(default)]
+    root: Option<String>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FindSymbolInput {
+    /// Symbol name or name prefix, e.g. "fetch_user", "UserController", or
+    /// "render/2" for an Elixir function of arity 2.
+    query: String,
+    /// Optional kind filter, e.g. "function", "class", "module", "component",
+    /// "table".
+    #[serde(default)]
+    kind: Option<String>,
+    /// Maximum matches to return, 1 to 100. Defaults to 20.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Absolute path inside the Git checkout to search. Omit to use the
+    /// server's startup directory.
+    #[serde(default)]
+    root: Option<String>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct CodeSymbolRecord {
+    /// Position of the symbol in the file's outline.
+    index: usize,
+    /// `index` of the syntactically enclosing symbol.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<usize>,
+    name: String,
+    kind: String,
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+    signature: String,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct CodeOutlineOutput {
+    path: String,
+    language: String,
+    /// "complete", or "partial: <reason>" when symbols may be missing.
+    coverage: String,
+    total: usize,
+    symbols: Vec<CodeSymbolRecord>,
+    /// Offset of the next page, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_offset: Option<usize>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct SymbolMatchRecord {
+    path: String,
+    language: String,
+    /// "fresh", "stale" (file changed since indexing), or "missing".
+    freshness: String,
+    /// Name of the enclosing symbol, such as the module or class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
+    name: String,
+    kind: String,
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+    signature: String,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct FindSymbolOutput {
+    matches: Vec<SymbolMatchRecord>,
+}
+
+#[cfg(feature = "code")]
+#[tool_router(router = code_router)]
+impl MemoryServer {
+    #[tool(
+        name = "code_outline",
+        description = "List the definitions in one source file of a Git checkout: modules, \
+             classes, functions, components, SQL objects, and imports, with 1-based line and \
+             column ranges and the index of each symbol's syntactic parent. Reads the file itself \
+             and re-indexes it when it changed, so the result is never stale. coverage is \
+             \"partial: <reason>\" when syntax errors or template limits may hide symbols. \
+             Supports Python, JavaScript/JSX, TypeScript/TSX, Elixir (including ~H), HEEx, EEx, \
+             Ruby, PHP, SQL, Bash, and HTML <script>."
+    )]
+    fn code_outline(
+        &self,
+        Parameters(input): Parameters<CodeOutlineInput>,
+    ) -> Result<Json<CodeOutlineOutput>, CallToolResult> {
+        let limit = input.limit.unwrap_or(200);
+        if !(1..=500).contains(&limit) {
+            return Err(tool_error("limit must be between 1 and 500"));
+        }
+        let offset = input.offset.unwrap_or(0);
+        let directory = code_directory(input.root)?;
+        let outline = self
+            .code()?
+            .outline(&directory, &input.path)
+            .map_err(|error| tool_error(error.to_string()))?;
+        let total = outline.symbols.len();
+        let symbols = outline
+            .symbols
+            .into_iter()
+            .enumerate()
+            .skip(offset)
+            .take(limit)
+            .map(|(index, symbol)| CodeSymbolRecord {
+                index,
+                parent: symbol.parent,
+                name: symbol.name,
+                kind: symbol.kind,
+                start_line: symbol.start.line,
+                start_column: symbol.start.column,
+                end_line: symbol.end.line,
+                end_column: symbol.end.column,
+                signature: symbol.signature,
+            })
+            .collect();
+        let next_offset = offset.saturating_add(limit);
+        Ok(Json(CodeOutlineOutput {
+            path: outline.path,
+            language: outline.language,
+            coverage: outline.coverage.as_text(),
+            total,
+            symbols,
+            next_offset: (next_offset < total).then_some(next_offset),
+        }))
+    }
+
+    #[tool(
+        name = "find_symbol",
+        description = "Find definitions by name in the Git checkout's code index, which `gmem \
+             code index` builds. Exact names come first (an Elixir name also matches name/arity), \
+             then prefix matches; matching ignores case. Returns every match with its path, \
+             line range, and enclosing symbol, and never picks one as the resolved target. \
+             freshness is \"stale\" when the file changed since indexing and \"missing\" when it \
+             was deleted: call code_outline on it or re-run `gmem code index`."
+    )]
+    fn find_symbol(
+        &self,
+        Parameters(input): Parameters<FindSymbolInput>,
+    ) -> Result<Json<FindSymbolOutput>, CallToolResult> {
+        let limit = input.limit.unwrap_or(20);
+        if !(1..=MAX_FIND_LIMIT).contains(&limit) {
+            return Err(tool_error("limit must be between 1 and 100"));
+        }
+        let directory = code_directory(input.root)?;
+        let hits = self
+            .code()?
+            .find_symbol(&directory, &input.query, input.kind.as_deref(), limit)
+            .map_err(|error| tool_error(error.to_string()))?;
+        let matches = hits
+            .into_iter()
+            .map(|hit| SymbolMatchRecord {
+                path: hit.path,
+                language: hit.language,
+                freshness: hit.freshness.as_str().to_owned(),
+                parent: hit.parent,
+                name: hit.symbol.name,
+                kind: hit.symbol.kind,
+                start_line: hit.symbol.start.line,
+                start_column: hit.symbol.start.column,
+                end_line: hit.symbol.end.line,
+                end_column: hit.symbol.end.column,
+                signature: hit.symbol.signature,
+            })
+            .collect();
+        Ok(Json(FindSymbolOutput { matches }))
+    }
+}
+
+#[cfg(feature = "code")]
+impl MemoryServer {
+    fn code(&self) -> Result<MutexGuard<'_, CodeService>, CallToolResult> {
+        self.code
+            .as_ref()
+            .ok_or_else(|| tool_error("code tools are disabled"))?
+            .lock()
+            .map_err(|_| tool_error("code index lock is poisoned"))
+    }
+}
+
+#[cfg(feature = "code")]
+fn code_directory(root: Option<String>) -> Result<std::path::PathBuf, CallToolResult> {
+    match root {
+        Some(root) if Path::new(&root).is_absolute() => Ok(root.into()),
+        Some(_) => Err(tool_error("root must be an absolute path")),
+        None => std::env::current_dir().map_err(|error| tool_error(error.to_string())),
     }
 }
 

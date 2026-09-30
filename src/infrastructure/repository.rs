@@ -21,6 +21,28 @@ pub fn git_repository(directory: &Path) -> Option<GitRepository> {
     })
 }
 
+/// Tracked and untracked, non-ignored files, relative to `checkout_root`.
+#[cfg(feature = "code")]
+pub fn list_files(checkout_root: &Path) -> Option<Vec<PathBuf>> {
+    let output = git(
+        checkout_root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )?;
+    Some(
+        output
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .collect(),
+    )
+}
+
 fn git(directory: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .args(args)

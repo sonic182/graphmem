@@ -3,94 +3,96 @@
 ## Goal
 
 Let an agent find definitions and navigate source without confusing generated code
-facts with Graphmem's durable, user-verified memories. First use must work on
-Elixir/Phoenix (`.ex`, `.exs`, `.heex`, `.eex`, including `.html.heex` and
-`.html.eex`), HTML, JavaScript/JSX, TypeScript/TSX, and Python. Do not start
-with a Rust-only prototype.
+facts with Graphmem's durable, user-verified memories. Target languages:
+Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix (`.ex`, `.exs`, inline
+`~H`, `.heex`, `.eex`, including `.html.heex` and `.html.eex`), Ruby, PHP,
+SQL, Bash, and HTML (`<script>`).
 
 ## Boundaries
 
-- Keep code symbols in a separate, rebuildable SQLite index, not the existing
-  `entities`/`edges` tables or memory `recall` ranking. No automatic memory
-  extraction from source.
+- Keep code symbols in a separate, rebuildable SQLite index
+  (`$GRAPHMEM_HOME/code.sqlite`), not the existing `entities`/`edges` tables or
+  memory `recall` ranking. No automatic memory extraction from source.
 - Key an index by checkout root, not just Git's common directory: linked
   worktrees share memories but can contain different code. Only read files
-  beneath the requested checkout; reject path escapes and avoid following
+  beneath the requested checkout; reject path escapes and do not follow
   symlinks out of it.
-- Initially record definitions, imports, source ranges, and *syntactic*
-  containment. Do not label name-matched call sites as resolved `CALLS` edges.
-  No Cypher, watchers, semantic code embeddings, or background daemon.
+- Record definitions, imports, source ranges, and *syntactic* containment. Do
+  not label name-matched call sites as resolved `CALLS` edges. No Cypher,
+  watchers, semantic code embeddings, or background daemon.
+- Two switches: the `code` Cargo feature compiles the tools in (off for a local
+  `cargo build`, on in CI and release builds); `[code] enabled` (default
+  `true`) or `GRAPHMEM_CODE=off` hides them at runtime without listing them.
 
 ## 1. Prove parser and template coverage first
 
-- [ ] Spike the in-process Rust libraries `ast-grep-outline` and
-      `ast-grep-language` (currently 0.45.3); enable only the Elixir, HTML,
-      JavaScript, TypeScript and Python grammar features. Add `ast-grep-core`
-      directly only if custom structural matching needs it. Verify build,
-      binary impact and extraction on representative files before committing
-      the dependency choice.
-- [ ] Reuse bundled outline rules for JS/JSX, TS/TSX and Python. Supply Elixir
-      rules for modules, functions (`def`/`defp`, guards and one-line forms),
-      macros and relevant Phoenix components. Check duplicates and nesting on
-      actual Phoenix modules; the Elixir grammar alone does not supply an
-      outline.
-- [ ] Test Phoenix's `tree-sitter-heex` for HEEx and the separate
-      `tree-sitter-eex` for EEx against ast-grep's Tree-sitter version. Neither
-      is an ast-grep built-in: verify Rust crate availability, static grammar
-      registration through its public language traits, licensing, and source
-      ranges. If either is incompatible, choose and document a bounded
-      template-specific fallback rather than treating templates as plain HTML.
-- [ ] Define what a template outline should expose: component invocations,
-      references to named components/modules when explicit, and embedded
-      Elixir expressions with accurate file/line ranges. Test `<.component>`,
-      `<Module.component>`, HEEx `{...}`, EEx `<%= ... %>`, and ordinary markup.
-      Avoid indexing every HTML tag as a symbol. Check inline `~H` sigils in
-      `.ex` files too; add injection handling if the target repos use them.
-- [ ] For ordinary HTML, reuse ast-grep's `<script>` JS/TS injection support
-      explicitly in our library integration; add HTML outline rules only for
-      structures that prove useful. Do not assume the HTML parser understands
-      HEEx/EEx. Check file-extension routing, including compound extensions.
+- [x] Use the in-process crates `ast-grep-core`, `ast-grep-language` and
+      `ast-grep-outline` 0.45.3. `ast-grep-language` has no per-language
+      features, only one implicit feature per optional grammar
+      (`tree-sitter-bash`, …); `default-features = false` plus those keeps the
+      build to the grammars we use. Parsing a grammar that is not compiled in
+      panics, so bundled outline rules are filtered before they are compiled.
+- [x] Reuse bundled outline rules for JS/JSX, TS/TSX, Python, Ruby and PHP.
+      They stop at item → member, so `module A; class B; def c` lost `c`;
+      each item's children are outlined again and duplicates dropped.
+- [x] Elixir: a syntax walk (not per-form patterns) finds
+      `defmodule`/`defprotocol`/`defimpl`, `def`/`defp`/`defdelegate`,
+      `defmacro(p)`, `defguard(p)` in plain, guarded and one-line forms, named
+      `name/arity`, with consecutive clauses merged; `alias`/`import`/
+      `require`/`use` are imports. Nested modules nest by range.
+- [x] HEEx via `tree-sitter-heex` 0.8.1 (MIT, `tree-sitter-language` 0.1,
+      compatible with ast-grep's tree-sitter 0.27) through a small
+      `Language`/`LanguageExt` impl. Outline exposes `<.component>`,
+      `<Module.component>` and `<:slot>`; plain tags are never symbols. `~H`
+      sigils in `.ex` files are re-parsed as HEEx at their file position.
+- [x] EEx: `tree-sitter-eex` is not usable (not on crates.io, tree-sitter
+      0.20, crate misnamed `tree-sitter-heex`, no license file). Its grammar
+      is only `<% %>` directives around text, so a scanner emits each
+      directive as an `expression`; coverage is always
+      `partial: EEx directives only`.
+- [x] SQL via `tree-sitter-sequel` 0.3.11 (MIT): every `create_*` statement
+      (table, view, index, function, trigger, type, …). Its `cc ~1.2.1`
+      build-dependency pin downgrades the lockfile's `cc`; re-check on upgrades.
+- [x] Bash `function_definition`; HTML `<script>` bodies outlined as
+      JavaScript at their file position.
 
-**Gate:** each target file type produces useful symbols with correct paths and
-ranges on a small, real-world fixture. Unsupported constructs must be visible
-as coverage gaps, not silently reported as a complete index.
+**Gate:** met on `tests/fixtures/code`. Files with syntax errors report
+`partial: syntax errors`, never `complete`.
 
 ## 2. Index only what navigation needs
 
-- [ ] Discover repository files with Git/ignore rules, bounded by file count
-      and size; skip binary, generated, and untrusted paths. Use `ignore` only
-      if existing Git-based discovery proves insufficient.
-- [ ] Store checkout root, relative path, language, a content fingerprint,
-      indexer/rule version, and symbol records (name, kind, parent, start/end
-      positions, signature). Keep enough source identity to distinguish
-      same-named functions in different modules/files; never infer a unique
-      target from a short name alone.
-- [ ] Make refresh explicit or on-demand initially. Re-index changed files and
-      remove deleted ones; atomically replace each file's rows. On query,
-      verify freshness before returning a source location and say `stale` or
-      `not indexed` when it cannot be trusted. A failed parse must not publish
-      a partial index as complete.
+- [x] Discover files with `git ls-files --cached --others --exclude-standard`;
+      skip symlinks, binary files, `*.min.js`, files over 1 MiB, and anything
+      past 20,000 source files (reported as truncated).
+- [x] Store checkout root, relative path, language, size + mtime stamp,
+      coverage, and symbols (name, kind, parent, start/end, signature). A
+      schema/extractor version in `PRAGMA user_version` rebuilds the index on
+      mismatch. Bump `INDEX_VERSION` whenever extraction output changes.
+- [x] Refresh is explicit (`gmem code index`) or per file on demand
+      (`code_outline`). Each file's rows are replaced in one transaction;
+      deleted files are removed. `find_symbol` reports `stale` or `missing`
+      per match instead of trusting old rows.
 
 ## 3. Expose a small read-only interface
 
-- [ ] `code_outline(path)` returns paginated symbols for a repository-relative
-      file with source ranges and a freshness/coverage status.
-- [ ] `find_symbol(query)` returns bounded, disambiguated matches with paths,
-      language and line numbers. Consider a snippet tool only if the existing
-      file-read tools do not cover it.
-- [ ] Provide an explicit CLI index/refresh operation before considering an
-      MCP indexing tool. Keep MCP stdout strictly JSON-RPC; report indexing
-      progress on stderr only.
+- [x] `code_outline(path, offset?, limit?, root?)`: paginated symbols with
+      ranges and coverage, always fresh.
+- [x] `find_symbol(query, kind?, limit?, root?)`: bounded matches, exact names
+      first, with paths, parents and freshness; never a single "resolved"
+      target.
+- [x] `gmem code index|outline|find`; progress on stderr. No MCP index tool.
 
 ## 4. Validate value before expanding
 
-- [ ] Integration-test Python, JS/JSX, TS/TSX, Elixir and Phoenix templates;
-      edits/deletes, two worktrees, ignored files, path traversal, stale
-      results, empty/invalid files, and bounded outputs. Keep the memory store
-      and `recall` behavior unchanged.
-- [ ] Compare common navigation questions against `rg`/`ast-grep` with the
-      same repositories. Ship if the index saves tool calls or improves
-      precision; measure misses and false matches rather than only timing.
+- [x] Integration tests: every language, edits/deletes, ignored files, path
+      traversal and symlinks, stale results, two worktrees, config off; the
+      memory tools' behavior unchanged (`tests/code.rs`, `tests/mcp.rs`).
+- [ ] Compare common navigation questions against `rg`/`ast-grep` on real
+      Phoenix and Python repositories. Ship more only if the index saves tool
+      calls or improves precision; measure misses and false matches, not only
+      timing.
+- [ ] Content hash in the stamp if size + mtime ever reports a changed file as
+      fresh.
 - [ ] Only then consider references, imports across files, or a call graph.
       Add an edge only when its target can be resolved reliably; carry
       uncertainty/coverage rather than presenting guesses as facts.
@@ -102,5 +104,4 @@ as coverage gaps, not silently reported as a complete index.
 - [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp/tree/80eb92a7017dab9a0773430433660a966b80cc15) — examples of file outlines, coverage
   reporting and the cost of call resolution; inspiration, not a design to copy.
 - [Phoenix Tree-sitter HEEx](https://github.com/phoenixframework/tree-sitter-heex)
-  and [Tree-sitter EEx](https://github.com/connorlay/tree-sitter-eex) — candidate
-  template grammars; compatibility has not yet been verified.
+  and [Tree-sitter EEx](https://github.com/connorlay/tree-sitter-eex).

@@ -64,6 +64,12 @@ pub struct RuntimeConfig {
     pub worker_threads: usize,
 }
 
+#[cfg(feature = "code")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodeConfig {
+    pub enabled: bool,
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("configuration error: {0}")]
@@ -79,6 +85,14 @@ struct FileConfig {
     embedding: Option<FileEmbeddingConfig>,
     retrieval: Option<FileRetrievalConfig>,
     runtime: Option<FileRuntimeConfig>,
+    #[cfg(feature = "code")]
+    code: Option<FileCodeConfig>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Default, Deserialize)]
+struct FileCodeConfig {
+    enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -232,6 +246,18 @@ pub fn runtime_config(data_dir: &Path) -> Result<RuntimeConfig, ConfigError> {
         ));
     }
     Ok(RuntimeConfig { worker_threads })
+}
+
+#[cfg(feature = "code")]
+pub fn code_config(data_dir: &Path) -> Result<CodeConfig, ConfigError> {
+    let file = read_file_config(data_dir)?.code.unwrap_or_default();
+    Ok(CodeConfig {
+        enabled: env::var("GRAPHMEM_CODE")
+            .ok()
+            .map(|value| value != "off")
+            .or(file.enabled)
+            .unwrap_or(true),
+    })
 }
 
 fn env_value(name: &str) -> Option<String> {

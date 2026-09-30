@@ -160,9 +160,133 @@ pub fn edge_document(edge: &Edge, source: &Entity, target: &Entity) -> String {
     )
 }
 
+/// One-based line and character column.
+#[cfg(feature = "code")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourcePoint {
+    pub line: usize,
+    pub column: usize,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeSymbol {
+    pub name: String,
+    pub kind: String,
+    /// Index of the syntactically enclosing symbol in the same outline.
+    pub parent: Option<usize>,
+    pub start: SourcePoint,
+    pub end: SourcePoint,
+    pub signature: String,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Coverage {
+    Complete,
+    /// Symbols were extracted, but some of the file may be missing from them.
+    Partial(String),
+}
+
+#[cfg(feature = "code")]
+impl Coverage {
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Complete => "complete".to_owned(),
+            Self::Partial(reason) => format!("partial: {reason}"),
+        }
+    }
+
+    pub fn from_text(text: &str) -> Self {
+        match text.strip_prefix("partial: ") {
+            Some(reason) => Self::Partial(reason.to_owned()),
+            None => Self::Complete,
+        }
+    }
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Freshness {
+    Fresh,
+    Stale,
+    Missing,
+}
+
+#[cfg(feature = "code")]
+impl Freshness {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+/// Orders symbols by position and points each at the innermost symbol whose
+/// range contains it.
+#[cfg(feature = "code")]
+pub fn nest_symbols(symbols: &mut [CodeSymbol]) {
+    symbols.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
+    let mut open: Vec<usize> = Vec::new();
+    for index in 0..symbols.len() {
+        while open
+            .last()
+            .is_some_and(|&top| symbols[top].end < symbols[index].end)
+        {
+            open.pop();
+        }
+        symbols[index].parent = open.last().copied();
+        open.push(index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{personalized_pagerank, text_mentions};
+
+    #[cfg(feature = "code")]
+    #[test]
+    fn nest_symbols_points_each_symbol_at_its_innermost_container() {
+        use super::{CodeSymbol, SourcePoint, nest_symbols};
+        let symbol = |name: &str, start: usize, end: usize| CodeSymbol {
+            name: name.to_owned(),
+            kind: "module".to_owned(),
+            parent: None,
+            start: SourcePoint {
+                line: start,
+                column: 1,
+            },
+            end: SourcePoint {
+                line: end,
+                column: 1,
+            },
+            signature: String::new(),
+        };
+        let mut symbols = vec![
+            symbol("after", 9, 9),
+            symbol("inner_fn", 4, 4),
+            symbol("outer", 1, 8),
+            symbol("inner", 3, 5),
+            symbol("outer_fn", 6, 7),
+        ];
+        nest_symbols(&mut symbols);
+        let parents = symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.parent.map(|p| symbols[p].name.as_str())))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parents,
+            [
+                ("outer", None),
+                ("inner", Some("outer")),
+                ("inner_fn", Some("inner")),
+                ("outer_fn", Some("outer")),
+                ("after", None),
+            ]
+        );
+    }
 
     #[test]
     fn matches_case_insensitively() {
