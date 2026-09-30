@@ -22,7 +22,7 @@ claude plugin marketplace add sonic182/graphmem
 claude plugin install graphmem@graphmem
 ```
 
-The plugin provides three things: the `graphmem-mcp-for-dev` skill, the `SessionStart`/`SubagentStart` hooks that inject the recall/store guidance into every session and subagent, and the `gmem mcp` server through its bundled `.mcp.json`, which exposes the `remember`/`recall`/`update`/`relate`/`graph`/`inspect`/`forget` tools. Nothing else is needed.
+The plugin provides three things: the `graphmem-mcp-for-dev` skill, the `SessionStart`/`SubagentStart` hooks that inject the recall/store and code-navigation guidance into every session and subagent, and the `gmem mcp` server through its bundled `.mcp.json`, which exposes the `remember`/`recall`/`update`/`relate`/`graph`/`inspect`/`forget` tools. Nothing else is needed.
 
 After installing, run `/mcp` and confirm the `gmem` server is listed. Claude Code has open bugs where a plugin's `.mcp.json` is not copied into the plugin cache, so if it is missing, register the server explicitly:
 
@@ -91,7 +91,7 @@ With `gmem` installed, install the plugin directly from GitHub (no npm publicati
 opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
-The plugin provides three things: the `graphmem-mcp-for-dev` skill (registered through `skills.paths`), the recall/store guidance injected into the system prompt and preserved across compaction, and the `gmem mcp` server registered through the plugin `config` hook. An existing user-defined `gmem` MCP entry is left unchanged. Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand, which has known cache/path-resolution issues.
+The plugin provides three things: the `graphmem-mcp-for-dev` skill (registered through `skills.paths`), the recall/store and code-navigation guidance injected into the system prompt (the memory part is also preserved across compaction), and the `gmem mcp` server registered through the plugin `config` hook. An existing user-defined `gmem` MCP entry is left unchanged. Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand, which has known cache/path-resolution issues.
 
 Pin to a commit for reproducibility, and re-run with `--force` to update:
 

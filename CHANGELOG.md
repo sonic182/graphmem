@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `truncated`. It also matches last name segments (`ConsentLive`,
   `public.users`), and leaves out imports and template usages unless `kind`
   asks for them.
+- Plugin session and subagent guidance points agents to `find_symbol` and
+  `code_outline` when those tools are available.
 
 ## [0.5.0] - 2026-09-29
 
