@@ -29,3 +29,5 @@ $query: "(min-width: 640px)";
     padding: $gap;
   }
 }
+
+@forward "sass:color";

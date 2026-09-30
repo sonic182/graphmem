@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `gmem code imports <FILE>` and the MCP `code_imports` tool list declared
+  imports with their source ranges without resolving them to files. Ruby
+  `require_relative`/`load`, PHP `require`/`include`, Bash `source`, Rust
+  `extern crate`, and JavaScript/TypeScript `require()`, `import()`,
+  `export ... from`, and `import x = require()` are listed too.
+
+### Changed
+
+- `export ... from` is now outlined as an `import` instead of a `module`, so
+  `find_symbol` with `kind: "module"` no longer returns re-exports. The new
+  import forms (for example Bash `source`) also appear as `import` symbols in
+  `code_outline` and `find_symbol`. The code index is rebuilt once on upgrade to
+  pick up the new symbols.
+
 ### Fixed
 
 - The MCP `find_symbol` and `code_outline` tools refresh the code index on the

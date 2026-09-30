@@ -272,7 +272,99 @@ fn bundled(
             .into_iter()
             .filter(|symbol| seen.insert((symbol.name.clone(), symbol.end))),
     );
+    file_imports(language, &root, origin, symbols);
     has_errors(&root)
+}
+
+/// The first real child of `parent`: comments are named nodes too, and PHP
+/// wraps `require('x')` in a parenthesized expression.
+fn target<'r, D: Doc>(parent: &Node<'r, D>) -> Option<Node<'r, D>> {
+    let node = parent
+        .children()
+        .find(|child| child.is_named() && !child.kind().contains("comment"))?;
+    if node.kind() == "parenthesized_expression" {
+        target(&node)
+    } else {
+        Some(node)
+    }
+}
+
+fn first_argument<'r, D: Doc>(call: &Node<'r, D>) -> Option<Node<'r, D>> {
+    target(&call.field("arguments")?)
+}
+
+/// Imports of other files that the bundled rules miss: Ruby `require_relative`
+/// and `load`, PHP `require`/`include` (with their `_once` forms), Rust
+/// `extern crate`, and JavaScript/TypeScript `require()`, `import()`,
+/// `import x = require()`, and `export ... from`. The bundled rules outline
+/// the last one as a module, so that symbol is turned into an import instead.
+fn file_imports<D: Doc>(
+    language: SupportLang,
+    root: &Node<'_, D>,
+    origin: Origin,
+    symbols: &mut Vec<CodeSymbol>,
+) {
+    if !matches!(
+        language,
+        SupportLang::Ruby
+            | SupportLang::Php
+            | SupportLang::Rust
+            | SupportLang::JavaScript
+            | SupportLang::TypeScript
+            | SupportLang::Tsx
+    ) {
+        return;
+    }
+    for node in root.dfs() {
+        let argument = match (language, node.kind().as_ref()) {
+            (SupportLang::Ruby, "call")
+                if node.field("receiver").is_none()
+                    && node.field("method").is_some_and(|method| {
+                        matches!(method.text().as_ref(), "require_relative" | "load")
+                    }) =>
+            {
+                first_argument(&node)
+            }
+            (
+                SupportLang::Php,
+                "require_expression"
+                | "require_once_expression"
+                | "include_expression"
+                | "include_once_expression",
+            ) => target(&node),
+            (SupportLang::Rust, "extern_crate_declaration") => node.field("name"),
+            (
+                SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx,
+                "call_expression",
+            ) if node.field("function").is_some_and(|function| {
+                matches!(function.text().as_ref(), "require" | "import")
+            }) =>
+            {
+                first_argument(&node)
+            }
+            (
+                SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx,
+                "export_statement",
+            ) => node.field("source"),
+            (SupportLang::TypeScript | SupportLang::Tsx, "import_statement") => node
+                .children()
+                .find(|child| child.kind() == "import_require_clause")
+                .and_then(|clause| clause.field("source")),
+            _ => None,
+        };
+        let Some(argument) = argument else {
+            continue;
+        };
+        let symbol = node_symbol(&node, argument.text().into_owned(), "import", origin);
+        match symbols.iter_mut().find(|existing| {
+            existing.kind == "module"
+                && existing.start == symbol.start
+                && existing.end == symbol.end
+        }) {
+            Some(existing) => existing.kind = symbol.kind,
+            None => symbols.push(symbol),
+        }
+    }
 }
 
 /// ast-grep outlines stop at item -> member, so `module A; class B; def c`
@@ -740,14 +832,23 @@ fn bash(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     let grep = SupportLang::Bash.ast_grep(source);
     let root = grep.root();
     for node in root.dfs() {
-        if node.kind() != "function_definition" {
-            continue;
-        }
-        if let Some(name) = node.field("name") {
+        let (name, kind) = match node.kind().as_ref() {
+            "function_definition" => (node.field("name"), "function"),
+            // `source file` and `. file` run another script in this shell.
+            "command"
+                if node
+                    .field("name")
+                    .is_some_and(|name| matches!(name.text().as_ref(), "source" | ".")) =>
+            {
+                (node.field("argument"), "import")
+            }
+            _ => continue,
+        };
+        if let Some(name) = name {
             symbols.push(node_symbol(
                 &node,
                 name.text().into_owned(),
-                "function",
+                kind,
                 Origin::default(),
             ));
         }

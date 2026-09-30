@@ -86,6 +86,8 @@ enum CodeCommand {
     Index { path: Option<std::path::PathBuf> },
     /// List the symbols in FILE, re-indexing it first if it changed.
     Outline { file: String },
+    /// List the imports declared in FILE, re-indexing it first if it changed.
+    Imports { file: String },
     /// Find indexed symbols by name, exact matches first.
     Find {
         query: String,
@@ -323,6 +325,18 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
                     symbol.kind,
                     symbol.name
                 );
+            }
+        }
+        CodeCommand::Imports { file } => {
+            let outline = service.outline(&directory, &file)?;
+            println!(
+                "{}\t{}\t{}",
+                outline.path,
+                outline.language,
+                outline.coverage.as_text()
+            );
+            for symbol in outline.imports() {
+                println!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name);
             }
         }
         CodeCommand::Find { query, kind, limit } => {

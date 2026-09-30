@@ -10,3 +10,6 @@ function deploy {
 }
 
 deploy
+
+source ./lib.sh
+. ./other.sh

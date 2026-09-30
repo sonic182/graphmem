@@ -318,6 +318,130 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
 }
 
 #[test]
+fn imports_lists_declared_imports_across_supported_languages() {
+    let sandbox = Sandbox::new("imports");
+    let expectations = [
+        ("native/lib.rs", "std::fmt"),
+        ("native/main.go", "fmt"),
+        ("native/util.c", "stdio.h"),
+        ("native/widget.h", "string"),
+        ("native/widget.cpp", "widget.h"),
+        ("native/build.zig", "std"),
+        ("app/service.py", "os"),
+        ("app/service.py", "pathlib"),
+        ("web/cart.jsx", "react"),
+        ("web/api.ts", "./client"),
+        (
+            "lib/demo_web/components/core_components.ex",
+            "Phoenix.Component",
+        ),
+        (
+            "lib/demo_web/components/core_components.ex",
+            "Phoenix.LiveView.JS",
+        ),
+        (
+            "lib/demo_web/components/core_components.ex",
+            "DemoWeb.CoreComponents",
+        ),
+        ("lib/demo_web/components/core_components.ex", "Logger"),
+        ("app/models/invoice.rb", "helper"),
+        ("app/models/invoice.rb", "tasks.rb"),
+        ("src/Report.php", "vendor/autoload.php"),
+        ("src/Report.php", "bootstrap.php"),
+        ("src/Report.php", "helpers.php"),
+        ("src/Report.php", "legacy.php"),
+        ("scripts/deploy.sh", "./lib.sh"),
+        ("scripts/deploy.sh", "./other.sh"),
+        ("web/cart.jsx", "node:fs"),
+        ("web/cart.jsx", "./lazy"),
+        ("web/cart.jsx", "./totals"),
+        ("web/cart.jsx", "./star"),
+        ("web/api.ts", "fs-extra"),
+        ("web/api.ts", "./rows"),
+        ("native/lib.rs", "serde"),
+        ("web/theme.css", "reset.css"),
+        ("web/_buttons.scss", "sass:math"),
+        ("web/_buttons.scss", "sass:color"),
+    ];
+
+    for (file, import) in expectations {
+        let output = sandbox.run(&["code", "imports", file]);
+        assert!(
+            output.lines().skip(1).any(|line| {
+                line.split_once('\t').is_some_and(|(range, name)| {
+                    range.split_once('-').is_some_and(|(start, end)| {
+                        start.parse::<usize>().is_ok() && end.parse::<usize>().is_ok()
+                    }) && name.contains(import)
+                })
+            }),
+            "{file}: expected `start-end<TAB>name` line with {import:?} in\n{output}"
+        );
+    }
+
+    let empty = sandbox.run(&["code", "imports", "db/schema.sql"]);
+    assert_eq!(empty.lines().count(), 1, "{empty}");
+
+    let partial = sandbox.run(&[
+        "code",
+        "imports",
+        "lib/demo_web/templates/page/index.html.eex",
+    ]);
+    assert!(
+        partial.contains("partial: EEx directives only"),
+        "{partial}"
+    );
+    assert_eq!(partial.lines().count(), 1, "{partial}");
+}
+
+#[test]
+fn imports_list_each_target_once_without_comments_or_parentheses() {
+    let sandbox = Sandbox::new("import-targets");
+    let cases = [
+        (
+            "targets.js",
+            "const a = require(/* c */ \"x\");\nrequire(\n  // why\n  \"y\");\n\
+             foo.require(\"no\");\nrequire.resolve(\"res\");\n",
+            "targets.js\tjavascript\tcomplete\n1-1\t\"x\"\n2-4\t\"y\"\n",
+        ),
+        (
+            "targets.rb",
+            "require_relative(# c\n  \"x\")\nobj.load \"no\"\n",
+            "targets.rb\truby\tcomplete\n1-2\t\"x\"\n",
+        ),
+        (
+            "targets.php",
+            "<?php\nrequire /* c */ \"x.php\";\nrequire('b.php');\nrequire(/* c */ \"p.php\");\n",
+            "targets.php\tphp\tcomplete\n2-2\t\"x.php\"\n3-3\t'b.php'\n4-4\t\"p.php\"\n",
+        ),
+        (
+            "targets.rs",
+            "extern crate serde;\nuse std::fmt;\n",
+            "targets.rs\trust\tcomplete\n1-1\tserde\n2-2\tstd::fmt\n",
+        ),
+        (
+            "targets.ts",
+            "import fs = require(\"fs\");\nexport type { T } from \"./t\";\nimport b from \"./b\";\n",
+            "targets.ts\ttypescript\tcomplete\n1-1\t\"fs\"\n2-2\t\"./t\"\n3-3\t\"./b\"\n",
+        ),
+        (
+            "targets.sh",
+            "#!/bin/bash\nsource \"$DIR/x.sh\"\n. ./y.sh\n",
+            "targets.sh\tbash\tcomplete\n2-2\t\"$DIR/x.sh\"\n3-3\t./y.sh\n",
+        ),
+        (
+            "reexport.js",
+            "const é = 1; export * from \"./café\";\nexport { ü } from \"./über\";\n",
+            "reexport.js\tjavascript\tcomplete\n1-1\t\"./café\"\n2-2\t\"./über\"\n",
+        ),
+    ];
+
+    for (file, source, expected) in cases {
+        fs::write(sandbox.repo.join(file), source).expect("source is written");
+        assert_eq!(sandbox.run(&["code", "imports", file]), expected, "{file}");
+    }
+}
+
+#[test]
 fn nested_definitions_without_bundled_members_are_outlined_and_found() {
     let sandbox = Sandbox::new("nested-definitions");
     let cases = [

@@ -5,3 +5,6 @@ module Billing
     end
   end
 end
+
+require_relative "helper"
+load "tasks.rb"
