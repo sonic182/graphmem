@@ -256,21 +256,9 @@ pub enum SymbolChangeKind {
 }
 
 #[cfg(feature = "code")]
-impl SymbolChangeKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Added => "added",
-            Self::Removed => "removed",
-            Self::Modified => "modified",
-        }
-    }
-}
-
-#[cfg(feature = "code")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolChange {
     pub change: SymbolChangeKind,
-    pub parent: Option<String>,
     pub symbol: CodeSymbol,
 }
 
@@ -295,9 +283,6 @@ pub fn diff_symbols(
     let head_text = SourceText::new(head_source);
     let change = |change, symbols: &[CodeSymbol], index: usize| SymbolChange {
         change,
-        parent: symbols[index]
-            .parent
-            .map(|parent| symbols[parent].name.clone()),
         symbol: symbols[index].clone(),
     };
 

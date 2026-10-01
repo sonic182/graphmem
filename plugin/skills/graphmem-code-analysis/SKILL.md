@@ -81,11 +81,14 @@ the way you expected.
   `next_offset` while it is present. With `depth`, `total` and `next_offset`
   count only the symbols within that depth; `index` and `parent` still refer
   to the full outline.
-- `code_diff` compares the merge base of `base` and `head`, as a PR does. It is
+- `code_diff` compares the merge base of `base` and `head`, as a PR does, and
+  answers in plain text: one `path<TAB>status` line per file, then
+  `  <+|-|~> start-end<TAB>kind name[<TAB>signature]` per symbol. It is
   structural: a renamed symbol shows as removed plus added, and an edit inside
-  a nested symbol is reported on that symbol only, not on its parents. Lines
-  refer to `head`, or to the merge base for removed symbols. Files it could
-  not outline are in `skipped`; read their `git diff` instead.
+  a nested symbol is reported on that symbol only, not on its parents. HEEx
+  usages inside a function are folded into that function. Lines refer to
+  `head`, or to the merge base for removed symbols. Files on `skipped` lines,
+  or with a `partial` third column, need `git diff` instead.
 - `.h` headers are parsed as C++. HTML and HEEx `<script>`/`<style>` bodies are
   outlined at their real lines in the file, including inside Elixir `~H`.
 - The first call in a large checkout that was never indexed can be slow. To

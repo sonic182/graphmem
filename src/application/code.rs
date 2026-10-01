@@ -8,7 +8,9 @@ use rayon::{ThreadPoolBuilder, prelude::*};
 
 use super::{ApplicationError, Result};
 use crate::{
-    domain::{CodeSymbol, Coverage, Freshness, SymbolChange, diff_symbols},
+    domain::{
+        CodeSymbol, Coverage, Freshness, SymbolChange, SymbolChangeKind, diff_symbols, nest_symbols,
+    },
     infrastructure::{
         code_index::{CodeIndex, FileRows, FileStamp, IndexedFile},
         config::code_config,
@@ -87,6 +89,66 @@ pub struct CodeDiff {
     pub skipped: Vec<(String, String)>,
 }
 
+impl CodeDiff {
+    pub fn to_text(&self) -> String {
+        let short = |commit: &str| commit[..commit.len().min(12)].to_owned();
+        let words = |text: &str| {
+            text.chars()
+                .filter(|character| character.is_alphanumeric())
+                .collect::<String>()
+        };
+        let mut lines = vec![format!(
+            "merge base {} head {}",
+            short(&self.base),
+            short(&self.head)
+        )];
+        for file in &self.files {
+            let mut header = format!("{}\t{}", file.path, file.status.as_str());
+            if let Some(old_path) = &file.old_path {
+                header.push_str(" from ");
+                header.push_str(old_path);
+            }
+            if !matches!(file.coverage, Coverage::Complete) {
+                header.push('\t');
+                header.push_str(&file.coverage.as_text());
+            }
+            lines.push(header);
+            for change in &file.symbols {
+                let symbol = &change.symbol;
+                let marker = match change.change {
+                    SymbolChangeKind::Added => '+',
+                    SymbolChangeKind::Removed => '-',
+                    SymbolChangeKind::Modified => '~',
+                };
+                let mut line = format!(
+                    "  {marker} {}-{}\t{} {}",
+                    symbol.start.line, symbol.end.line, symbol.kind, symbol.name
+                );
+                if change.change != SymbolChangeKind::Removed
+                    && symbol.signature.contains(['(', ':', '<', '=', ','])
+                    && words(&symbol.signature) != words(&symbol.name)
+                {
+                    line.push('\t');
+                    line.push_str(&symbol.signature);
+                }
+                lines.push(line);
+            }
+        }
+        let mut reasons: Vec<(&str, Vec<&str>)> = Vec::new();
+        for (path, reason) in &self.skipped {
+            match reasons.iter_mut().find(|(known, _)| known == reason) {
+                Some((_, paths)) => paths.push(path),
+                None => reasons.push((reason, vec![path])),
+            }
+        }
+        for (reason, paths) in reasons {
+            lines.push(format!("skipped ({reason}): {}", paths.join(", ")));
+        }
+        lines.push(String::new());
+        lines.join("\n")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
     Added,
@@ -110,7 +172,6 @@ pub struct FileDiff {
     pub path: String,
     pub old_path: Option<String>,
     pub status: FileStatus,
-    pub language: String,
     pub coverage: Coverage,
     pub symbols: Vec<SymbolChange>,
 }
@@ -450,15 +511,34 @@ fn diff_file(
         path: file.path.clone(),
         old_path: file.old_path.clone(),
         status,
-        language: language.name().to_owned(),
         coverage,
         symbols: diff_symbols(
             base_source,
-            &base_outline.symbols,
+            &definitions(base_outline.symbols),
             head_source,
-            &head_outline.symbols,
+            &definitions(head_outline.symbols),
         ),
     }))
+}
+
+fn definitions(symbols: Vec<CodeSymbol>) -> Vec<CodeSymbol> {
+    let usage =
+        |symbol: &CodeSymbol| matches!(symbol.kind.as_str(), "component" | "slot" | "expression");
+    let inside_definition = symbols
+        .iter()
+        .map(|symbol| {
+            std::iter::successors(symbol.parent, |&parent| symbols[parent].parent)
+                .any(|parent| !usage(&symbols[parent]))
+        })
+        .collect::<Vec<_>>();
+    let mut kept = symbols
+        .into_iter()
+        .zip(inside_definition)
+        .filter(|(symbol, inside)| !(usage(symbol) && *inside))
+        .map(|(symbol, _)| symbol)
+        .collect::<Vec<_>>();
+    nest_symbols(&mut kept);
+    kept
 }
 
 fn checkout_root(directory: &Path) -> Result<PathBuf> {

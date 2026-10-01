@@ -1572,21 +1572,13 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         "tools/call",
         json!({"name":"code_diff","arguments":{"base":"HEAD~1"}}),
     );
-    let diff = &diff["result"]["structuredContent"];
-    assert_eq!(diff["files"].as_array().unwrap().len(), 1);
-    assert_eq!(diff["files"][0]["path"], "lib/billing.ex");
-    assert_eq!(diff["files"][0]["status"], "modified");
+    assert!(diff["result"].get("structuredContent").is_none());
+    let text = diff["result"]["content"][0]["text"].as_str().unwrap();
+    let (header, text) = text.split_once('\n').unwrap();
+    assert!(header.starts_with("merge base "), "{header}");
     assert_eq!(
-        diff["files"][0]["symbols"],
-        json!([{
-            "change":"modified",
-            "parent":"Billing",
-            "name":"charge/1",
-            "kind":"function",
-            "start_line":2,
-            "end_line":2,
-            "signature":"def charge(amount), do: amount * 2"
-        }])
+        text,
+        "lib/billing.ex\tmodified\n  ~ 2-2\tfunction charge/1\tdef charge(amount), do: amount * 2\n"
     );
     let injected = mcp.request(
         13,

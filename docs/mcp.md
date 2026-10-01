@@ -109,13 +109,29 @@ large checkout ahead of time, or to see which files could not be indexed, run
 - `code_diff`: lists the symbols `added`, `removed`, or `modified` between two
   Git revisions, with `base`, optional `head` (default `HEAD`), and `root`.
   Like a pull request, the merge base of `base` and `head` is compared with
-  `head`; the response's `base` is that merge-base commit. Both versions of
-  each changed file are outlined in memory; the index is neither read nor
-  written. Each file has a `path`, `old_path` when Git detected a rename,
-  `status` (`added`, `deleted`, `modified`, or `renamed`), `language`,
-  `coverage`, and its changed `symbols`, each with `change`, `parent`, `name`,
-  `kind`, `start_line`, `end_line`, and `signature`. Lines refer to `head`, or
-  to the merge base for removed symbols. The diff is structural, not
+  `head`. Both versions of each changed file are outlined in memory; the index
+  is neither read nor written. Unlike the other tools, the result is plain
+  text with no structured content, to keep large diffs cheap:
+
+  ```text
+  merge base a9c4b016dd43 head a51919589c13
+  minibot/llm/tools/bash.py	modified
+    ~ 67-148	method _handle	async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+    - 215-232	method _truncate_output
+  minibot/shared/subprocess_utils.py	modified
+    + 11-32	function truncate_subprocess_output	def truncate_subprocess_output(
+  skipped (unsupported file type): todos/ROADMAP.md
+  ```
+
+  Each file line is the path, a tab, and its status: `added`, `deleted`,
+  `modified`, or `renamed from <old path>`. A third column is added when
+  coverage is `partial: <reason>`. Each symbol line is `+`, `-`, or `~`, its
+  line range, a tab, its kind and name, and, for added and modified symbols,
+  a tab and its signature when that shows parameters, types, or values the
+  name does not. Lines refer to `head`, or to the merge base for removed
+  symbols. HEEx component and slot usages inside a definition (such as a `~H`
+  sigil) are left out, so a template edit shows on the enclosing function;
+  top-level components of `.heex` files are kept. The diff is structural, not
   semantic: a symbol is identified by its kind, its name and its ancestors'
   names, and its occurrence among symbols sharing those, and it is modified
   when its signature or its own text changed. Its own text includes the
@@ -123,8 +139,8 @@ large checkout ahead of time, or to see which files could not be indexed, run
   whitespace, `,`, and `;`, so an edited method is reported without its
   `impl` or module. A renamed symbol appears as removed plus added. Changed
   files that are not supported, minified, binary, not UTF-8, or larger than
-  1 MiB are listed in `skipped` with a `reason`. Revisions starting with `-`
-  are refused.
+  1 MiB are listed on `skipped (<reason>): …` lines. Revisions starting with
+  `-` are refused. `gmem code diff <BASE> [HEAD]` prints the same text.
 
 Supported files: Rust, Go, Zig, C, C++ (`.h` headers are parsed as C++),
 Python, JavaScript/JSX, TypeScript/TSX, Elixir (including `~H` sigils), HEEx,

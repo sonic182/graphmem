@@ -686,6 +686,11 @@ fn diff_reports_changed_symbols_between_revisions() {
         "<button><.icon",
         "<button class=\"primary\"><.icon",
     );
+    edit(
+        "lib/demo_web/components/core_components.ex",
+        "<.icon name=\"hero-x-mark\" />",
+        "<.icon name=\"hero-x-mark\" />\n      <.icon name=\"hero-bell\" />",
+    );
     edit("web/theme.css", "padding: 1rem;", "padding: 2rem;");
     edit(
         "lib/demo_web/controllers/page_html/home.html.heex",
@@ -706,28 +711,25 @@ fn diff_reports_changed_symbols_between_revisions() {
     git(repo, &["add", "."]);
     git(repo, &["commit", "-q", "-m", "head"]);
 
-    let output = sandbox.gmem(repo, &["code", "diff", "HEAD~1"]);
-    assert!(output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("skipped: README.md (unsupported file type)"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("skipped: web/blob.js (binary)"), "{stderr}");
+    let output = sandbox.run(&["code", "diff", "HEAD~1"]);
+    let (header, output) = output.split_once('\n').expect("diff has a header");
+    assert!(header.starts_with("merge base "), "{header}");
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        output,
         "app/billing.py\trenamed from app/service.py\n\
-         \x20 ~ 5-6\tmethod charge\n\
+         \x20 ~ 5-6\tmethod charge\tdef charge(self, amount):\n\
          app/tools.py\tmodified\n\
-         \x20 ~ 1-5\tfunction build\n\
+         \x20 ~ 1-5\tfunction build\tdef build(flag):\n\
          lib/demo_web/components/core_components.ex\tmodified\n\
-         \x20 ~ 17-23\tfunction button/1\n\
+         \x20 ~ 8-16\tfunction flash/1\tdef flash(assigns) do\n\
+         \x20 ~ 18-24\tfunction button/1\t\
+         def button(%{disabled: true} = assigns), do: ~H\"<button disabled><%= @label %></button>\"\n\
          lib/demo_web/controllers/page_html/home.html.heex\tmodified\n\
-         \x20 + 7-7\tcomponent .button\n\
+         \x20 + 7-7\tcomponent .button\t<.button phx-click=\"stop\">Stop</.button>\n\
          native/lib.rs\tmodified\n\
-         \x20 ~ 4-6\tfunction charge\n\
-         \x20 + 8-10\tfunction refund\n\
-         \x20 ~ 30-30\tmethod price\n\
+         \x20 ~ 4-6\tfunction charge\tpub fn charge(amount: u64) -> u64\n\
+         \x20 + 8-10\tfunction refund\tpub fn refund(amount: u64) -> u64\n\
+         \x20 ~ 30-30\tmethod price\tfn price(&self) -> u32\n\
          \x20 - 28-30\tmethod discounted\n\
          scripts/deploy.sh\tdeleted\n\
          \x20 - 4-6\tfunction build\n\
@@ -735,9 +737,11 @@ fn diff_reports_changed_symbols_between_revisions() {
          \x20 - 14-14\timport ./lib.sh\n\
          \x20 - 15-15\timport ./other.sh\n\
          web/refund.ts\tadded\n\
-         \x20 + 1-1\tfunction refund\n\
+         \x20 + 1-1\tfunction refund\texport function refund(): void {}\n\
          web/theme.css\tmodified\n\
-         \x20 ~ 13-15\tselector .card\n"
+         \x20 ~ 13-15\tselector .card\n\
+         skipped (unsupported file type): README.md\n\
+         skipped (binary): web/blob.js\n"
     );
     assert!(
         sandbox

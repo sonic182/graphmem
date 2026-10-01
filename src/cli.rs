@@ -347,34 +347,10 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
             }
         }
         CodeCommand::Diff { base, head } => {
-            let diff = graphmem::application::code::diff(&directory, &base, &head)?;
-            for (path, reason) in &diff.skipped {
-                eprintln!("skipped: {path} ({reason})");
-            }
-            for file in &diff.files {
-                let mut header = format!("{}\t{}", file.path, file.status.as_str());
-                if let Some(old_path) = &file.old_path {
-                    header.push_str(&format!(" from {old_path}"));
-                }
-                if !matches!(file.coverage, graphmem::domain::Coverage::Complete) {
-                    header.push_str(&format!("\t{}", file.coverage.as_text()));
-                }
-                println!("{header}");
-                for change in &file.symbols {
-                    let marker = match change.change {
-                        graphmem::domain::SymbolChangeKind::Added => '+',
-                        graphmem::domain::SymbolChangeKind::Removed => '-',
-                        graphmem::domain::SymbolChangeKind::Modified => '~',
-                    };
-                    println!(
-                        "  {marker} {}-{}\t{} {}",
-                        change.symbol.start.line,
-                        change.symbol.end.line,
-                        change.symbol.kind,
-                        change.symbol.name
-                    );
-                }
-            }
+            print!(
+                "{}",
+                graphmem::application::code::diff(&directory, &base, &head)?.to_text()
+            );
         }
         CodeCommand::Find { query, kind, limit } => {
             let found = service.find_symbol(&directory, &query, kind.as_deref(), limit)?;

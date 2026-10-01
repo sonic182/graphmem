@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the head, per changed file, by outlining both versions in memory. Edits
   inside a nested symbol are reported on that symbol only; renamed symbols
   appear as removed plus added; unsupported and binary files are listed as
-  skipped.
+  skipped. The MCP tool answers in compact plain text rather than JSON (about
+  7× smaller than `git diff` on real repositories).
 
 ### Changed
 

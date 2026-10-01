@@ -784,57 +784,6 @@ struct SymbolMatchRecord {
 
 #[cfg(feature = "code")]
 #[derive(Debug, Serialize, JsonSchema)]
-struct SymbolChangeRecord {
-    /// "added", "removed", or "modified".
-    change: String,
-    /// Name of the enclosing symbol, such as the module or class.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent: Option<String>,
-    name: String,
-    kind: String,
-    /// Lines in head, or in base for a removed symbol.
-    start_line: usize,
-    end_line: usize,
-    signature: String,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct FileDiffRecord {
-    path: String,
-    /// Path in base when the file was renamed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    old_path: Option<String>,
-    /// "added", "deleted", "modified", or "renamed".
-    status: String,
-    language: String,
-    /// "complete", or "partial: <reason>" when symbols may be missing on
-    /// either side.
-    coverage: String,
-    symbols: Vec<SymbolChangeRecord>,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct SkippedFileRecord {
-    path: String,
-    reason: String,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct CodeDiffOutput {
-    /// Commit compared from: the merge base of base and head.
-    base: String,
-    head: String,
-    files: Vec<FileDiffRecord>,
-    /// Changed files that were not compared, such as unsupported or binary
-    /// files.
-    skipped: Vec<SkippedFileRecord>,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
 struct FindSymbolOutput {
     matches: Vec<SymbolMatchRecord>,
     /// Number of matches, including those beyond `limit`.
@@ -996,18 +945,25 @@ impl MemoryServer {
 
     #[tool(
         name = "code_diff",
-        description = "List the symbols added, removed, or modified between two Git revisions, \
-             per changed file, by outlining both versions of each file. base is compared through \
-             its merge base with head (default HEAD), as in a pull request. This is structural, \
-             not semantic: a modified symbol's signature or own lines changed (changes inside a \
-             nested symbol are reported on that symbol only), and a renamed symbol appears as \
-             removed plus added. Lines refer to head, or to base for removed symbols. Changed \
-             files that cannot be outlined are listed in skipped. Nothing is indexed."
+        description = "List the definitions added, removed, or modified between two Git \
+             revisions, per changed file, by outlining both versions of each file. base is \
+             compared through its merge base with head (default HEAD), as in a pull request. \
+             Returns plain text: a `merge base <sha> head <sha>` line; per file a \
+             `path<TAB>status` line (status added, deleted, modified, or `renamed from <old>`; \
+             a third column when coverage is partial); then one `  <+|-|~> start-end<TAB>kind \
+             name[<TAB>signature]` line per symbol, the signature only when it adds to the name \
+             and the symbol was not removed; and `skipped (<reason>): paths` lines for files that \
+             could not be outlined. Lines refer to head, or to the merge base for removed \
+             symbols. This is structural, not semantic: a symbol is modified when its signature \
+             or own text changed (an edit inside a nested symbol is reported on that symbol \
+             only), and a renamed symbol appears as removed plus added. HEEx component and slot \
+             usages are not listed; template edits show on the enclosing function. Nothing is \
+             indexed."
     )]
     async fn code_diff(
         &self,
         Parameters(input): Parameters<CodeDiffInput>,
-    ) -> Result<Json<CodeDiffOutput>, CallToolResult> {
+    ) -> Result<CallToolResult, CallToolResult> {
         let directory = code_directory(input.root)?;
         let head = input.head.unwrap_or_else(|| "HEAD".to_owned());
         let base = input.base;
@@ -1015,41 +971,9 @@ impl MemoryServer {
             .await
             .map_err(|error| tool_error(format!("code diff task failed: {error}")))?
             .map_err(|error| tool_error(error.to_string()))?;
-        let files = diff
-            .files
-            .into_iter()
-            .map(|file| FileDiffRecord {
-                path: file.path,
-                old_path: file.old_path,
-                status: file.status.as_str().to_owned(),
-                language: file.language,
-                coverage: file.coverage.as_text(),
-                symbols: file
-                    .symbols
-                    .into_iter()
-                    .map(|change| SymbolChangeRecord {
-                        change: change.change.as_str().to_owned(),
-                        parent: change.parent,
-                        name: change.symbol.name,
-                        kind: change.symbol.kind,
-                        start_line: change.symbol.start.line,
-                        end_line: change.symbol.end.line,
-                        signature: change.symbol.signature,
-                    })
-                    .collect(),
-            })
-            .collect();
-        let skipped = diff
-            .skipped
-            .into_iter()
-            .map(|(path, reason)| SkippedFileRecord { path, reason })
-            .collect();
-        Ok(Json(CodeDiffOutput {
-            base: diff.base,
-            head: diff.head,
-            files,
-            skipped,
-        }))
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            diff.to_text(),
+        )]))
     }
 }
 
