@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-01
+
 ### Added
 
 - `gmem code imports <FILE>` and the MCP `code_imports` tool list declared
@@ -224,7 +226,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.7.1...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/sonic182/graphmem/releases/tag/0.8.0
 [0.7.1]: https://github.com/sonic182/graphmem/releases/tag/0.7.1
 [0.7.0]: https://github.com/sonic182/graphmem/releases/tag/0.7.0
 [0.6.0]: https://github.com/sonic182/graphmem/releases/tag/0.6.0
