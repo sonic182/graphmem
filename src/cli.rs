@@ -317,34 +317,11 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
         }
         CodeCommand::Outline { file, depth } => {
             let outline = service.outline(&directory, &file)?;
-            println!(
-                "{}\t{}\t{}",
-                outline.path,
-                outline.language,
-                outline.coverage.as_text()
-            );
-            for (index, symbol) in outline.within_depth(depth) {
-                println!(
-                    "{}-{}\t{}{} {}",
-                    symbol.start.line,
-                    symbol.end.line,
-                    "  ".repeat(outline.depth(index)),
-                    symbol.kind,
-                    symbol.name
-                );
-            }
+            print!("{}", outline.to_text(depth, 0, usize::MAX));
         }
         CodeCommand::Imports { file } => {
             let outline = service.outline(&directory, &file)?;
-            println!(
-                "{}\t{}\t{}",
-                outline.path,
-                outline.language,
-                outline.coverage.as_text()
-            );
-            for symbol in outline.imports() {
-                println!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name);
-            }
+            print!("{}", outline.imports_text(0, usize::MAX));
         }
         CodeCommand::Diff { base, head } => {
             print!(
@@ -354,24 +331,7 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
         }
         CodeCommand::Find { query, kind, limit } => {
             let found = service.find_symbol(&directory, &query, kind.as_deref(), limit)?;
-            if found.truncated {
-                eprintln!("warning: too many source files; some were not indexed");
-            }
-            if found.total > found.hits.len() {
-                eprintln!("showing {} of {} matches", found.hits.len(), found.total);
-            }
-            for hit in found.hits {
-                println!(
-                    "{}:{}:{}\t{}\t{}\t{}\t{}",
-                    hit.path,
-                    hit.symbol.start.line,
-                    hit.symbol.start.column,
-                    hit.symbol.kind,
-                    hit.symbol.name,
-                    hit.parent.unwrap_or_default(),
-                    hit.freshness.as_str()
-                );
-            }
+            print!("{}", found.to_text());
         }
     }
     Ok(())

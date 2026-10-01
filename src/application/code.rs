@@ -80,6 +80,126 @@ impl FileOutline {
             .enumerate()
             .filter(move |(index, _)| max.is_none_or(|max| self.depth(*index) <= max))
     }
+
+    pub fn to_text(&self, depth: Option<usize>, offset: usize, limit: usize) -> String {
+        let total = self.within_depth(depth).count();
+        let lines = self
+            .within_depth(depth)
+            .skip(offset)
+            .take(limit)
+            .map(|(index, symbol)| {
+                let mut line = format!(
+                    "{}-{}\t{}{} {}",
+                    symbol.start.line,
+                    symbol.end.line,
+                    "  ".repeat(self.depth(index)),
+                    symbol.kind,
+                    symbol.name
+                );
+                if let Some(signature) = shown_signature(symbol) {
+                    line.push('\t');
+                    line.push_str(signature);
+                }
+                line
+            });
+        self.page_text(lines, offset, limit, total)
+    }
+
+    pub fn imports_text(&self, offset: usize, limit: usize) -> String {
+        let total = self.imports().count();
+        let lines =
+            self.imports().skip(offset).take(limit).map(|symbol| {
+                format!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name)
+            });
+        self.page_text(lines, offset, limit, total)
+    }
+
+    fn page_text(
+        &self,
+        lines: impl Iterator<Item = String>,
+        offset: usize,
+        limit: usize,
+        total: usize,
+    ) -> String {
+        let mut text = format!(
+            "{}\t{}\t{}\n",
+            display_path(&self.path),
+            self.language,
+            self.coverage.as_text()
+        );
+        for line in lines {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        let next_offset = offset.saturating_add(limit);
+        if next_offset < total {
+            text.push_str(&format!("next_offset {next_offset} of {total}\n"));
+        }
+        text
+    }
+}
+
+impl FoundSymbols {
+    pub fn to_text(&self) -> String {
+        let mut text = String::new();
+        for hit in &self.hits {
+            let symbol = &hit.symbol;
+            text.push_str(&format!(
+                "{}:{}-{}\t{} {}",
+                display_path(&hit.path),
+                symbol.start.line,
+                symbol.end.line,
+                symbol.kind,
+                symbol.name
+            ));
+            if let Some(parent) = &hit.parent {
+                text.push_str("\tin ");
+                text.push_str(parent);
+            }
+            if hit.freshness != Freshness::Fresh {
+                text.push('\t');
+                text.push_str(hit.freshness.as_str());
+            }
+            if let Some(signature) = shown_signature(symbol) {
+                text.push('\t');
+                text.push_str(signature);
+            }
+            text.push('\n');
+        }
+        if self.total > self.hits.len() {
+            text.push_str(&format!(
+                "{} of {} matches; raise limit for more\n",
+                self.hits.len(),
+                self.total
+            ));
+        }
+        if self.truncated {
+            text.push_str(
+                "truncated: more source files than [code] max_files; a definition may be missing\n",
+            );
+        }
+        text
+    }
+}
+
+fn shown_signature(symbol: &CodeSymbol) -> Option<&str> {
+    let words = |text: &str| {
+        text.chars()
+            .filter(|character| character.is_alphanumeric())
+            .collect::<String>()
+    };
+    (symbol.kind != "import"
+        && symbol.signature.contains(['(', ':', '<', '=', ','])
+        && words(&symbol.signature) != words(&symbol.name))
+    .then_some(symbol.signature.as_str())
+}
+
+fn display_path(path: &str) -> String {
+    if path.contains(char::is_control) {
+        format!("{path:?}")
+    } else {
+        path.to_owned()
+    }
 }
 
 pub struct CodeDiff {
@@ -92,28 +212,16 @@ pub struct CodeDiff {
 impl CodeDiff {
     pub fn to_text(&self) -> String {
         let short = |commit: &str| commit[..commit.len().min(12)].to_owned();
-        let words = |text: &str| {
-            text.chars()
-                .filter(|character| character.is_alphanumeric())
-                .collect::<String>()
-        };
         let mut lines = vec![format!(
             "merge base {} head {}",
             short(&self.base),
             short(&self.head)
         )];
-        let path = |path: &str| {
-            if path.contains(char::is_control) {
-                format!("{path:?}")
-            } else {
-                path.to_owned()
-            }
-        };
         for file in &self.files {
-            let mut header = format!("{}\t{}", path(&file.path), file.status.as_str());
+            let mut header = format!("{}\t{}", display_path(&file.path), file.status.as_str());
             if let Some(old_path) = &file.old_path {
                 header.push_str(" from ");
-                header.push_str(&path(old_path));
+                header.push_str(&display_path(old_path));
             }
             if !matches!(file.coverage, Coverage::Complete) {
                 header.push('\t');
@@ -132,11 +240,10 @@ impl CodeDiff {
                     symbol.start.line, symbol.end.line, symbol.kind, symbol.name
                 );
                 if change.change != SymbolChangeKind::Removed
-                    && symbol.signature.contains(['(', ':', '<', '=', ','])
-                    && words(&symbol.signature) != words(&symbol.name)
+                    && let Some(signature) = shown_signature(symbol)
                 {
                     line.push('\t');
-                    line.push_str(&symbol.signature);
+                    line.push_str(signature);
                 }
                 lines.push(line);
             }
@@ -144,8 +251,8 @@ impl CodeDiff {
         let mut reasons: Vec<(&str, Vec<String>)> = Vec::new();
         for (skipped, reason) in &self.skipped {
             match reasons.iter_mut().find(|(known, _)| known == reason) {
-                Some((_, paths)) => paths.push(path(skipped)),
-                None => reasons.push((reason, vec![path(skipped)])),
+                Some((_, paths)) => paths.push(display_path(skipped)),
+                None => reasons.push((reason, vec![display_path(skipped)])),
             }
         }
         for (reason, paths) in reasons {

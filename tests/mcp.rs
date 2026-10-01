@@ -1441,28 +1441,36 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     assert!(names.contains(&"code_imports".to_owned()));
     assert!(names.contains(&"find_symbol".to_owned()));
 
+    let text = |response: Value| {
+        assert!(
+            response["result"].get("structuredContent").is_none(),
+            "{response}"
+        );
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text result")
+            .to_owned()
+    };
+    let charge =
+        "lib/billing.ex:2-2\tfunction charge/1\tin Billing\tdef charge(amount), do: amount\n";
     let unindexed = mcp.request(
         3,
         "tools/call",
         json!({"name":"find_symbol","arguments":{"query":"charge"}}),
     );
-    let unindexed = &unindexed["result"]["structuredContent"];
-    assert_eq!(unindexed["matches"][0]["name"], "charge/1");
-    assert_eq!(unindexed["total"], 1);
-    assert_eq!(unindexed["truncated"], false);
+    assert_eq!(text(unindexed), charge);
 
     let outline = mcp.request(
         7,
         "tools/call",
         json!({"name":"code_outline","arguments":{"path":"lib/billing.ex"}}),
     );
-    let outline = &outline["result"]["structuredContent"];
-    assert_eq!(outline["coverage"], "complete");
-    assert_eq!(outline["total"], 2);
-    assert_eq!(outline["symbols"][0]["name"], "Billing");
-    assert_eq!(outline["symbols"][1]["name"], "charge/1");
-    assert_eq!(outline["symbols"][1]["parent"], 0);
-    assert_eq!(outline["symbols"][1]["start_line"], 2);
+    assert_eq!(
+        text(outline),
+        "lib/billing.ex\telixir\tcomplete\n\
+         1-3\tmodule Billing\n\
+         2-2\t  function charge/1\tdef charge(amount), do: amount\n"
+    );
 
     let shallow = mcp.request(
         11,
@@ -1472,13 +1480,10 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
             "arguments":{"path":"lib/nested.ex","depth":1,"offset":1,"limit":1}
         }),
     );
-    let shallow = &shallow["result"]["structuredContent"];
-    assert_eq!(shallow["total"], 3);
-    assert_eq!(shallow["next_offset"], 2);
-    assert_eq!(shallow["symbols"].as_array().unwrap().len(), 1);
-    assert_eq!(shallow["symbols"][0]["name"], "A.B");
-    assert_eq!(shallow["symbols"][0]["index"], 1);
-    assert_eq!(shallow["symbols"][0]["parent"], 0);
+    assert_eq!(
+        text(shallow),
+        "lib/nested.ex\telixir\tcomplete\n2-4\t  module A.B\nnext_offset 2 of 3\n"
+    );
 
     let imports = mcp.request(
         8,
@@ -1488,21 +1493,10 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
             "arguments":{"path":"lib/imports.rs","offset":1,"limit":1}
         }),
     );
-    let imports = &imports["result"]["structuredContent"];
-    assert_eq!(imports["path"], "lib/imports.rs");
-    assert_eq!(imports["coverage"], "complete");
-    assert!(imports.get("freshness").is_none());
-    assert_eq!(imports["total"], 3);
-    assert_eq!(imports["next_offset"], 2);
-    assert_eq!(imports["imports"].as_array().unwrap().len(), 1);
-    assert!(
-        imports["imports"][0]["name"]
-            .as_str()
-            .unwrap()
-            .contains("beta")
+    assert_eq!(
+        text(imports),
+        "lib/imports.rs\trust\tcomplete\n2-5\tbeta::{ Two, Three, }\nnext_offset 2 of 3\n"
     );
-    assert_eq!(imports["imports"][0]["start_line"], 2);
-    assert_eq!(imports["imports"][0]["end_line"], 5);
 
     fs::write(repo.join("lib/imports.rs"), "use updated::Only;\n")
         .expect("import source file is updated");
@@ -1511,32 +1505,27 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         "tools/call",
         json!({"name":"code_imports","arguments":{"path":"lib/imports.rs"}}),
     );
-    let refreshed = &refreshed["result"]["structuredContent"];
-    assert_eq!(refreshed["total"], 1);
-    assert_eq!(refreshed["imports"][0]["name"], "updated::Only");
-    assert!(refreshed.get("freshness").is_none());
-    assert!(refreshed.get("next_offset").is_none());
+    assert_eq!(
+        text(refreshed),
+        "lib/imports.rs\trust\tcomplete\n1-1\tupdated::Only\n"
+    );
 
     let partial = mcp.request(
         10,
         "tools/call",
         json!({"name":"code_imports","arguments":{"path":"lib/partial.html.eex"}}),
     );
-    let partial = &partial["result"]["structuredContent"];
-    assert_eq!(partial["coverage"], "partial: EEx directives only");
-    assert_eq!(partial["total"], 0);
-    assert_eq!(partial["imports"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        text(partial),
+        "lib/partial.html.eex\teex\tpartial: EEx directives only\n"
+    );
 
     let found = mcp.request(
         5,
         "tools/call",
         json!({"name":"find_symbol","arguments":{"query":"charge"}}),
     );
-    let matches = &found["result"]["structuredContent"]["matches"];
-    assert_eq!(matches.as_array().expect("matches").len(), 1);
-    assert_eq!(matches[0]["path"], "lib/billing.ex");
-    assert_eq!(matches[0]["parent"], "Billing");
-    assert_eq!(matches[0]["freshness"], "fresh");
+    assert_eq!(text(found), charge);
 
     let escaped = mcp.request(
         6,
@@ -1642,9 +1631,12 @@ fn code_failures_leave_the_memory_tools_available() {
         "tools/call",
         json!({"name":"code_outline","arguments":{"path":"app.py"}}),
     );
-    assert_eq!(
-        outline["result"]["structuredContent"]["symbols"][0]["name"],
-        "ping"
+    assert!(
+        outline["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\tfunction ping"),
+        "{outline}"
     );
     drop(mcp);
 
@@ -1771,7 +1763,8 @@ fn code_refresh_does_not_block_memory_tools() {
             let response = mcp.recv();
             assert_ne!(response["result"]["isError"], true, "{response}");
             assert!(
-                response["result"]["structuredContent"].is_object(),
+                response["result"]["structuredContent"].is_object()
+                    || response["result"]["content"][0]["text"].is_string(),
                 "{response}"
             );
             answered.push(response["id"].as_u64().expect("response id"));

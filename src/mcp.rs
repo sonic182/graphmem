@@ -710,108 +710,27 @@ struct FindSymbolInput {
 }
 
 #[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct CodeSymbolRecord {
-    /// Position of the symbol in the file's outline.
-    index: usize,
-    /// `index` of the syntactically enclosing symbol.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent: Option<usize>,
-    name: String,
-    kind: String,
-    start_line: usize,
-    start_column: usize,
-    end_line: usize,
-    end_column: usize,
-    signature: String,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct CodeOutlineOutput {
-    path: String,
-    language: String,
-    /// "complete", or "partial: <reason>" when symbols may be missing.
-    coverage: String,
-    total: usize,
-    symbols: Vec<CodeSymbolRecord>,
-    /// Offset of the next page, when there is one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    next_offset: Option<usize>,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct CodeImportRecord {
-    name: String,
-    start_line: usize,
-    end_line: usize,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct CodeImportsOutput {
-    path: String,
-    imports: Vec<CodeImportRecord>,
-    /// "complete", or "partial: <reason>" when syntax errors or template
-    /// limits may hide imports. "complete" does not mean every import form
-    /// is recognised: only the forms the parser knows are listed.
-    coverage: String,
-    total: usize,
-    /// Offset of the next page, when there is one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    next_offset: Option<usize>,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct SymbolMatchRecord {
-    path: String,
-    language: String,
-    /// "fresh", "stale" (file changed since indexing), or "missing".
-    freshness: String,
-    /// Name of the enclosing symbol, such as the module or class.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent: Option<String>,
-    name: String,
-    kind: String,
-    start_line: usize,
-    start_column: usize,
-    end_line: usize,
-    end_column: usize,
-    signature: String,
-}
-
-#[cfg(feature = "code")]
-#[derive(Debug, Serialize, JsonSchema)]
-struct FindSymbolOutput {
-    matches: Vec<SymbolMatchRecord>,
-    /// Number of matches, including those beyond `limit`.
-    total: usize,
-    /// True when the checkout has more source files than the index accepts,
-    /// so a definition may be missing.
-    truncated: bool,
-}
-
-#[cfg(feature = "code")]
 #[tool_router(router = code_router)]
 impl MemoryServer {
     #[tool(
         name = "code_outline",
         description = "List the definitions in one source file of a Git checkout: modules, \
-             classes, functions, components, SQL objects, and imports, with 1-based line and \
-             column ranges and the index of each symbol's syntactic parent. Reads the file itself \
-             and re-indexes it when it changed, so the result is never stale. coverage is \
-             \"partial: <reason>\" when syntax errors or template limits may hide symbols. \
-             Pass depth (0 for top-level symbols only) to skip deeper nesting; total and \
-             next_offset then count only the symbols within that depth. Supports Rust, Go, Zig, C, C++ (including .h), Python, JavaScript/JSX, \
-             TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, Bash, CSS, SCSS, \
-             and HTML/HEEx <script> and <style>."
+             classes, functions, components, SQL objects, and imports. Reads the file itself and \
+             re-indexes it when it changed, so the result is never stale. Returns plain text: a \
+             `path<TAB>language<TAB>coverage` line (coverage is \"partial: <reason>\" when syntax \
+             errors or template limits may hide symbols), then one `start-end<TAB>kind \
+             name[<TAB>signature]` line per symbol with 1-based lines, indented two spaces per \
+             nesting level, the signature only when it adds to the name; and a \
+             `next_offset <n> of <total>` line when more symbols follow. Pass depth (0 for \
+             top-level symbols only) to skip deeper nesting; pagination then counts only the \
+             symbols within that depth. Supports Rust, Go, Zig, C, C++ (including .h), Python, \
+             JavaScript/JSX, TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, \
+             Bash, CSS, SCSS, and HTML/HEEx <script> and <style>."
     )]
     async fn code_outline(
         &self,
         Parameters(input): Parameters<CodeOutlineInput>,
-    ) -> Result<Json<CodeOutlineOutput>, CallToolResult> {
+    ) -> Result<CallToolResult, CallToolResult> {
         let limit = input.limit.unwrap_or(200);
         if !(1..=500).contains(&limit) {
             return Err(tool_error("limit must be between 1 and 500"));
@@ -822,48 +741,26 @@ impl MemoryServer {
         let outline = self
             .run_code(move |code| code.outline(&directory, &path))
             .await?;
-        let total = outline.within_depth(input.depth).count();
-        let symbols = outline
-            .within_depth(input.depth)
-            .skip(offset)
-            .take(limit)
-            .map(|(index, symbol)| CodeSymbolRecord {
-                index,
-                parent: symbol.parent,
-                name: symbol.name.clone(),
-                kind: symbol.kind.clone(),
-                start_line: symbol.start.line,
-                start_column: symbol.start.column,
-                end_line: symbol.end.line,
-                end_column: symbol.end.column,
-                signature: symbol.signature.clone(),
-            })
-            .collect();
-        let next_offset = offset.saturating_add(limit);
-        Ok(Json(CodeOutlineOutput {
-            path: outline.path,
-            language: outline.language,
-            coverage: outline.coverage.as_text(),
-            total,
-            symbols,
-            next_offset: (next_offset < total).then_some(next_offset),
-        }))
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            outline.to_text(input.depth, offset, limit),
+        )]))
     }
 
     #[tool(
         name = "code_imports",
         description = "List the imports declared in one source file without resolving them to \
-             other files. The file is refreshed first. Returns each import's name and 1-based \
-             start and end lines, along with parser coverage. Only import forms the parser \
-             recognises are listed, so when absence matters also use text search for code \
-             loaded through other APIs. Supports optional offset, limit \
-             (1 to 500, default 200), and root (an absolute directory inside a checkout; \
+             other files. The file is refreshed first. Returns plain text: a \
+             `path<TAB>language<TAB>coverage` line, one `start-end<TAB>name` line per import \
+             with 1-based lines, and a `next_offset <n> of <total>` line when more imports \
+             follow. Only import forms the parser recognises are listed, so when absence matters \
+             also use text search for code loaded through other APIs. Supports optional offset, \
+             limit (1 to 500, default 200), and root (an absolute directory inside a checkout; \
              defaults to the server's startup directory)."
     )]
     async fn code_imports(
         &self,
         Parameters(input): Parameters<CodeImportsInput>,
-    ) -> Result<Json<CodeImportsOutput>, CallToolResult> {
+    ) -> Result<CallToolResult, CallToolResult> {
         let limit = input.limit.unwrap_or(200);
         if !(1..=500).contains(&limit) {
             return Err(tool_error("limit must be between 1 and 500"));
@@ -874,25 +771,9 @@ impl MemoryServer {
         let outline = self
             .run_code(move |code| code.outline(&directory, &path))
             .await?;
-        let total = outline.imports().count();
-        let imports = outline
-            .imports()
-            .skip(offset)
-            .take(limit)
-            .map(|symbol| CodeImportRecord {
-                name: symbol.name.clone(),
-                start_line: symbol.start.line,
-                end_line: symbol.end.line,
-            })
-            .collect();
-        let next_offset = offset.saturating_add(limit);
-        Ok(Json(CodeImportsOutput {
-            path: outline.path,
-            imports,
-            coverage: outline.coverage.as_text(),
-            total,
-            next_offset: (next_offset < total).then_some(next_offset),
-        }))
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            outline.imports_text(offset, limit),
+        )]))
     }
 
     #[tool(
@@ -902,14 +783,18 @@ impl MemoryServer {
              Exact names come first (an Elixir name also matches name/arity), then names ending \
              in .query (ConsentLive finds MyAppWeb.ConsentLive), then prefix matches; matching \
              ignores case. Imports and HEEx component/slot usages are left out unless asked for \
-             with kind. Returns every match with its path, line range, and enclosing symbol, and \
-             never picks one as the resolved target; total counts matches beyond limit, and \
-             truncated means the checkout exceeded the index's file limit."
+             with kind. Returns every match and never picks one as the resolved target, as plain \
+             text with one `path:start-end<TAB>kind name[<TAB>in parent][<TAB>stale|missing]\
+             [<TAB>signature]` line per match (1-based lines; `in` names the enclosing symbol; \
+             stale or missing means the file changed after the refresh, so call again; the \
+             signature only when it adds to the name). An `<n> of <total> matches` line follows \
+             when limit cut matches off, and a `truncated:` line when the checkout exceeded the \
+             index's file limit, so a definition may be missing. No matches returns empty text."
     )]
     async fn find_symbol(
         &self,
         Parameters(input): Parameters<FindSymbolInput>,
-    ) -> Result<Json<FindSymbolOutput>, CallToolResult> {
+    ) -> Result<CallToolResult, CallToolResult> {
         let limit = input.limit.unwrap_or(20);
         if !(1..=MAX_FIND_LIMIT).contains(&limit) {
             return Err(tool_error("limit must be between 1 and 100"));
@@ -919,28 +804,9 @@ impl MemoryServer {
         let found = self
             .run_code(move |code| code.find_symbol(&directory, &query, kind.as_deref(), limit))
             .await?;
-        let matches = found
-            .hits
-            .into_iter()
-            .map(|hit| SymbolMatchRecord {
-                path: hit.path,
-                language: hit.language,
-                freshness: hit.freshness.as_str().to_owned(),
-                parent: hit.parent,
-                name: hit.symbol.name,
-                kind: hit.symbol.kind,
-                start_line: hit.symbol.start.line,
-                start_column: hit.symbol.start.column,
-                end_line: hit.symbol.end.line,
-                end_column: hit.symbol.end.column,
-                signature: hit.symbol.signature,
-            })
-            .collect();
-        Ok(Json(FindSymbolOutput {
-            matches,
-            total: found.total,
-            truncated: found.truncated,
-        }))
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            found.to_text(),
+        )]))
     }
 
     #[tool(

@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import forms (for example Bash `source`) also appear as `import` symbols in
   `code_outline` and `find_symbol`. The code index is rebuilt once on upgrade to
   pick up the new symbols.
+- The MCP `code_outline`, `code_imports`, and `find_symbol` tools answer in
+  plain text, like `code_diff` and the CLI, instead of JSON. Nesting is
+  shown by indentation, and signatures only when they add to the name.
+  Columns, outline indexes, and `fresh` markers are gone. An outline of a
+  200-symbol file shrinks from 69 KB to 9 KB on the wire.
+- `gmem code find` prints `path:start-end<TAB>kind name`, then the parent,
+  freshness, and signature only when they apply. Its `N of TOTAL matches`
+  and `truncated` notes now go to stdout. `gmem code outline` adds
+  signatures.
 
 ### Fixed
 

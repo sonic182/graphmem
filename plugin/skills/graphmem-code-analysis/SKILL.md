@@ -49,19 +49,26 @@ Matching ignores case and ranks in this order:
    `.btn, .btn-primary`.
 3. Prefix: `fetch_` finds `fetch_user`.
 
-Narrow a common name with `kind`. Raise `limit` (up to 100) when `total` is
-greater than the matches returned. Read
+Narrow a common name with `kind`. Raise `limit` (up to 100) when the result
+ends with an `<n> of <total> matches` line. Read
 [references/symbol-kinds.md](references/symbol-kinds.md) when you need a
 `kind` value for a language, or when a language's names or kinds do not look
 the way you expected.
 
 ## Gotchas
 
-- Several matches are an ambiguity to resolve with `path` and `parent`, not a
-  ranking: the first match is not the resolved target, and the tool never
-  picks one.
+- Results are plain text, one line per match or symbol:
+  `path:start-end<TAB>kind name[<TAB>in parent][<TAB>stale|missing][<TAB>signature]`
+  from `find_symbol`, and `start-end<TAB>kind name[<TAB>signature]` under a
+  `path<TAB>language<TAB>coverage` line from `code_outline`, indented two
+  spaces per nesting level. The signature is the first source line, shown only
+  when it adds parameters, types, or values to the name; a multi-line header
+  is cut after its first line.
+- Several matches are an ambiguity to resolve with the path and `in <parent>`,
+  not a ranking: the first match is not the resolved target, and the tool
+  never picks one.
 - An empty result does not prove a name is absent. It may be past
-  `[code] max_files` (`truncated: true`), in a file Git ignores, generated,
+  `[code] max_files` (a `truncated:` line), in a file Git ignores, generated,
   minified (`.min.js`, `.min.css`), or in an unsupported language. Confirm with
   `rg` before saying it does not exist.
 - Imports, HEEx `component`/`slot` usages, and EEx `expression`s are left out
@@ -72,15 +79,15 @@ the way you expected.
   an imported name to a file or dependency. Only import forms the parser
   recognises are listed, even when `coverage` is `complete`; loading through
   other APIs is not: `rg` for those when absence matters.
-- `coverage: partial: <reason>` means symbols may be missing from the outline.
+- Coverage `partial: <reason>` means symbols may be missing from the outline.
   EEx is always partial (directives only), and the SCSS grammar rejects
   `@extend %placeholder`. Fall back to reading or `rg` for the gap.
-- `freshness: stale` or `missing` means the file changed between the refresh
-  and the read. Call again rather than trusting the line numbers.
-- `code_outline` returns at most 500 symbols per call. Continue from
-  `next_offset` while it is present. With `depth`, `total` and `next_offset`
-  count only the symbols within that depth; `index` and `parent` still refer
-  to the full outline.
+- A `stale` or `missing` column on a match means the file changed between the
+  refresh and the read. Call again rather than trusting the line numbers.
+- `code_outline` returns at most 500 symbols per call. Continue from the
+  offset on the `next_offset <n> of <total>` line while it is present. With
+  `depth`, both count only the symbols within that depth, and a page can start
+  below a parent listed on an earlier page.
 - `code_diff` compares the merge base of `base` and `head`, as a PR does, and
   answers in plain text: one `path<TAB>status` line per file, then
   `  <+|-|~> start-end<TAB>kind name[<TAB>signature]` per symbol. It is

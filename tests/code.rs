@@ -314,7 +314,13 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
         "outline",
         "lib/demo_web/controllers/page_html/home.html.heex",
     ]);
-    assert!(!heex.contains(" p"), "plain tags are not symbols:\n{heex}");
+    assert!(
+        !heex.lines().any(|line| line
+            .split('\t')
+            .nth(1)
+            .is_some_and(|symbol| symbol.ends_with(" p"))),
+        "plain tags are not symbols:\n{heex}"
+    );
 }
 
 #[test]
@@ -478,14 +484,14 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
             "def factory():\n    def helper():\n        pass\n    return helper\n",
             "2-3\t  function helper",
             "helper",
-            "app/factory.py:2:5\tfunction\thelper\tfactory\tfresh\n",
+            "app/factory.py:2-3\tfunction helper\tin factory\tdef helper():\n",
         ),
         (
             "native/constants.rs",
             "mod settings {\n    const RETRIES: u8 = 3;\n}\n",
             "2-2\t  constant RETRIES",
             "RETRIES",
-            "native/constants.rs:2:5\tconstant\tRETRIES\tsettings\tfresh\n",
+            "native/constants.rs:2-2\tconstant RETRIES\tin settings\tconst RETRIES: u8\n",
         ),
     ];
     for (path, source, symbol, query, expected) in cases {
@@ -535,7 +541,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     assert!(indexed.contains("20 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
-        "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
+        "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
     );
 }
 
@@ -553,7 +559,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "hidden"]), "");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
-        "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
+        "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
     );
     assert!(
         sandbox
@@ -567,7 +573,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     fs::write(&service, source).expect("service is edited");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
-        "app/service.py:11:1\tfunction\tload_config\t\tfresh\n"
+        "app/service.py:11-12\tfunction load_config\tdef load_config(path):\n"
     );
 
     fs::remove_file(sandbox.repo.join("scripts/deploy.sh")).expect("script is deleted");
@@ -580,16 +586,16 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
 
     assert_eq!(
         sandbox.run(&["code", "find", "Helpers"]),
-        "lib/demo_web/components/core_components.ex:33:3\tmodule\t\
-         DemoWeb.CoreComponents.Helpers\tDemoWeb.CoreComponents\tfresh\n"
+        "lib/demo_web/components/core_components.ex:33-39\tmodule \
+         DemoWeb.CoreComponents.Helpers\tin DemoWeb.CoreComponents\n"
     );
     let icons = sandbox.run(&["code", "find", "icon"]);
     assert!(
         icons
-            .starts_with("lib/demo_web/components/core_components.ex:25:3\tfunction\ticon_class/1"),
+            .starts_with("lib/demo_web/components/core_components.ex:25-25\tfunction icon_class/1"),
         "{icons}"
     );
-    assert!(!icons.contains("\tcomponent\t"), "{icons}");
+    assert!(!icons.contains("\tcomponent "), "{icons}");
     assert_eq!(
         sandbox
             .run(&["code", "find", ".icon", "--kind", "component"])
@@ -662,7 +668,7 @@ fn indexes_each_linked_worktree_separately() {
     let found = sandbox.gmem(&worktree, &["code", "find", "only_in_feature"]);
     assert_eq!(
         String::from_utf8_lossy(&found.stdout),
-        "app/feature.py:1:1\tfunction\tonly_in_feature\t\tfresh\n"
+        "app/feature.py:1-2\tfunction only_in_feature\tdef only_in_feature():\n"
     );
 }
 
