@@ -325,6 +325,7 @@ fn embedding_resource_downloads_once_and_reuses_cached_revision() {
                 }
                 Err(error) => panic!("accept failed: {error}"),
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
@@ -466,6 +467,7 @@ fn repository_scopes_are_prioritized_and_isolated() {
             .access_count,
         0
     );
+    drop(database);
     drop(mcp);
     std::fs::remove_dir_all(home).expect("MCP test data is removed");
 }
