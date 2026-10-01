@@ -8,7 +8,7 @@ use std::{
 use tokio::sync::Mutex as AsyncMutex;
 
 #[cfg(feature = "code")]
-use graphmem::application::code::{CodeService, MAX_FIND_LIMIT};
+use graphmem::application::code::{self, CodeService, MAX_FIND_LIMIT};
 use graphmem::{
     Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
     StoreStats,
@@ -618,9 +618,10 @@ impl MemoryServer {
         if self.code.is_some() {
             " find_symbol finds definitions by name, code_outline lists a file's symbols, and \
              code_imports lists its declared imports, through a separate code index of the Git \
-             checkout that they keep fresh themselves (never through memory). Use them before \
-             grepping or reading whole files to locate code; use text search for call sites and \
-             references, which they do not index."
+             checkout that they keep fresh themselves (never through memory). code_diff lists the \
+             symbols changed between two revisions. Use them before grepping or reading whole \
+             files to locate code; use text search for call sites and references, which they do \
+             not index."
         } else {
             ""
         }
@@ -667,6 +668,21 @@ struct CodeImportsInput {
     #[serde(default)]
     limit: Option<usize>,
     /// Absolute path inside the Git checkout to read. Omit to use the
+    /// server's startup directory.
+    #[serde(default)]
+    root: Option<String>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CodeDiffInput {
+    /// Base revision, e.g. "main" or "HEAD~1". Its merge base with head is
+    /// compared, as in a pull request.
+    base: String,
+    /// Head revision. Defaults to "HEAD".
+    #[serde(default)]
+    head: Option<String>,
+    /// Absolute path inside the Git checkout to compare. Omit to use the
     /// server's startup directory.
     #[serde(default)]
     root: Option<String>,
@@ -764,6 +780,57 @@ struct SymbolMatchRecord {
     end_line: usize,
     end_column: usize,
     signature: String,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct SymbolChangeRecord {
+    /// "added", "removed", or "modified".
+    change: String,
+    /// Name of the enclosing symbol, such as the module or class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
+    name: String,
+    kind: String,
+    /// Lines in head, or in base for a removed symbol.
+    start_line: usize,
+    end_line: usize,
+    signature: String,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct FileDiffRecord {
+    path: String,
+    /// Path in base when the file was renamed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    old_path: Option<String>,
+    /// "added", "deleted", "modified", or "renamed".
+    status: String,
+    language: String,
+    /// "complete", or "partial: <reason>" when symbols may be missing on
+    /// either side.
+    coverage: String,
+    symbols: Vec<SymbolChangeRecord>,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct SkippedFileRecord {
+    path: String,
+    reason: String,
+}
+
+#[cfg(feature = "code")]
+#[derive(Debug, Serialize, JsonSchema)]
+struct CodeDiffOutput {
+    /// Commit compared from: the merge base of base and head.
+    base: String,
+    head: String,
+    files: Vec<FileDiffRecord>,
+    /// Changed files that were not compared, such as unsupported or binary
+    /// files.
+    skipped: Vec<SkippedFileRecord>,
 }
 
 #[cfg(feature = "code")]
@@ -924,6 +991,64 @@ impl MemoryServer {
             matches,
             total: found.total,
             truncated: found.truncated,
+        }))
+    }
+
+    #[tool(
+        name = "code_diff",
+        description = "List the symbols added, removed, or modified between two Git revisions, \
+             per changed file, by outlining both versions of each file. base is compared through \
+             its merge base with head (default HEAD), as in a pull request. This is structural, \
+             not semantic: a modified symbol's signature or own lines changed (changes inside a \
+             nested symbol are reported on that symbol only), and a renamed symbol appears as \
+             removed plus added. Lines refer to head, or to base for removed symbols. Changed \
+             files that cannot be outlined are listed in skipped. Nothing is indexed."
+    )]
+    async fn code_diff(
+        &self,
+        Parameters(input): Parameters<CodeDiffInput>,
+    ) -> Result<Json<CodeDiffOutput>, CallToolResult> {
+        let directory = code_directory(input.root)?;
+        let head = input.head.unwrap_or_else(|| "HEAD".to_owned());
+        let base = input.base;
+        let diff = tokio::task::spawn_blocking(move || code::diff(&directory, &base, &head))
+            .await
+            .map_err(|error| tool_error(format!("code diff task failed: {error}")))?
+            .map_err(|error| tool_error(error.to_string()))?;
+        let files = diff
+            .files
+            .into_iter()
+            .map(|file| FileDiffRecord {
+                path: file.path,
+                old_path: file.old_path,
+                status: file.status.as_str().to_owned(),
+                language: file.language,
+                coverage: file.coverage.as_text(),
+                symbols: file
+                    .symbols
+                    .into_iter()
+                    .map(|change| SymbolChangeRecord {
+                        change: change.change.as_str().to_owned(),
+                        parent: change.parent,
+                        name: change.symbol.name,
+                        kind: change.symbol.kind,
+                        start_line: change.symbol.start.line,
+                        end_line: change.symbol.end.line,
+                        signature: change.symbol.signature,
+                    })
+                    .collect(),
+            })
+            .collect();
+        let skipped = diff
+            .skipped
+            .into_iter()
+            .map(|(path, reason)| SkippedFileRecord { path, reason })
+            .collect();
+        Ok(Json(CodeDiffOutput {
+            base: diff.base,
+            head: diff.head,
+            files,
+            skipped,
         }))
     }
 }

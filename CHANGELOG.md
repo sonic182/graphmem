@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gmem code outline <FILE> --depth N` and the MCP `code_outline` `depth`
   argument limit how deeply nested symbols are listed; 0 returns top-level
   symbols only. Pagination counts only the symbols within that depth.
+- `gmem code diff <BASE> [HEAD]` and the MCP `code_diff` tool list the symbols
+  added, removed, or modified between the merge base of two Git revisions and
+  the head, per changed file, by outlining both versions in memory. Edits
+  inside a nested symbol are reported on that symbol only; renamed symbols
+  appear as removed plus added; unsupported and binary files are listed as
+  skipped.
 
 ### Changed
 

@@ -92,6 +92,12 @@ enum CodeCommand {
     },
     /// List the imports declared in FILE, re-indexing it first if it changed.
     Imports { file: String },
+    /// List the symbols changed between the merge base of BASE and HEAD, and HEAD.
+    Diff {
+        base: String,
+        #[arg(default_value = "HEAD")]
+        head: String,
+    },
     /// Find indexed symbols by name, exact matches first.
     Find {
         query: String,
@@ -338,6 +344,36 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
             );
             for symbol in outline.imports() {
                 println!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name);
+            }
+        }
+        CodeCommand::Diff { base, head } => {
+            let diff = graphmem::application::code::diff(&directory, &base, &head)?;
+            for (path, reason) in &diff.skipped {
+                eprintln!("skipped: {path} ({reason})");
+            }
+            for file in &diff.files {
+                let mut header = format!("{}\t{}", file.path, file.status.as_str());
+                if let Some(old_path) = &file.old_path {
+                    header.push_str(&format!(" from {old_path}"));
+                }
+                if !matches!(file.coverage, graphmem::domain::Coverage::Complete) {
+                    header.push_str(&format!("\t{}", file.coverage.as_text()));
+                }
+                println!("{header}");
+                for change in &file.symbols {
+                    let marker = match change.change {
+                        graphmem::domain::SymbolChangeKind::Added => '+',
+                        graphmem::domain::SymbolChangeKind::Removed => '-',
+                        graphmem::domain::SymbolChangeKind::Modified => '~',
+                    };
+                    println!(
+                        "  {marker} {}-{}\t{} {}",
+                        change.symbol.start.line,
+                        change.symbol.end.line,
+                        change.symbol.kind,
+                        change.symbol.name
+                    );
+                }
             }
         }
         CodeCommand::Find { query, kind, limit } => {

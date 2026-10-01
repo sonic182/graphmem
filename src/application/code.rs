@@ -8,12 +8,15 @@ use rayon::{ThreadPoolBuilder, prelude::*};
 
 use super::{ApplicationError, Result};
 use crate::{
-    domain::{CodeSymbol, Coverage, Freshness},
+    domain::{CodeSymbol, Coverage, Freshness, SymbolChange, diff_symbols},
     infrastructure::{
         code_index::{CodeIndex, FileRows, FileStamp, IndexedFile},
         config::code_config,
-        outline::{CodeLanguage, outline},
-        repository::{git_repository, list_files},
+        outline::{CodeLanguage, Outline, outline},
+        repository::{
+            ChangedFile, changed_files, file_at, git_repository, list_files, merge_base,
+            resolve_commit,
+        },
     },
 };
 
@@ -75,6 +78,41 @@ impl FileOutline {
             .enumerate()
             .filter(move |(index, _)| max.is_none_or(|max| self.depth(*index) <= max))
     }
+}
+
+pub struct CodeDiff {
+    pub base: String,
+    pub head: String,
+    pub files: Vec<FileDiff>,
+    pub skipped: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileStatus {
+    Added,
+    Deleted,
+    Modified,
+    Renamed,
+}
+
+impl FileStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Deleted => "deleted",
+            Self::Modified => "modified",
+            Self::Renamed => "renamed",
+        }
+    }
+}
+
+pub struct FileDiff {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: FileStatus,
+    pub language: String,
+    pub coverage: Coverage,
+    pub symbols: Vec<SymbolChange>,
 }
 
 pub struct SymbolHit {
@@ -325,14 +363,102 @@ fn parse_file(root: &Path, path: &str, stamp: FileStamp) -> Parsed {
             symbols,
         })
     };
-    if bytes[..bytes.len().min(8192)].contains(&0) {
-        return rows(Coverage::Skipped("binary".to_owned()), Vec::new());
+    match outline_bytes(language, &bytes) {
+        Ok((_, outline)) => rows(outline.coverage, outline.symbols),
+        Err(reason) => rows(Coverage::Skipped(reason.to_owned()), Vec::new()),
     }
-    let Ok(source) = String::from_utf8(bytes) else {
-        return rows(Coverage::Skipped("not valid UTF-8".to_owned()), Vec::new());
+}
+
+fn outline_bytes(
+    language: CodeLanguage,
+    bytes: &[u8],
+) -> std::result::Result<(&str, Outline), &'static str> {
+    if bytes[..bytes.len().min(8192)].contains(&0) {
+        return Err("binary");
+    }
+    let source = std::str::from_utf8(bytes).map_err(|_| "not valid UTF-8")?;
+    Ok((source, outline(language, source)))
+}
+
+pub fn diff(directory: &Path, base: &str, head: &str) -> Result<CodeDiff> {
+    let root = checkout_root(directory)?;
+    let resolve = |revision: &str| {
+        resolve_commit(&root, revision)
+            .ok_or_else(|| code_error(format!("{revision}: unknown revision")))
     };
-    let outline = outline(language, &source);
-    rows(outline.coverage, outline.symbols)
+    let head = resolve(head)?;
+    let base = merge_base(&root, &resolve(base)?, &head)
+        .ok_or_else(|| code_error(format!("{base} and {head} have no common ancestor")))?;
+    let changed = changed_files(&root, &base, &head)
+        .ok_or_else(|| code_error(format!("git diff failed in {}", root.display())))?;
+    let mut report = CodeDiff {
+        base,
+        head,
+        files: Vec::new(),
+        skipped: Vec::new(),
+    };
+    for file in changed {
+        match diff_file(&root, &report.base, &report.head, &file) {
+            Ok(Some(diff)) => report.files.push(diff),
+            Ok(None) => {}
+            Err(reason) => report.skipped.push((file.path, reason)),
+        }
+    }
+    Ok(report)
+}
+
+fn diff_file(
+    root: &Path,
+    base: &str,
+    head: &str,
+    file: &ChangedFile,
+) -> std::result::Result<Option<FileDiff>, String> {
+    let status = match file.status {
+        'A' => FileStatus::Added,
+        'D' => FileStatus::Deleted,
+        'M' | 'T' => FileStatus::Modified,
+        'R' => FileStatus::Renamed,
+        _ => return Ok(None),
+    };
+    let language = CodeLanguage::for_path(Path::new(&file.path))
+        .filter(|_| !is_minified(Path::new(&file.path)))
+        .ok_or("unsupported file type")?;
+    let old_path = file.old_path.as_deref().unwrap_or(&file.path);
+    let read = |commit: &str, path: &str| {
+        let bytes = file_at(root, commit, path).ok_or("git cat-file failed")?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(format!("larger than {MAX_FILE_BYTES} bytes"));
+        }
+        Ok(bytes)
+    };
+    let base_bytes = match status {
+        FileStatus::Added => Vec::new(),
+        _ => read(base, old_path)?,
+    };
+    let head_bytes = match status {
+        FileStatus::Deleted => Vec::new(),
+        _ => read(head, &file.path)?,
+    };
+    let (base_source, base_outline) = outline_bytes(language, &base_bytes)?;
+    let (head_source, head_outline) = outline_bytes(language, &head_bytes)?;
+    let coverage = [&base_outline.coverage, &head_outline.coverage]
+        .into_iter()
+        .find(|coverage| !matches!(coverage, Coverage::Complete))
+        .cloned()
+        .unwrap_or(Coverage::Complete);
+    Ok(Some(FileDiff {
+        path: file.path.clone(),
+        old_path: file.old_path.clone(),
+        status,
+        language: language.name().to_owned(),
+        coverage,
+        symbols: diff_symbols(
+            base_source,
+            &base_outline.symbols,
+            head_source,
+            &head_outline.symbols,
+        ),
+    }))
 }
 
 fn checkout_root(directory: &Path) -> Result<PathBuf> {

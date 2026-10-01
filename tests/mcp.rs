@@ -1544,6 +1544,57 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         json!({"name":"code_outline","arguments":{"path":"../home/config.toml"}}),
     );
     assert_eq!(escaped["result"]["isError"], true);
+
+    let git = |args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
+                .args(args)
+                .current_dir(&repo)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .status()
+                .expect("git runs")
+                .success()
+        );
+    };
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "base"]);
+    fs::write(
+        repo.join("lib/billing.ex"),
+        "defmodule Billing do\n  def charge(amount), do: amount * 2\nend\n",
+    )
+    .expect("source file is changed");
+    git(&["commit", "-q", "-am", "head"]);
+    let diff = mcp.request(
+        12,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"HEAD~1"}}),
+    );
+    let diff = &diff["result"]["structuredContent"];
+    assert_eq!(diff["files"].as_array().unwrap().len(), 1);
+    assert_eq!(diff["files"][0]["path"], "lib/billing.ex");
+    assert_eq!(diff["files"][0]["status"], "modified");
+    assert_eq!(
+        diff["files"][0]["symbols"],
+        json!([{
+            "change":"modified",
+            "parent":"Billing",
+            "name":"charge/1",
+            "kind":"function",
+            "start_line":2,
+            "end_line":2,
+            "signature":"def charge(amount), do: amount * 2"
+        }])
+    );
+    let injected = mcp.request(
+        13,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"--output=injected"}}),
+    );
+    assert_eq!(injected["result"]["isError"], true);
+    assert!(!repo.join("injected").exists());
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP code test data is removed");
 }

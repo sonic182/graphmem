@@ -650,6 +650,95 @@ fn indexes_each_linked_worktree_separately() {
 }
 
 #[test]
+fn diff_reports_changed_symbols_between_revisions() {
+    let sandbox = Sandbox::new("diff");
+    let repo = &sandbox.repo;
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "base"]);
+
+    let edit = |path: &str, from: &str, to: &str| {
+        let source = fs::read_to_string(repo.join(path)).expect("fixture is readable");
+        assert!(source.contains(from), "{path}: missing {from:?}");
+        fs::write(repo.join(path), source.replacen(from, to, 1)).expect("fixture is edited");
+    };
+    edit(
+        "native/lib.rs",
+        "        amount\n    }\n",
+        "        amount * 2\n    }\n\n    pub fn refund(amount: u64) -> u64 {\n        amount\n    }\n",
+    );
+    edit(
+        "native/lib.rs",
+        "fn price(&self) -> u64;",
+        "fn price(&self) -> u32;",
+    );
+    edit(
+        "native/lib.rs",
+        "\n    fn discounted(&self) -> u64 {\n        self.price() / 2\n    }\n",
+        "",
+    );
+    edit(
+        "lib/demo_web/components/core_components.ex",
+        "<button><.icon",
+        "<button class=\"primary\"><.icon",
+    );
+    edit("web/theme.css", "padding: 1rem;", "padding: 2rem;");
+    edit(
+        "lib/demo_web/controllers/page_html/home.html.heex",
+        "  <p class",
+        "  <.button phx-click=\"stop\">Stop</.button>\n  <p class",
+    );
+    git(repo, &["mv", "app/service.py", "app/billing.py"]);
+    edit("app/billing.py", "return amount", "return -amount");
+    git(repo, &["rm", "-q", "scripts/deploy.sh"]);
+    fs::write(
+        repo.join("web/refund.ts"),
+        "export function refund(): void {}\n",
+    )
+    .expect("new file is written");
+    fs::write(repo.join("README.md"), "# Demo\n").expect("unsupported file is written");
+    fs::write(repo.join("web/blob.js"), b"\0binary").expect("binary file is written");
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "head"]);
+
+    let output = sandbox.gmem(repo, &["code", "diff", "HEAD~1"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("skipped: README.md (unsupported file type)"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("skipped: web/blob.js (binary)"), "{stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "app/billing.py\trenamed from app/service.py\n\
+         \x20 ~ 5-6\tmethod charge\n\
+         lib/demo_web/components/core_components.ex\tmodified\n\
+         \x20 ~ 17-23\tfunction button/1\n\
+         lib/demo_web/controllers/page_html/home.html.heex\tmodified\n\
+         \x20 + 7-7\tcomponent .button\n\
+         native/lib.rs\tmodified\n\
+         \x20 ~ 4-6\tfunction charge\n\
+         \x20 + 8-10\tfunction refund\n\
+         \x20 ~ 30-30\tmethod price\n\
+         \x20 - 28-30\tmethod discounted\n\
+         scripts/deploy.sh\tdeleted\n\
+         \x20 - 4-6\tfunction build\n\
+         \x20 - 8-10\tfunction deploy\n\
+         \x20 - 14-14\timport ./lib.sh\n\
+         \x20 - 15-15\timport ./other.sh\n\
+         web/refund.ts\tadded\n\
+         \x20 + 1-1\tfunction refund\n\
+         web/theme.css\tmodified\n\
+         \x20 ~ 13-15\tselector .card\n"
+    );
+    assert!(
+        sandbox
+            .fail(&["code", "diff", "no-such-revision"])
+            .contains("no-such-revision: unknown revision")
+    );
+}
+
+#[test]
 fn config_can_disable_the_code_tools() {
     let sandbox = Sandbox::new("disabled");
     fs::write(

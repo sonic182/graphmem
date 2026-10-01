@@ -1,6 +1,6 @@
 const eventName = process.argv[2];
 
-const CODE = `Code navigation: when the gmem \`find_symbol\`, \`code_outline\`, and \`code_imports\` tools are listed, use them to find a definition by name or to list a file's symbols or imports before grepping or reading whole files; they keep their own index fresh. Use \`rg\`/\`ast-grep\` for plain text, call sites, and references, which they do not index. Load the \`graphmem-code-analysis\` skill for which tool fits a task and how to read their results.`;
+const CODE = `Code navigation: when the gmem \`find_symbol\`, \`code_outline\`, \`code_imports\`, and \`code_diff\` tools are listed, use them to find a definition by name, to list a file's symbols or imports, or to list the symbols changed between Git revisions before grepping or reading whole files; they keep their own index fresh. Use \`rg\`/\`ast-grep\` for plain text, call sites, and references, which they do not index. Load the \`graphmem-code-analysis\` skill for which tool fits a task and how to read their results.`;
 
 const MAIN = `Graphmem (gmem) is connected as an MCP server for durable project memory.
 

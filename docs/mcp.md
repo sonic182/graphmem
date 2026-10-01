@@ -50,7 +50,7 @@ The server exposes eight memory tools:
 
 ## Code navigation tools
 
-Binaries built with `--features code` (release binaries are) add three tools,
+Binaries built with `--features code` (release binaries are) add four tools,
 listed unless `[code] enabled = false` or `GRAPHMEM_CODE=off`; the
 `initialize` instructions then add a short note on when to use them. They use
 a separate, rebuildable index (`$GRAPHMEM_HOME/code.sqlite`) keyed by Git
@@ -106,6 +106,25 @@ large checkout ahead of time, or to see which files could not be indexed, run
   true when the checkout has more source files than `[code] max_files`, so a
   definition may be missing. `freshness` is `fresh`, or `stale`/`missing` when
   the file changed between the refresh and the read.
+- `code_diff`: lists the symbols `added`, `removed`, or `modified` between two
+  Git revisions, with `base`, optional `head` (default `HEAD`), and `root`.
+  Like a pull request, the merge base of `base` and `head` is compared with
+  `head`; the response's `base` is that merge-base commit. Both versions of
+  each changed file are outlined in memory; the index is neither read nor
+  written. Each file has a `path`, `old_path` when Git detected a rename,
+  `status` (`added`, `deleted`, `modified`, or `renamed`), `language`,
+  `coverage`, and its changed `symbols`, each with `change`, `parent`, `name`,
+  `kind`, `start_line`, `end_line`, and `signature`. Lines refer to `head`, or
+  to the merge base for removed symbols. The diff is structural, not
+  semantic: a symbol is identified by its kind, its name and its ancestors'
+  names, and its occurrence among symbols sharing those, and it is modified
+  when its signature or its own text changed. Its own text includes the
+  comment and attribute lines directly above it and excludes nested symbols,
+  whitespace, `,`, and `;`, so an edited method is reported without its
+  `impl` or module. A renamed symbol appears as removed plus added. Changed
+  files that are not supported, minified, binary, not UTF-8, or larger than
+  1 MiB are listed in `skipped` with a `reason`. Revisions starting with `-`
+  are refused.
 
 Supported files: Rust, Go, Zig, C, C++ (`.h` headers are parsed as C++),
 Python, JavaScript/JSX, TypeScript/TSX, Elixir (including `~H` sigils), HEEx,

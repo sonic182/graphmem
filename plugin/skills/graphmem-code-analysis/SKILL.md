@@ -1,6 +1,6 @@
 ---
 name: graphmem-code-analysis
-description: Locates definitions, declared imports, and file structure with the Graphmem (gmem) find_symbol, code_outline, and code_imports MCP tools, instead of grepping or reading whole files. Use when finding where a function, class, module, component, SQL object, or CSS selector is defined, listing imports declared by a file, outlining a file before reading or editing it, following a stack trace to its source, reviewing, refactoring, or renaming code, when a plan needs exact path:line citations, and whenever these tools are listed. Covers when to fall back to rg or ast-grep for call sites and references, which these tools do not index.
+description: Locates definitions, declared imports, file structure, and the symbols changed between Git revisions with the Graphmem (gmem) find_symbol, code_outline, code_imports, and code_diff MCP tools, instead of grepping or reading whole files. Use when finding where a function, class, module, component, SQL object, or CSS selector is defined, listing imports declared by a file, outlining a file before reading or editing it, following a stack trace to its source, reviewing a branch, PR, or commit, refactoring, or renaming code, when a plan needs exact path:line citations, and whenever these tools are listed. Covers when to fall back to rg or ast-grep for call sites and references, which these tools do not index.
 compatibility: Requires the Graphmem (gmem) MCP server with its code tools enabled (built with the code feature, and not turned off by `[code] enabled = false` or GRAPHMEM_CODE=off)
 ---
 
@@ -9,7 +9,9 @@ compatibility: Requires the Graphmem (gmem) MCP server with its code tools enabl
 `find_symbol` and `code_outline` read a syntax index of the Git checkout. Both
 refresh it themselves before answering, re-reading only files whose size or
 modification time changed, so there is no index step to run first.
-`code_imports` lists the imports declared in one file. These tools expose
+`code_imports` lists the imports declared in one file. `code_diff` outlines
+both versions of each file changed between two revisions, without the index,
+and lists the symbols added, removed, or modified. These tools expose
 definitions and declared imports only: they do not resolve imports to files or
 show call sites, references, types, or arbitrary text.
 
@@ -30,7 +32,7 @@ show call sites, references, types, or arbitrary text.
 | Which imports does a file declare? | MCP `code_imports` or `gmem code imports <FILE>` | inspect the import names and source ranges; this does not resolve them to files |
 | Understand or edit a large file | `code_outline` path with `depth: 0` or `1` | raise `depth` only where needed, then read only the symbols involved |
 | Stack trace or error names a function | `find_symbol` with `kind: "function"` or `"method"` | read the frame's range |
-| Review or refactor a diff | `code_outline` each changed file | `rg`/`ast-grep` for callers of what changed |
+| Review a branch, PR, or commit | `code_diff` with `base` (and `head`) | read only the changed symbols' ranges; `rg`/`ast-grep` for callers of what changed |
 | Rename, or impact of a signature change | `find_symbol` for the definition | `rg -w`/`ast-grep` for every reference |
 | Plan that cites locations | `code_outline` the files involved | cite `path:start_line` from the result |
 | Code in another checkout | either tool with `root` set to an absolute path inside it | same as above |
@@ -79,6 +81,11 @@ the way you expected.
   `next_offset` while it is present. With `depth`, `total` and `next_offset`
   count only the symbols within that depth; `index` and `parent` still refer
   to the full outline.
+- `code_diff` compares the merge base of `base` and `head`, as a PR does. It is
+  structural: a renamed symbol shows as removed plus added, and an edit inside
+  a nested symbol is reported on that symbol only, not on its parents. Lines
+  refer to `head`, or to the merge base for removed symbols. Files it could
+  not outline are in `skipped`; read their `git diff` instead.
 - `.h` headers are parsed as C++. HTML and HEEx `<script>`/`<style>` bodies are
   outlined at their real lines in the file, including inside Elixir `~H`.
 - The first call in a large checkout that was never indexed can be slow. To

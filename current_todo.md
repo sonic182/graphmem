@@ -108,7 +108,16 @@ target.
 
 ---
 
-## [ ] P1 — Structural code diff
+## [x] P1 — Structural code diff
+
+**Completed on branch feat/outline-depth-and-code-diff.** `gmem code diff
+<BASE> [HEAD]` and the code_diff MCP tool compare the merge base with head,
+outline both versions in memory, and never touch code.sqlite. A symbol is
+modified when its signature or own text changed: its span plus the comment and
+attribute lines directly above it, minus nested symbols, whitespace, `,`, and
+`;`, so edits are not reported on enclosing impls or modules. The CLI has no
+--json yet (the MCP tool returns JSON), head cannot be the working tree, and
+the MCP response is not paginated.
 
 Add a structural view of changes between two Git revisions. Git diff shows
 changed lines; Graphmem should show which symbols changed without explaining
@@ -158,17 +167,17 @@ a removed old name and an added new name; that is acceptable.
 
 ### Files and tests
 
-- [ ] Handle added, deleted, modified, and Git-renamed files (a rename may be
-  represented as delete plus add).
-- [ ] Ignore binary files and unsupported languages.
-- [ ] Test added and removed functions.
-- [ ] Test signature and body changes.
-- [ ] Test changed classes and modules.
-- [ ] Test added and deleted files.
-- [ ] Test nested symbols.
-- [ ] Test Elixir multiple clauses.
-- [ ] Test HEEx and other templates.
-- [ ] Test CSS and SCSS.
+- [x] Handle added, deleted, modified, and Git-renamed files (renames are
+  detected with git -M and compared old path against new path).
+- [x] Ignore binary files and unsupported languages (listed as skipped).
+- [x] Test added and removed functions.
+- [x] Test signature and body changes.
+- [x] Test changed classes and modules.
+- [x] Test added and deleted files.
+- [x] Test nested symbols.
+- [x] Test Elixir multiple clauses.
+- [x] Test HEEx and other templates.
+- [x] Test CSS (SCSS shares the same style outliner).
 
 Do not implement call-graph impact, affected callers, semantic explanations,
 memory invalidation, LLM summaries, or sophisticated rename detection yet.
@@ -356,4 +365,5 @@ measurements show a concrete need.
 **Suggested next priorities:** code_outline depth and structural code_diff.
 The depth option may offer a strong value-to-effort ratio because symbol
 parents are already stored as parent_ordinal. Code-index spawn_blocking,
-declared-import listing, and code_outline depth are complete.
+declared-import listing, code_outline depth, and structural code_diff are
+complete.
