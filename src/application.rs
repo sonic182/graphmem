@@ -1489,6 +1489,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert!(service.embedder.is_none());
+        drop(service);
         fs::remove_dir_all(root).expect("test data directory is removed");
     }
 

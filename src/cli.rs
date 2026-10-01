@@ -85,9 +85,19 @@ enum CodeCommand {
     /// Index the Git checkout containing PATH (default: the current directory).
     Index { path: Option<std::path::PathBuf> },
     /// List the symbols in FILE, re-indexing it first if it changed.
-    Outline { file: String },
+    Outline {
+        file: String,
+        #[arg(long)]
+        depth: Option<usize>,
+    },
     /// List the imports declared in FILE, re-indexing it first if it changed.
     Imports { file: String },
+    /// List the symbols changed between the merge base of BASE and HEAD, and HEAD.
+    Diff {
+        base: String,
+        #[arg(default_value = "HEAD")]
+        head: String,
+    },
     /// Find indexed symbols by name, exact matches first.
     Find {
         query: String,
@@ -305,60 +315,23 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
                 eprintln!("failed: {failure}");
             }
         }
-        CodeCommand::Outline { file } => {
+        CodeCommand::Outline { file, depth } => {
             let outline = service.outline(&directory, &file)?;
-            println!(
-                "{}\t{}\t{}",
-                outline.path,
-                outline.language,
-                outline.coverage.as_text()
-            );
-            for symbol in &outline.symbols {
-                let depth =
-                    std::iter::successors(symbol.parent, |&parent| outline.symbols[parent].parent)
-                        .count();
-                println!(
-                    "{}-{}\t{}{} {}",
-                    symbol.start.line,
-                    symbol.end.line,
-                    "  ".repeat(depth),
-                    symbol.kind,
-                    symbol.name
-                );
-            }
+            print!("{}", outline.to_text(depth, 0, usize::MAX));
         }
         CodeCommand::Imports { file } => {
             let outline = service.outline(&directory, &file)?;
-            println!(
-                "{}\t{}\t{}",
-                outline.path,
-                outline.language,
-                outline.coverage.as_text()
+            print!("{}", outline.imports_text(0, usize::MAX));
+        }
+        CodeCommand::Diff { base, head } => {
+            print!(
+                "{}",
+                graphmem::application::code::diff(&directory, &base, &head, usize::MAX)?.to_text()
             );
-            for symbol in outline.imports() {
-                println!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name);
-            }
         }
         CodeCommand::Find { query, kind, limit } => {
             let found = service.find_symbol(&directory, &query, kind.as_deref(), limit)?;
-            if found.truncated {
-                eprintln!("warning: too many source files; some were not indexed");
-            }
-            if found.total > found.hits.len() {
-                eprintln!("showing {} of {} matches", found.hits.len(), found.total);
-            }
-            for hit in found.hits {
-                println!(
-                    "{}:{}:{}\t{}\t{}\t{}\t{}",
-                    hit.path,
-                    hit.symbol.start.line,
-                    hit.symbol.start.column,
-                    hit.symbol.kind,
-                    hit.symbol.name,
-                    hit.parent.unwrap_or_default(),
-                    hit.freshness.as_str()
-                );
-            }
+            print!("{}", found.to_text());
         }
     }
     Ok(())

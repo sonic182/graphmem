@@ -14,7 +14,7 @@ Update, do not duplicate: recall the topic first, and when a stored memory is no
 
 Skip both for logistical or no-code requests, and when Graphmem is unavailable. Never store secrets, private data, speculation, temporary progress updates, raw debugging output, or source code that can be read from the repository.
 
-Code navigation: when the gmem \`find_symbol\`, \`code_outline\`, and \`code_imports\` tools are listed, use them to find a definition by name or to list a file's symbols or imports before grepping or reading whole files; they keep their own index fresh. Use \`rg\`/\`ast-grep\` for plain text, call sites, and references, which they do not index. Load the \`graphmem-code-analysis\` skill for which tool fits a task and how to read their results.
+Code navigation: when the gmem \`find_symbol\`, \`code_outline\`, \`code_imports\`, and \`code_diff\` tools are listed, use them to find a definition by name, to list a file's symbols or imports, or to list the symbols changed between Git revisions before grepping or reading whole files; they keep their own index fresh. Use \`rg\`/\`ast-grep\` for plain text, call sites, and references, which they do not index. Before the first code lookup of the session, load the \`graphmem-code-analysis\` skill for which tool fits a task and how to read their results.
 
 Load the \`graphmem-mcp-for-dev\` skill for the full contract before storing anything, or before using \`update\`, \`relate\`, \`graph\`, \`inspect\`, or \`forget\`.`;
 

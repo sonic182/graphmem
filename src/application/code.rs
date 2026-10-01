@@ -8,12 +8,17 @@ use rayon::{ThreadPoolBuilder, prelude::*};
 
 use super::{ApplicationError, Result};
 use crate::{
-    domain::{CodeSymbol, Coverage, Freshness},
+    domain::{
+        CodeSymbol, Coverage, Freshness, SymbolChange, SymbolChangeKind, diff_symbols, nest_symbols,
+    },
     infrastructure::{
         code_index::{CodeIndex, FileRows, FileStamp, IndexedFile},
         config::code_config,
-        outline::{CodeLanguage, outline},
-        repository::{git_repository, list_files},
+        outline::{CodeLanguage, Outline, outline},
+        repository::{
+            ChangedFile, changed_files, file_at, git_repository, list_files, merge_base,
+            resolve_commit,
+        },
     },
 };
 
@@ -58,6 +63,239 @@ impl FileOutline {
     pub fn imports(&self) -> impl Iterator<Item = &CodeSymbol> {
         self.symbols.iter().filter(|symbol| symbol.kind == "import")
     }
+
+    /// How many enclosing symbols the symbol at `index` has.
+    pub fn depth(&self, index: usize) -> usize {
+        std::iter::successors(self.symbols[index].parent, |&parent| {
+            self.symbols[parent].parent
+        })
+        .count()
+    }
+
+    /// The symbols nested at most `max` levels deep, with their outline
+    /// index; every symbol when `max` is `None`.
+    pub fn within_depth(&self, max: Option<usize>) -> impl Iterator<Item = (usize, &CodeSymbol)> {
+        self.symbols
+            .iter()
+            .enumerate()
+            .filter(move |(index, _)| max.is_none_or(|max| self.depth(*index) <= max))
+    }
+
+    pub fn to_text(&self, depth: Option<usize>, offset: usize, limit: usize) -> String {
+        let total = self.within_depth(depth).count();
+        let lines = self
+            .within_depth(depth)
+            .skip(offset)
+            .take(limit)
+            .map(|(index, symbol)| {
+                let mut line = format!(
+                    "{}-{}\t{}{} {}",
+                    symbol.start.line,
+                    symbol.end.line,
+                    "  ".repeat(self.depth(index)),
+                    symbol.kind,
+                    symbol.name
+                );
+                if let Some(signature) = shown_signature(symbol) {
+                    line.push('\t');
+                    line.push_str(signature);
+                }
+                line
+            });
+        self.page_text(lines, offset, limit, total)
+    }
+
+    pub fn imports_text(&self, offset: usize, limit: usize) -> String {
+        let total = self.imports().count();
+        let lines =
+            self.imports().skip(offset).take(limit).map(|symbol| {
+                format!("{}-{}\t{}", symbol.start.line, symbol.end.line, symbol.name)
+            });
+        self.page_text(lines, offset, limit, total)
+    }
+
+    fn page_text(
+        &self,
+        lines: impl Iterator<Item = String>,
+        offset: usize,
+        limit: usize,
+        total: usize,
+    ) -> String {
+        let mut text = format!(
+            "{}\t{}\t{}\n",
+            display_path(&self.path),
+            self.language,
+            self.coverage.as_text()
+        );
+        for line in lines {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        let next_offset = offset.saturating_add(limit);
+        if next_offset < total {
+            text.push_str(&format!("next_offset {next_offset} of {total}\n"));
+        }
+        text
+    }
+}
+
+impl FoundSymbols {
+    pub fn to_text(&self) -> String {
+        let mut text = String::new();
+        for hit in &self.hits {
+            let symbol = &hit.symbol;
+            text.push_str(&format!(
+                "{}:{}-{}\t{} {}",
+                display_path(&hit.path),
+                symbol.start.line,
+                symbol.end.line,
+                symbol.kind,
+                symbol.name
+            ));
+            if let Some(parent) = &hit.parent {
+                text.push_str("\tin ");
+                text.push_str(parent);
+            }
+            if hit.freshness != Freshness::Fresh {
+                text.push('\t');
+                text.push_str(hit.freshness.as_str());
+            }
+            if let Some(signature) = shown_signature(symbol) {
+                text.push('\t');
+                text.push_str(signature);
+            }
+            text.push('\n');
+        }
+        if self.total > self.hits.len() {
+            text.push_str(&format!(
+                "{} of {} matches; raise limit for more\n",
+                self.hits.len(),
+                self.total
+            ));
+        }
+        if self.truncated {
+            text.push_str(
+                "truncated: more source files than [code] max_files; a definition may be missing\n",
+            );
+        }
+        text
+    }
+}
+
+fn shown_signature(symbol: &CodeSymbol) -> Option<&str> {
+    let words = |text: &str| {
+        text.chars()
+            .filter(|character| character.is_alphanumeric())
+            .collect::<String>()
+    };
+    (symbol.kind != "import"
+        && symbol.signature.contains(['(', ':', '<', '=', ','])
+        && words(&symbol.signature) != words(&symbol.name))
+    .then_some(symbol.signature.as_str())
+}
+
+fn display_path(path: &str) -> String {
+    if path.contains(char::is_control) {
+        format!("{path:?}")
+    } else {
+        path.to_owned()
+    }
+}
+
+pub struct CodeDiff {
+    pub base: String,
+    pub head: String,
+    pub files: Vec<FileDiff>,
+    pub skipped: Vec<(String, String)>,
+    pub total: usize,
+}
+
+impl CodeDiff {
+    pub fn to_text(&self) -> String {
+        let short = |commit: &str| commit[..commit.len().min(12)].to_owned();
+        let mut lines = vec![format!(
+            "merge base {} head {}",
+            short(&self.base),
+            short(&self.head)
+        )];
+        for file in &self.files {
+            let mut header = format!("{}\t{}", display_path(&file.path), file.status.as_str());
+            if let Some(old_path) = &file.old_path {
+                header.push_str(" from ");
+                header.push_str(&display_path(old_path));
+            }
+            if !matches!(file.coverage, Coverage::Complete) {
+                header.push('\t');
+                header.push_str(&file.coverage.as_text());
+            }
+            lines.push(header);
+            for change in &file.symbols {
+                let symbol = &change.symbol;
+                let marker = match change.change {
+                    SymbolChangeKind::Added => '+',
+                    SymbolChangeKind::Removed => '-',
+                    SymbolChangeKind::Modified => '~',
+                };
+                let mut line = format!(
+                    "  {marker} {}-{}\t{} {}",
+                    symbol.start.line, symbol.end.line, symbol.kind, symbol.name
+                );
+                if change.change != SymbolChangeKind::Removed
+                    && let Some(signature) = shown_signature(symbol)
+                {
+                    line.push('\t');
+                    line.push_str(signature);
+                }
+                lines.push(line);
+            }
+        }
+        let mut reasons: Vec<(&str, Vec<String>)> = Vec::new();
+        for (skipped, reason) in &self.skipped {
+            match reasons.iter_mut().find(|(known, _)| known == reason) {
+                Some((_, paths)) => paths.push(display_path(skipped)),
+                None => reasons.push((reason, vec![display_path(skipped)])),
+            }
+        }
+        for (reason, paths) in reasons {
+            lines.push(format!("skipped ({reason}): {}", paths.join(", ")));
+        }
+        let shown = self.files.len() + self.skipped.len();
+        if shown < self.total {
+            lines.push(format!(
+                "{shown} of {} changed files; raise limit or narrow base and head for more",
+                self.total
+            ));
+        }
+        lines.push(String::new());
+        lines.join("\n")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileStatus {
+    Added,
+    Deleted,
+    Modified,
+    Renamed,
+}
+
+impl FileStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Deleted => "deleted",
+            Self::Modified => "modified",
+            Self::Renamed => "renamed",
+        }
+    }
+}
+
+pub struct FileDiff {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: FileStatus,
+    pub coverage: Coverage,
+    pub symbols: Vec<SymbolChange>,
 }
 
 pub struct SymbolHit {
@@ -308,14 +546,127 @@ fn parse_file(root: &Path, path: &str, stamp: FileStamp) -> Parsed {
             symbols,
         })
     };
-    if bytes[..bytes.len().min(8192)].contains(&0) {
-        return rows(Coverage::Skipped("binary".to_owned()), Vec::new());
+    match outline_bytes(language, &bytes) {
+        Ok((_, outline)) => rows(outline.coverage, outline.symbols),
+        Err(reason) => rows(Coverage::Skipped(reason.to_owned()), Vec::new()),
     }
-    let Ok(source) = String::from_utf8(bytes) else {
-        return rows(Coverage::Skipped("not valid UTF-8".to_owned()), Vec::new());
+}
+
+fn outline_bytes(
+    language: CodeLanguage,
+    bytes: &[u8],
+) -> std::result::Result<(&str, Outline), &'static str> {
+    if bytes[..bytes.len().min(8192)].contains(&0) {
+        return Err("binary");
+    }
+    let source = std::str::from_utf8(bytes).map_err(|_| "not valid UTF-8")?;
+    Ok((source, outline(language, source)))
+}
+
+pub fn diff(directory: &Path, base: &str, head: &str, limit: usize) -> Result<CodeDiff> {
+    let root = checkout_root(directory)?;
+    let resolve = |revision: &str| {
+        resolve_commit(&root, revision)
+            .ok_or_else(|| code_error(format!("{revision}: unknown revision")))
     };
-    let outline = outline(language, &source);
-    rows(outline.coverage, outline.symbols)
+    let head_commit = resolve(head)?;
+    let base = merge_base(&root, &resolve(base)?, &head_commit)
+        .ok_or_else(|| code_error(format!("{base} and {head} have no common ancestor")))?;
+    let head = head_commit;
+    let changed = changed_files(&root, &base, &head)
+        .ok_or_else(|| code_error(format!("git diff failed in {}", root.display())))?;
+    let mut report = CodeDiff {
+        base,
+        head,
+        files: Vec::new(),
+        skipped: Vec::new(),
+        total: changed.len(),
+    };
+    for file in changed.into_iter().take(limit) {
+        match diff_file(&root, &report.base, &report.head, &file) {
+            Ok(diff) => report.files.push(diff),
+            Err(reason) => report.skipped.push((file.path, reason)),
+        }
+    }
+    Ok(report)
+}
+
+fn diff_file(
+    root: &Path,
+    base: &str,
+    head: &str,
+    file: &ChangedFile,
+) -> std::result::Result<FileDiff, String> {
+    if !file.utf8 {
+        return Err("path not valid UTF-8".to_owned());
+    }
+    let status = match file.status {
+        'A' | 'C' => FileStatus::Added,
+        'D' => FileStatus::Deleted,
+        'M' => FileStatus::Modified,
+        'R' => FileStatus::Renamed,
+        'T' => return Err("file type changed".to_owned()),
+        other => return Err(format!("git status {other}")),
+    };
+    let language = CodeLanguage::for_path(Path::new(&file.path))
+        .filter(|_| !is_minified(Path::new(&file.path)))
+        .ok_or("unsupported file type")?;
+    let old_path = file.old_path.as_deref().unwrap_or(&file.path);
+    let base_language = CodeLanguage::for_path(Path::new(old_path)).unwrap_or(language);
+    let read = |commit: &str, path: &str| {
+        let bytes = file_at(root, commit, path).ok_or("git cat-file failed")?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(format!("larger than {MAX_FILE_BYTES} bytes"));
+        }
+        Ok(bytes)
+    };
+    let base_bytes = match status {
+        FileStatus::Added => Vec::new(),
+        _ => read(base, old_path)?,
+    };
+    let head_bytes = match status {
+        FileStatus::Deleted => Vec::new(),
+        _ => read(head, &file.path)?,
+    };
+    let (base_source, base_outline) = outline_bytes(base_language, &base_bytes)?;
+    let (head_source, head_outline) = outline_bytes(language, &head_bytes)?;
+    let coverage = [&base_outline.coverage, &head_outline.coverage]
+        .into_iter()
+        .find(|coverage| !matches!(coverage, Coverage::Complete))
+        .cloned()
+        .unwrap_or(Coverage::Complete);
+    Ok(FileDiff {
+        path: file.path.clone(),
+        old_path: file.old_path.clone(),
+        status,
+        coverage,
+        symbols: diff_symbols(
+            base_source,
+            &definitions(base_outline.symbols),
+            head_source,
+            &definitions(head_outline.symbols),
+        ),
+    })
+}
+
+fn definitions(symbols: Vec<CodeSymbol>) -> Vec<CodeSymbol> {
+    let usage =
+        |symbol: &CodeSymbol| matches!(symbol.kind.as_str(), "component" | "slot" | "expression");
+    let inside_definition = symbols
+        .iter()
+        .map(|symbol| {
+            std::iter::successors(symbol.parent, |&parent| symbols[parent].parent)
+                .any(|parent| !usage(&symbols[parent]))
+        })
+        .collect::<Vec<_>>();
+    let mut kept = symbols
+        .into_iter()
+        .zip(inside_definition)
+        .filter(|(symbol, inside)| !(usage(symbol) && *inside))
+        .map(|(symbol, _)| symbol)
+        .collect::<Vec<_>>();
+    nest_symbols(&mut kept);
+    kept
 }
 
 fn checkout_root(directory: &Path) -> Result<PathBuf> {
@@ -357,7 +708,12 @@ fn checkout_path(root: &Path, path: &str) -> Result<String> {
     let relative = resolved
         .strip_prefix(root)
         .map_err(|_| code_error(format!("{path}: outside the checkout {}", root.display())))?;
-    root_key(relative)
+    relative
+        .iter()
+        .map(|part| part.to_str())
+        .collect::<Option<Vec<_>>>()
+        .map(|parts| parts.join("/"))
+        .ok_or_else(|| code_error(format!("{} is not valid UTF-8", relative.display())))
 }
 
 fn is_minified(path: &Path) -> bool {

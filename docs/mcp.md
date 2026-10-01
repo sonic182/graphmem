@@ -50,7 +50,7 @@ The server exposes eight memory tools:
 
 ## Code navigation tools
 
-Binaries built with `--features code` (release binaries are) add three tools,
+Binaries built with `--features code` (release binaries are) add four tools,
 listed unless `[code] enabled = false` or `GRAPHMEM_CODE=off`; the
 `initialize` instructions then add a short note on when to use them. They use
 a separate, rebuildable index (`$GRAPHMEM_HOME/code.sqlite`) keyed by Git
@@ -66,18 +66,33 @@ large checkout ahead of time, or to see which files could not be indexed, run
 
 - `code_outline`: lists the definitions in `path` (relative to the checkout
   root, or absolute inside it), with optional `offset`, `limit` (1 to 500,
-  default 200), and `root` (an absolute directory inside another checkout;
-  defaults to the server's startup directory). Each symbol has an `index`, the
-  `index` of its syntactic `parent`, `name`, `kind`, 1-based
-  `start_line`/`start_column`/`end_line`/`end_column`, and a one-line
-  `signature`. The file is re-indexed first when it changed, so the result
-  always matches it. `coverage` is `complete`, or `partial: <reason>` when
-  syntax errors or template limits may hide symbols. Paths containing `..`,
-  symlinks, and paths that resolve outside the checkout are refused.
+  default 200), `depth` (0 for top-level symbols only, 1 adds their direct
+  children; omitted for every level), and `root` (an absolute directory inside
+  another checkout; defaults to the server's startup directory). The file is
+  re-indexed first when it changed, so the result always matches it. Like the
+  other code tools, the result is plain text with no structured content:
+
+  ```text
+  lib/billing.ex	elixir	complete
+  1-3	module Billing
+  2-2	  function charge/1	def charge(amount), do: amount
+  next_offset 200 of 214
+  ```
+
+  The first line is the path, language, and `coverage`: `complete`, or
+  `partial: <reason>` when syntax errors or template limits may hide symbols.
+  Each symbol line is its 1-based line range, a tab, two spaces per nesting
+  level, its kind and name, and a tab and its first source line (the
+  signature) when that shows parameters, types, or values the name does not
+  (never for imports, whose name is the declaration).
+  A `next_offset <n> of <total>` line follows when more symbols remain; with
+  `depth`, both count only the symbols within that depth. Paths containing
+  `..`, symlinks, and paths that resolve outside the checkout are refused.
 - `code_imports`: lists the imports declared in `path`, with optional `offset`
   and `limit` (1 to 500, default 200), and `root` using the same path rules as
-  `code_outline`. Each import has a `name`, `start_line`, and `end_line`;
-  `total` and `next_offset` describe pagination. The file is refreshed before
+  `code_outline`. The text starts with the same path, language, and coverage
+  line, then one `start-end<TAB>name` line per import, and the same
+  `next_offset` line when more remain. The file is refreshed before
   returning results. `coverage` is `partial` only when syntax errors or
   template limits may hide imports; `complete` does not mean every way of
   loading code is recognised. Listed forms include Rust `use` and
@@ -98,12 +113,65 @@ large checkout ahead of time, or to see which files could not be indexed, run
   ending in `.query` (`ConsentLive` finds `MyAppWeb.ConsentLive`, and
   `users` finds `public.users`), then prefix matches; matching ignores case.
   Imports, HEEx `component`/`slot` usages, and EEx `expression`s are returned
-  only when `kind` asks for them. Every match is returned with its `path`,
-  range, and `parent` name; none is presented as the resolved target.
-  `total` counts all matches, including those past `limit`; `truncated` is
-  true when the checkout has more source files than `[code] max_files`, so a
-  definition may be missing. `freshness` is `fresh`, or `stale`/`missing` when
-  the file changed between the refresh and the read.
+  only when `kind` asks for them. Every match is returned, one line each, and
+  none is presented as the resolved target:
+
+  ```text
+  lib/billing.ex:2-2	function charge/1	in Billing	def charge(amount), do: amount
+  app/service.py:9-10	function load_config	def load_config(path):
+  20 of 35 matches; raise limit for more
+  ```
+
+  A match line is the path and 1-based line range, a tab, and the kind and
+  name, followed by tab-separated `in <parent>` when the symbol is nested,
+  `stale` or `missing` when the file changed between the refresh and the
+  read, and the signature under the same rule as `code_outline`. An
+  `<n> of <total> matches` line follows when `limit` cut matches off, and a
+  `truncated:` line when the checkout has more source files than
+  `[code] max_files`, so a definition may be missing. No match returns empty
+  text.
+- `code_diff`: lists the symbols `added`, `removed`, or `modified` between two
+  Git revisions, with `base`, optional `head` (default `HEAD`), `limit` (1 to
+  1000 changed files, default 200), and `root`. When more files changed, the
+  first `limit` are reported and a final `<n> of <total> changed files` line
+  says how many were left out.
+  Like a pull request, the merge base of `base` and `head` is compared with
+  `head`. Both versions of each changed file are outlined in memory; the index
+  is neither read nor written. The result is plain text:
+
+  ```text
+  merge base a9c4b016dd43 head a51919589c13
+  minibot/llm/tools/bash.py	modified
+    ~ 67-148	method _handle	async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+    - 215-232	method _truncate_output
+  minibot/shared/subprocess_utils.py	modified
+    + 11-32	function truncate_subprocess_output	def truncate_subprocess_output(
+  skipped (unsupported file type): todos/ROADMAP.md
+  ```
+
+  Each file line is the path, a tab, and its status: `added`, `deleted`,
+  `modified`, or `renamed from <old path>`. A third column is added when
+  coverage is `partial: <reason>`. Each symbol line is `+`, `-`, or `~`, its
+  line range, a tab, its kind and name, and, for added and modified symbols,
+  a tab and its signature when that shows parameters, types, or values the
+  name does not. Lines refer to `head`, or to the merge base for removed
+  symbols. HEEx component and slot usages inside a definition (such as a `~H`
+  sigil) are left out, so a template edit shows on the enclosing function;
+  top-level components of `.heex` files are kept. The diff is structural, not
+  semantic: a symbol is identified by its kind, its name and its ancestors'
+  names, and its occurrence among symbols sharing those, and it is modified
+  when its signature or its own text changed. Its own text includes the
+  comment and attribute lines directly above it and excludes nested symbols,
+  so an edited method is reported without its `impl` or module. Blank lines,
+  repeated spaces inside a line, and the `,` and `;` that separate nested
+  symbols are ignored; indentation is
+  compared, so re-indenting Python counts as a change. A renamed symbol
+  appears as removed plus added. Changed files that are not supported,
+  minified, binary, not UTF-8 (content or path), larger than 1 MiB, or whose
+  type changed (for example into a symlink) are listed on
+  `skipped (<reason>): …` lines. Paths with control characters are printed
+  quoted and escaped. Revisions starting with
+  `-` are refused. `gmem code diff <BASE> [HEAD]` prints the same text.
 
 Supported files: Rust, Go, Zig, C, C++ (`.h` headers are parsed as C++),
 Python, JavaScript/JSX, TypeScript/TSX, Elixir (including `~H` sigils), HEEx,

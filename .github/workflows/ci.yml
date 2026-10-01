@@ -8,13 +8,19 @@ permissions:
   contents: read
 
 jobs:
-  windows:
-    runs-on: windows-2025
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --locked --features code
+      - run: cargo nextest run --workspace --locked --features code --no-fail-fast --no-tests=pass
 
   checks:
     runs-on: ubuntu-latest

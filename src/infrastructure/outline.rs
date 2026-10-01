@@ -449,8 +449,8 @@ fn signature(text: &str) -> String {
     line.chars().take(160).collect()
 }
 
-fn has_errors<D: Doc>(root: &Node<'_, D>) -> bool {
-    root.dfs().any(|node| node.is_error() || node.is_missing())
+fn has_errors<L: LanguageExt>(root: &Node<'_, StrDoc<L>>) -> bool {
+    root.get_inner_node().has_error()
 }
 
 macro_rules! grammar {
@@ -647,7 +647,11 @@ fn heex(source: &str, origin: Origin, symbols: &mut Vec<CodeSymbol>) -> bool {
 }
 
 /// SCSS extends the CSS grammar, so one walk covers both.
-fn styles<D: Doc>(root: Node<'_, D>, origin: Origin, symbols: &mut Vec<CodeSymbol>) -> bool {
+fn styles<L: LanguageExt>(
+    root: Node<'_, StrDoc<L>>,
+    origin: Origin,
+    symbols: &mut Vec<CodeSymbol>,
+) -> bool {
     for node in root.dfs() {
         let child = |kind: &str| node.children().find(|child| child.kind() == kind);
         let node_kind = node.kind();

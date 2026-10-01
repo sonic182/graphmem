@@ -44,6 +44,95 @@ pub fn list_files(checkout_root: &Path) -> Option<Vec<PathBuf>> {
     )
 }
 
+#[cfg(feature = "code")]
+pub fn resolve_commit(checkout_root: &Path, revision: &str) -> Option<String> {
+    if revision.starts_with('-') {
+        return None;
+    }
+    let commit = format!("{revision}^{{commit}}");
+    let id = git(
+        checkout_root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &commit,
+        ],
+    )?;
+    Some(id.trim_end().to_owned())
+}
+
+#[cfg(feature = "code")]
+pub fn merge_base(checkout_root: &Path, base: &str, head: &str) -> Option<String> {
+    let id = git(checkout_root, &["merge-base", base, head])?;
+    Some(id.trim_end().to_owned())
+}
+
+#[cfg(feature = "code")]
+pub struct ChangedFile {
+    pub status: char,
+    pub old_path: Option<String>,
+    pub path: String,
+    pub utf8: bool,
+}
+
+#[cfg(feature = "code")]
+pub fn changed_files(checkout_root: &Path, base: &str, head: &str) -> Option<Vec<ChangedFile>> {
+    let output = git_output(
+        checkout_root,
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "-M",
+            "--no-ext-diff",
+            base,
+            head,
+        ],
+    )?;
+    let mut fields = output
+        .split(|&byte| byte == 0)
+        .filter(|field| !field.is_empty())
+        .map(|field| {
+            (
+                String::from_utf8_lossy(field).into_owned(),
+                str::from_utf8(field).is_ok(),
+            )
+        });
+    let mut files = Vec::new();
+    while let Some((status, _)) = fields.next() {
+        let status = status.chars().next()?;
+        let (first, first_utf8) = fields.next()?;
+        files.push(if matches!(status, 'R' | 'C') {
+            let (path, utf8) = fields.next()?;
+            ChangedFile {
+                status,
+                old_path: Some(first),
+                path,
+                utf8: utf8 && first_utf8,
+            }
+        } else {
+            ChangedFile {
+                status,
+                old_path: None,
+                path: first,
+                utf8: first_utf8,
+            }
+        });
+    }
+    Some(files)
+}
+
+#[cfg(feature = "code")]
+pub fn file_at(checkout_root: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
+    // ponytail: one git process per file version; git cat-file --batch if large PRs are slow
+    git_output(
+        checkout_root,
+        &["cat-file", "blob", &format!("{commit}:{path}")],
+    )
+}
+
 fn git(directory: &Path, args: &[&str]) -> Option<String> {
     String::from_utf8(git_output(directory, args)?).ok()
 }

@@ -314,7 +314,41 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
         "outline",
         "lib/demo_web/controllers/page_html/home.html.heex",
     ]);
-    assert!(!heex.contains(" p"), "plain tags are not symbols:\n{heex}");
+    assert!(
+        !heex.lines().any(|line| line
+            .split('\t')
+            .nth(1)
+            .is_some_and(|symbol| symbol.ends_with(" p"))),
+        "plain tags are not symbols:\n{heex}"
+    );
+}
+
+#[test]
+fn outline_depth_limits_nesting() {
+    let sandbox = Sandbox::new("outline-depth");
+    let path = "lib/demo_web/components/core_components.ex";
+    let top = sandbox.run(&["code", "outline", path, "--depth", "0"]);
+    assert_eq!(
+        top.lines().skip(1).collect::<Vec<_>>(),
+        [
+            "1-40\tmodule DemoWeb.CoreComponents",
+            "42-42\timport Logger"
+        ],
+        "{top}"
+    );
+    let children = sandbox.run(&["code", "outline", path, "--depth", "1"]);
+    for line in [
+        "8-15\t  function flash/1",
+        "33-39\t  module DemoWeb.CoreComponents.Helpers",
+    ] {
+        assert!(children.contains(line), "missing {line:?} in\n{children}");
+    }
+    for line in ["component .icon", "function hide/2"] {
+        assert!(
+            !children.contains(line),
+            "unexpected {line:?} in\n{children}"
+        );
+    }
 }
 
 #[test]
@@ -450,14 +484,14 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
             "def factory():\n    def helper():\n        pass\n    return helper\n",
             "2-3\t  function helper",
             "helper",
-            "app/factory.py:2:5\tfunction\thelper\tfactory\tfresh\n",
+            "app/factory.py:2-3\tfunction helper\tin factory\tdef helper():\n",
         ),
         (
             "native/constants.rs",
             "mod settings {\n    const RETRIES: u8 = 3;\n}\n",
             "2-2\t  constant RETRIES",
             "RETRIES",
-            "native/constants.rs:2:5\tconstant\tRETRIES\tsettings\tfresh\n",
+            "native/constants.rs:2-2\tconstant RETRIES\tin settings\tconst RETRIES: u8\n",
         ),
     ];
     for (path, source, symbol, query, expected) in cases {
@@ -472,7 +506,24 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
     }
 }
 
-#[cfg(unix)]
+#[test]
+fn syntax_errors_and_missing_nodes_mark_the_outline_partial() {
+    let sandbox = Sandbox::new("syntax-errors");
+    let cases = [
+        ("app/broken.ts", "function f( {\n"),
+        ("native/missing.rs", "fn main() { let x = 1 }\n"),
+    ];
+    for (path, source) in cases {
+        fs::write(sandbox.repo.join(path), source).expect("broken source is written");
+        let outline = sandbox.run(&["code", "outline", path]);
+        assert!(
+            outline.contains("\tpartial: syntax errors\n"),
+            "{path}: {outline}"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
@@ -490,7 +541,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     assert!(indexed.contains("20 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
-        "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
+        "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
     );
 }
 
@@ -508,7 +559,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "hidden"]), "");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
-        "app/service.py:9:1\tfunction\tload_config\t\tfresh\n"
+        "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
     );
     assert!(
         sandbox
@@ -522,7 +573,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     fs::write(&service, source).expect("service is edited");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
-        "app/service.py:11:1\tfunction\tload_config\t\tfresh\n"
+        "app/service.py:11-12\tfunction load_config\tdef load_config(path):\n"
     );
 
     fs::remove_file(sandbox.repo.join("scripts/deploy.sh")).expect("script is deleted");
@@ -535,16 +586,16 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
 
     assert_eq!(
         sandbox.run(&["code", "find", "Helpers"]),
-        "lib/demo_web/components/core_components.ex:33:3\tmodule\t\
-         DemoWeb.CoreComponents.Helpers\tDemoWeb.CoreComponents\tfresh\n"
+        "lib/demo_web/components/core_components.ex:33-39\tmodule \
+         DemoWeb.CoreComponents.Helpers\tin DemoWeb.CoreComponents\n"
     );
     let icons = sandbox.run(&["code", "find", "icon"]);
     assert!(
         icons
-            .starts_with("lib/demo_web/components/core_components.ex:25:3\tfunction\ticon_class/1"),
+            .starts_with("lib/demo_web/components/core_components.ex:25-25\tfunction icon_class/1"),
         "{icons}"
     );
-    assert!(!icons.contains("\tcomponent\t"), "{icons}");
+    assert!(!icons.contains("\tcomponent "), "{icons}");
     assert_eq!(
         sandbox
             .run(&["code", "find", ".icon", "--kind", "component"])
@@ -617,7 +668,132 @@ fn indexes_each_linked_worktree_separately() {
     let found = sandbox.gmem(&worktree, &["code", "find", "only_in_feature"]);
     assert_eq!(
         String::from_utf8_lossy(&found.stdout),
-        "app/feature.py:1:1\tfunction\tonly_in_feature\t\tfresh\n"
+        "app/feature.py:1-2\tfunction only_in_feature\tdef only_in_feature():\n"
+    );
+}
+
+#[test]
+fn diff_reports_changed_symbols_between_revisions() {
+    let sandbox = Sandbox::new("diff");
+    let repo = &sandbox.repo;
+    fs::write(
+        repo.join("app/tools.py"),
+        "def build(flag):\n    tools = [Old()]\n    if flag:\n        from extra import Tool\n    return tools\n",
+    )
+    .expect("nested import file is written");
+    fs::write(
+        repo.join("app/indent.py"),
+        "def run(flag):\n    if flag:\n        a()\n    b()\n",
+    )
+    .expect("indentation file is written");
+    fs::write(
+        repo.join("app/smile.py"),
+        "# done :)\ndef two():\n    pass\n",
+    )
+    .expect("comment file is written");
+    fs::write(
+        repo.join("app/split.py"),
+        "def parts(text):\n    return text.split(\",\")\n",
+    )
+    .expect("separator file is written");
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "base"]);
+
+    let edit = |path: &str, from: &str, to: &str| {
+        let source = fs::read_to_string(repo.join(path)).expect("fixture is readable");
+        assert!(source.contains(from), "{path}: missing {from:?}");
+        fs::write(repo.join(path), source.replacen(from, to, 1)).expect("fixture is edited");
+    };
+    edit(
+        "native/lib.rs",
+        "        amount\n    }\n",
+        "        amount * 2\n    }\n\n    pub fn refund(amount: u64) -> u64 {\n        amount\n    }\n",
+    );
+    edit(
+        "native/lib.rs",
+        "fn price(&self) -> u64;",
+        "fn price(&self) -> u32;",
+    );
+    edit(
+        "native/lib.rs",
+        "\n    fn discounted(&self) -> u64 {\n        self.price() / 2\n    }\n",
+        "",
+    );
+    edit(
+        "lib/demo_web/components/core_components.ex",
+        "<button><.icon",
+        "<button class=\"primary\"><.icon",
+    );
+    edit(
+        "lib/demo_web/components/core_components.ex",
+        "<.icon name=\"hero-x-mark\" />",
+        "<.icon name=\"hero-x-mark\" />\n      <.icon name=\"hero-bell\" />",
+    );
+    edit("web/theme.css", "padding: 1rem;", "padding: 2rem;");
+    edit(
+        "lib/demo_web/controllers/page_html/home.html.heex",
+        "  <p class",
+        "  <.button phx-click=\"stop\">Stop</.button>\n  <p class",
+    );
+    git(repo, &["mv", "app/service.py", "app/billing.py"]);
+    edit("app/billing.py", "return amount", "return -amount");
+    edit("app/tools.py", "Old()", "New()");
+    edit("app/indent.py", "    b()", "        b()");
+    edit("app/smile.py", "# done :)", "# done :) twice");
+    edit("app/split.py", "\",\"", "\";\"");
+    git(repo, &["rm", "-q", "scripts/deploy.sh"]);
+    fs::write(
+        repo.join("web/refund.ts"),
+        "export function refund(): void {}\n",
+    )
+    .expect("new file is written");
+    fs::write(repo.join("README.md"), "# Demo\n").expect("unsupported file is written");
+    fs::write(repo.join("web/blob.js"), b"\0binary").expect("binary file is written");
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "head"]);
+
+    let output = sandbox.run(&["code", "diff", "HEAD~1"]);
+    let (header, output) = output.split_once('\n').expect("diff has a header");
+    assert!(header.starts_with("merge base "), "{header}");
+    assert_eq!(
+        output,
+        "app/billing.py\trenamed from app/service.py\n\
+         \x20 ~ 5-6\tmethod charge\tdef charge(self, amount):\n\
+         app/indent.py\tmodified\n\
+         \x20 ~ 1-4\tfunction run\tdef run(flag):\n\
+         app/smile.py\tmodified\n\
+         \x20 ~ 2-3\tfunction two\tdef two():\n\
+         app/split.py\tmodified\n\
+         \x20 ~ 1-2\tfunction parts\tdef parts(text):\n\
+         app/tools.py\tmodified\n\
+         \x20 ~ 1-5\tfunction build\tdef build(flag):\n\
+         lib/demo_web/components/core_components.ex\tmodified\n\
+         \x20 ~ 8-16\tfunction flash/1\tdef flash(assigns) do\n\
+         \x20 ~ 18-24\tfunction button/1\t\
+         def button(%{disabled: true} = assigns), do: ~H\"<button disabled><%= @label %></button>\"\n\
+         lib/demo_web/controllers/page_html/home.html.heex\tmodified\n\
+         \x20 + 7-7\tcomponent .button\t<.button phx-click=\"stop\">Stop</.button>\n\
+         native/lib.rs\tmodified\n\
+         \x20 ~ 4-6\tfunction charge\tpub fn charge(amount: u64) -> u64\n\
+         \x20 + 8-10\tfunction refund\tpub fn refund(amount: u64) -> u64\n\
+         \x20 ~ 30-30\tmethod price\tfn price(&self) -> u32\n\
+         \x20 - 28-30\tmethod discounted\n\
+         scripts/deploy.sh\tdeleted\n\
+         \x20 - 4-6\tfunction build\n\
+         \x20 - 8-10\tfunction deploy\n\
+         \x20 - 14-14\timport ./lib.sh\n\
+         \x20 - 15-15\timport ./other.sh\n\
+         web/refund.ts\tadded\n\
+         \x20 + 1-1\tfunction refund\texport function refund(): void {}\n\
+         web/theme.css\tmodified\n\
+         \x20 ~ 13-15\tselector .card\n\
+         skipped (unsupported file type): README.md\n\
+         skipped (binary): web/blob.js\n"
+    );
+    assert!(
+        sandbox
+            .fail(&["code", "diff", "no-such-revision"])
+            .contains("no-such-revision: unknown revision")
     );
 }
 

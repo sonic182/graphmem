@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `require_relative`/`load`, PHP `require`/`include`, Bash `source`, Rust
   `extern crate`, and JavaScript/TypeScript `require()`, `import()`,
   `export ... from`, and `import x = require()` are listed too.
+- `gmem code outline <FILE> --depth N` and the MCP `code_outline` `depth`
+  argument limit how deeply nested symbols are listed; 0 returns top-level
+  symbols only. Pagination counts only the symbols within that depth.
+- `gmem code diff <BASE> [HEAD]` and the MCP `code_diff` tool list the symbols
+  added, removed, or modified between the merge base of two Git revisions and
+  the head, per changed file, by outlining both versions in memory. Edits
+  inside a nested symbol are reported on that symbol only; renamed symbols
+  appear as removed plus added; unsupported and binary files are listed as
+  skipped. The MCP tool answers in compact plain text rather than JSON (about
+  7× smaller than `git diff` on real repositories) and reports at most `limit`
+  changed files (default 200).
 
 ### Changed
 
@@ -22,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import forms (for example Bash `source`) also appear as `import` symbols in
   `code_outline` and `find_symbol`. The code index is rebuilt once on upgrade to
   pick up the new symbols.
+- The MCP `code_outline`, `code_imports`, and `find_symbol` tools answer in
+  plain text, like `code_diff` and the CLI, instead of JSON. Nesting is
+  shown by indentation, and signatures only when they add to the name.
+  Columns, outline indexes, and `fresh` markers are gone. An outline of a
+  200-symbol file shrinks from 69 KB to 9 KB on the wire.
+- `gmem code find` prints `path:start-end<TAB>kind name`, then the parent,
+  freshness, and signature only when they apply. Its `N of TOTAL matches`
+  and `truncated` notes now go to stdout. `gmem code outline` adds
+  signatures.
+- The session-start context tells the agent to load the
+  `graphmem-code-analysis` skill before its first code lookup, and the skill
+  now also triggers on addressing PR review comments and reading another
+  checkout.
 
 ### Fixed
 

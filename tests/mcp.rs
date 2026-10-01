@@ -325,6 +325,7 @@ fn embedding_resource_downloads_once_and_reuses_cached_revision() {
                 }
                 Err(error) => panic!("accept failed: {error}"),
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
@@ -466,6 +467,7 @@ fn repository_scopes_are_prioritized_and_isolated() {
             .access_count,
         0
     );
+    drop(database);
     drop(mcp);
     std::fs::remove_dir_all(home).expect("MCP test data is removed");
 }
@@ -1395,6 +1397,11 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     )
     .expect("source file is written");
     fs::write(
+        repo.join("lib/nested.ex"),
+        "defmodule A do\n  defmodule B do\n    def c, do: 1\n  end\n  def d, do: 2\nend\n",
+    )
+    .expect("nested source file is written");
+    fs::write(
         repo.join("lib/imports.rs"),
         "use alpha::One;\nuse beta::{\n    Two,\n    Three,\n};\nuse gamma::Four;\n",
     )
@@ -1436,28 +1443,49 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     assert!(names.contains(&"code_imports".to_owned()));
     assert!(names.contains(&"find_symbol".to_owned()));
 
+    let text = |response: Value| {
+        assert!(
+            response["result"].get("structuredContent").is_none(),
+            "{response}"
+        );
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text result")
+            .to_owned()
+    };
+    let charge =
+        "lib/billing.ex:2-2\tfunction charge/1\tin Billing\tdef charge(amount), do: amount\n";
     let unindexed = mcp.request(
         3,
         "tools/call",
         json!({"name":"find_symbol","arguments":{"query":"charge"}}),
     );
-    let unindexed = &unindexed["result"]["structuredContent"];
-    assert_eq!(unindexed["matches"][0]["name"], "charge/1");
-    assert_eq!(unindexed["total"], 1);
-    assert_eq!(unindexed["truncated"], false);
+    assert_eq!(text(unindexed), charge);
 
     let outline = mcp.request(
         7,
         "tools/call",
         json!({"name":"code_outline","arguments":{"path":"lib/billing.ex"}}),
     );
-    let outline = &outline["result"]["structuredContent"];
-    assert_eq!(outline["coverage"], "complete");
-    assert_eq!(outline["total"], 2);
-    assert_eq!(outline["symbols"][0]["name"], "Billing");
-    assert_eq!(outline["symbols"][1]["name"], "charge/1");
-    assert_eq!(outline["symbols"][1]["parent"], 0);
-    assert_eq!(outline["symbols"][1]["start_line"], 2);
+    assert_eq!(
+        text(outline),
+        "lib/billing.ex\telixir\tcomplete\n\
+         1-3\tmodule Billing\n\
+         2-2\t  function charge/1\tdef charge(amount), do: amount\n"
+    );
+
+    let shallow = mcp.request(
+        11,
+        "tools/call",
+        json!({
+            "name":"code_outline",
+            "arguments":{"path":"lib/nested.ex","depth":1,"offset":1,"limit":1}
+        }),
+    );
+    assert_eq!(
+        text(shallow),
+        "lib/nested.ex\telixir\tcomplete\n2-4\t  module A.B\nnext_offset 2 of 3\n"
+    );
 
     let imports = mcp.request(
         8,
@@ -1467,21 +1495,10 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
             "arguments":{"path":"lib/imports.rs","offset":1,"limit":1}
         }),
     );
-    let imports = &imports["result"]["structuredContent"];
-    assert_eq!(imports["path"], "lib/imports.rs");
-    assert_eq!(imports["coverage"], "complete");
-    assert!(imports.get("freshness").is_none());
-    assert_eq!(imports["total"], 3);
-    assert_eq!(imports["next_offset"], 2);
-    assert_eq!(imports["imports"].as_array().unwrap().len(), 1);
-    assert!(
-        imports["imports"][0]["name"]
-            .as_str()
-            .unwrap()
-            .contains("beta")
+    assert_eq!(
+        text(imports),
+        "lib/imports.rs\trust\tcomplete\n2-5\tbeta::{ Two, Three, }\nnext_offset 2 of 3\n"
     );
-    assert_eq!(imports["imports"][0]["start_line"], 2);
-    assert_eq!(imports["imports"][0]["end_line"], 5);
 
     fs::write(repo.join("lib/imports.rs"), "use updated::Only;\n")
         .expect("import source file is updated");
@@ -1490,32 +1507,27 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         "tools/call",
         json!({"name":"code_imports","arguments":{"path":"lib/imports.rs"}}),
     );
-    let refreshed = &refreshed["result"]["structuredContent"];
-    assert_eq!(refreshed["total"], 1);
-    assert_eq!(refreshed["imports"][0]["name"], "updated::Only");
-    assert!(refreshed.get("freshness").is_none());
-    assert!(refreshed.get("next_offset").is_none());
+    assert_eq!(
+        text(refreshed),
+        "lib/imports.rs\trust\tcomplete\n1-1\tupdated::Only\n"
+    );
 
     let partial = mcp.request(
         10,
         "tools/call",
         json!({"name":"code_imports","arguments":{"path":"lib/partial.html.eex"}}),
     );
-    let partial = &partial["result"]["structuredContent"];
-    assert_eq!(partial["coverage"], "partial: EEx directives only");
-    assert_eq!(partial["total"], 0);
-    assert_eq!(partial["imports"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        text(partial),
+        "lib/partial.html.eex\teex\tpartial: EEx directives only\n"
+    );
 
     let found = mcp.request(
         5,
         "tools/call",
         json!({"name":"find_symbol","arguments":{"query":"charge"}}),
     );
-    let matches = &found["result"]["structuredContent"]["matches"];
-    assert_eq!(matches.as_array().expect("matches").len(), 1);
-    assert_eq!(matches[0]["path"], "lib/billing.ex");
-    assert_eq!(matches[0]["parent"], "Billing");
-    assert_eq!(matches[0]["freshness"], "fresh");
+    assert_eq!(text(found), charge);
 
     let escaped = mcp.request(
         6,
@@ -1523,6 +1535,68 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         json!({"name":"code_outline","arguments":{"path":"../home/config.toml"}}),
     );
     assert_eq!(escaped["result"]["isError"], true);
+
+    let git = |args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
+                .args(args)
+                .current_dir(&repo)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .status()
+                .expect("git runs")
+                .success()
+        );
+    };
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "base"]);
+    fs::write(
+        repo.join("lib/billing.ex"),
+        "defmodule Billing do\n  def charge(amount), do: amount * 2\nend\n",
+    )
+    .expect("source file is changed");
+    git(&["commit", "-q", "-am", "head"]);
+    let diff = mcp.request(
+        12,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"HEAD~1"}}),
+    );
+    assert!(diff["result"].get("structuredContent").is_none());
+    let text = diff["result"]["content"][0]["text"].as_str().unwrap();
+    let (header, text) = text.split_once('\n').unwrap();
+    assert!(header.starts_with("merge base "), "{header}");
+    assert_eq!(
+        text,
+        "lib/billing.ex\tmodified\n  ~ 2-2\tfunction charge/1\tdef charge(amount), do: amount * 2\n"
+    );
+    fs::write(repo.join("lib/nested.ex"), "defmodule A do\nend\n")
+        .expect("second source file is changed");
+    git(&["commit", "-q", "-am", "second"]);
+    let limited = mcp.request(
+        14,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"HEAD~2","limit":1}}),
+    );
+    let text = limited["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.ends_with("\n1 of 2 changed files; raise limit or narrow base and head for more\n"),
+        "{text}"
+    );
+    let invalid = mcp.request(
+        15,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"HEAD~1","limit":0}}),
+    );
+    assert_eq!(invalid["result"]["isError"], true);
+    let injected = mcp.request(
+        13,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"--output=injected"}}),
+    );
+    assert_eq!(injected["result"]["isError"], true);
+    assert!(!repo.join("injected").exists());
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP code test data is removed");
 }
@@ -1578,9 +1652,12 @@ fn code_failures_leave_the_memory_tools_available() {
         "tools/call",
         json!({"name":"code_outline","arguments":{"path":"app.py"}}),
     );
-    assert_eq!(
-        outline["result"]["structuredContent"]["symbols"][0]["name"],
-        "ping"
+    assert!(
+        outline["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\tfunction ping"),
+        "{outline}"
     );
     drop(mcp);
 
@@ -1707,7 +1784,8 @@ fn code_refresh_does_not_block_memory_tools() {
             let response = mcp.recv();
             assert_ne!(response["result"]["isError"], true, "{response}");
             assert!(
-                response["result"]["structuredContent"].is_object(),
+                response["result"]["structuredContent"].is_object()
+                    || response["result"]["content"][0]["text"].is_string(),
                 "{response}"
             );
             answered.push(response["id"].as_u64().expect("response id"));

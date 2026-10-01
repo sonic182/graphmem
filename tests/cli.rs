@@ -202,6 +202,7 @@ fn memory_lifecycle_works_across_cli_processes() {
     assert!(stdout(run(&data_dir, &["list"])).is_empty());
     assert!(stdout(run(&data_dir, &["scopes"])).is_empty());
 
+    drop(database);
     fs::remove_dir_all(data_dir).expect("test data directory is removed");
 }
 

@@ -253,8 +253,10 @@ into `$GRAPHMEM_HOME/code.sqlite`, which can be deleted and rebuilt at any time.
   past the first `[code] max_files` source files (default 20,000; also
   `GRAPHMEM_CODE_MAX_FILES`) are not indexed. Progress goes to stderr.
 - `gmem code outline <FILE>` prints `path`, language, and coverage, then one
-  line per symbol as `start-end<TAB>kind name`, indented by nesting. The file
-  is re-indexed first if it changed.
+  line per symbol as `start-end<TAB>kind name`, indented by nesting, followed
+  by a tab and the symbol's first source line when that shows parameters,
+  types, or values the name does not. The file is re-indexed first if it
+  changed.
 - `gmem code imports <FILE>` prints `path`, language, and coverage, then one
   `start-end<TAB>name` line per declared import. The file is re-indexed first
   if it changed. Imports are reported as written (quotes included where the
@@ -263,21 +265,23 @@ into `$GRAPHMEM_HOME/code.sqlite`, which can be deleted and rebuilt at any time.
   `complete`; see `code_imports` in [mcp.md](mcp.md#code-navigation-tools) for
   the forms, and use text search for loading through other APIs.
 - `gmem code find <QUERY> [--kind KIND] [--limit N]` refreshes the index, then
-  prints `path:line:column<TAB>kind<TAB>name<TAB>parent<TAB>freshness` for
-  each match: exact names first, then names ending in `.QUERY`, then
+  prints `path:start-end<TAB>kind name` for each match, followed by
+  tab-separated `in <parent>` when it is nested, `stale` or `missing` when the
+  file changed during the read, and the signature under the same rule as
+  `outline`: exact names first, then names ending in `.QUERY`, then
   prefixes. Imports and template usages (`import`, `component`, `slot`,
   `expression`) appear only with `--kind`. When more matches exist than
-  `--limit`, stderr says `showing N of TOTAL matches`.
+  `--limit`, a last line says `N of TOTAL matches; raise limit for more`.
 
 ```sh
 gmem code index
 gmem code outline lib/demo_web/components/core_components.ex
 # lib/demo_web/components/core_components.ex	elixir	complete
 # 1-40	module DemoWeb.CoreComponents
-# 8-15	  function flash/1
-# 11-11	    component .icon
+# 8-15	  function flash/1	def flash(assigns) do
+# 11-11	    component .icon	<.icon name="hero-x-mark" />
 gmem code find flash
-# lib/demo_web/components/core_components.ex:8:3	function	flash/1	DemoWeb.CoreComponents	fresh
+# lib/demo_web/components/core_components.ex:8-15	function flash/1	in DemoWeb.CoreComponents	def flash(assigns) do
 ```
 
 ## `gmem mcp`
