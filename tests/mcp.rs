@@ -295,6 +295,100 @@ fn serves_memory_lifecycle_over_stdio() {
 }
 
 #[test]
+fn embedding_resource_downloads_once_and_reuses_cached_revision() {
+    use std::net::TcpListener;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use std::thread;
+    use std::time::Duration;
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("graphmem-hub-{}-{nonce}", std::process::id()));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let done = Arc::new(AtomicBool::new(false));
+    let server_done = Arc::clone(&done);
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        while !server_done.load(Ordering::Relaxed) {
+            let (mut stream, _) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" || header.is_empty() {
+                    break;
+                }
+            }
+            let body = r#"{"max_position_embeddings":512}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"config-etag\"\r\nX-Repo-Commit: {}\r\nConnection: close\r\n\r\n",
+                body.len(), "a".repeat(40)).unwrap();
+            if request.starts_with("GET ") {
+                stream.write_all(body.as_bytes()).unwrap();
+            }
+            requests.push(request);
+        }
+        requests
+    });
+    let cache = home.join("models");
+    let mut mcp = Mcp::spawn_with_config(
+        &home,
+        &home,
+        &[
+            ("GRAPHMEM_CODE", "off"),
+            ("GRAPHMEM_EMBEDDINGS", "on"),
+            ("GRAPHMEM_EMBEDDING_MODEL", "test-owner/test-model"),
+            ("GRAPHMEM_EMBEDDING_REVISION", "test-revision"),
+            ("GRAPHMEM_EMBEDDING_CACHE_DIR", cache.to_str().unwrap()),
+            ("HF_ENDPOINT", &endpoint),
+            ("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1"),
+        ],
+        "[embedding]\nenabled = true\n",
+    );
+    mcp.request(1, "initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}));
+    let downloaded = mcp.request(2, "resources/read", json!({"uri":"gmem://embedding"}));
+    let cached = mcp.request(3, "resources/read", json!({"uri":"gmem://embedding"}));
+    drop(mcp);
+    done.store(true, Ordering::Relaxed);
+    let requests = server.join().unwrap();
+    fs::remove_dir_all(home).unwrap();
+
+    for response in [downloaded, cached] {
+        let details: Value =
+            serde_json::from_str(response["result"]["contents"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(details["model"], "test-owner/test-model");
+        assert_eq!(details["revision"], "test-revision");
+        assert_eq!(details["max_tokens"], 512);
+    }
+    assert_eq!(
+        requests,
+        [
+            "HEAD /test-owner/test-model/resolve/test-revision/config.json HTTP/1.1\r\n",
+            "GET /test-owner/test-model/resolve/test-revision/config.json HTTP/1.1\r\n",
+        ]
+    );
+}
+
+#[test]
 fn repository_scopes_are_prioritized_and_isolated() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)

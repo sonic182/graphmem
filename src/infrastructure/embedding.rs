@@ -1,13 +1,11 @@
 use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::{bert, distilbert, qwen3};
-use hf_hub::{
-    Repo, RepoType,
-    api::sync::{ApiBuilder, ApiRepo},
-};
+use hf_hub::{HFClient, HFError, HFRepositorySync, RepoTypeModel, split_id};
 use serde::Deserialize;
 use thiserror::Error;
 use tokenizers::{Tokenizer, TruncationDirection, TruncationParams};
@@ -20,7 +18,7 @@ pub enum EmbeddingError {
     #[error("model file access failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("model download failed: {0}")]
-    Hub(#[from] hf_hub::api::sync::ApiError),
+    Hub(#[from] HFError),
     #[error("model configuration failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("model inference failed: {0}")]
@@ -100,10 +98,10 @@ impl Embedder {
         } else {
             tracing::info!(model = %config.model, revision = %config.revision, "downloading model files");
         }
-        let config_path = repository.get("config.json")?;
-        let tokenizer_path = repository.get("tokenizer.json")?;
+        let config_path = model_file(&repository, &config.revision, "config.json")?;
+        let tokenizer_path = model_file(&repository, &config.revision, "tokenizer.json")?;
         tracing::info!(model = %config.model, revision = %config.revision, "loading embedding weights");
-        let weights_path = repository.get("model.safetensors")?;
+        let weights_path = model_file(&repository, &config.revision, "model.safetensors")?;
         let config_bytes = std::fs::read(config_path)?;
         let model_type = serde_json::from_slice::<ModelTypeProbe>(&config_bytes)?.model_type;
         let mut tokenizer = Tokenizer::from_file(tokenizer_path)
@@ -395,16 +393,36 @@ fn normalize(vector: Vec<f32>) -> Result<Vec<f32>, EmbeddingError> {
     Ok(vector.into_iter().map(|value| value / norm).collect())
 }
 
-fn model_repository(config: &EmbeddingConfig) -> Result<ApiRepo, EmbeddingError> {
-    let api = ApiBuilder::new()
-        .with_cache_dir(config.cache_dir.clone())
-        .with_progress(false)
-        .build()?;
-    Ok(api.repo(Repo::with_revision(
-        config.model.clone(),
-        RepoType::Model,
-        config.revision.clone(),
-    )))
+fn model_repository(
+    config: &EmbeddingConfig,
+) -> Result<HFRepositorySync<RepoTypeModel>, EmbeddingError> {
+    let client = HFClient::builder()
+        .cache_dir(&config.cache_dir)
+        .build_sync()?;
+    let (owner, name) = split_id(&config.model);
+    Ok(client.model(owner, name))
+}
+
+fn model_file(
+    repository: &HFRepositorySync<RepoTypeModel>,
+    revision: &str,
+    filename: &str,
+) -> Result<PathBuf, EmbeddingError> {
+    // Preserve cache-first loading; hf-hub 1.x otherwise checks the network on every branch lookup.
+    match repository
+        .download_file()
+        .filename(filename)
+        .revision(revision)
+        .local_files_only(true)
+        .send()
+    {
+        Err(HFError::LocalEntryNotFound { .. }) => Ok(repository
+            .download_file()
+            .filename(filename)
+            .revision(revision)
+            .send()?),
+        result => Ok(result?),
+    }
 }
 
 /// The active embedding configuration with the exact token limit read from
@@ -428,7 +446,7 @@ pub fn embedding_details(config: &EmbeddingConfig) -> Result<EmbeddingDetails, E
         return Ok(details);
     }
     let repository = model_repository(config)?;
-    let config_path = repository.get("config.json")?;
+    let config_path = model_file(&repository, &config.revision, "config.json")?;
     let config_bytes = std::fs::read(config_path)?;
     details.max_tokens = token_limit(&config_bytes)?;
     Ok(details)
