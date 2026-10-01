@@ -31,6 +31,7 @@ pub enum CodeLanguage {
     JavaScript,
     Php,
     Python,
+    Racket,
     Ruby,
     Rust,
     Scss,
@@ -40,7 +41,7 @@ pub enum CodeLanguage {
     Zig,
 }
 
-const LANGUAGE_NAMES: [(CodeLanguage, &str); 19] = [
+const LANGUAGE_NAMES: [(CodeLanguage, &str); 20] = [
     (CodeLanguage::Bash, "bash"),
     (CodeLanguage::C, "c"),
     (CodeLanguage::Cpp, "cpp"),
@@ -53,6 +54,7 @@ const LANGUAGE_NAMES: [(CodeLanguage, &str); 19] = [
     (CodeLanguage::JavaScript, "javascript"),
     (CodeLanguage::Php, "php"),
     (CodeLanguage::Python, "python"),
+    (CodeLanguage::Racket, "racket"),
     (CodeLanguage::Ruby, "ruby"),
     (CodeLanguage::Rust, "rust"),
     (CodeLanguage::Scss, "scss"),
@@ -87,6 +89,7 @@ impl CodeLanguage {
             "js" | "mjs" | "cjs" | "jsx" => Self::JavaScript,
             "php" => Self::Php,
             "py" | "pyi" => Self::Python,
+            "rkt" | "rktl" => Self::Racket,
             "rb" | "rake" | "gemspec" => Self::Ruby,
             "rs" => Self::Rust,
             "scss" => Self::Scss,
@@ -147,6 +150,7 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
         }
         CodeLanguage::Php => bundled(SupportLang::Php, source, origin, &mut symbols),
         CodeLanguage::Python => bundled(SupportLang::Python, source, origin, &mut symbols),
+        CodeLanguage::Racket => racket(source, &mut symbols),
         CodeLanguage::Ruby => bundled(SupportLang::Ruby, source, origin, &mut symbols),
         CodeLanguage::Rust => bundled(SupportLang::Rust, source, origin, &mut symbols),
         CodeLanguage::Scss => styles(Scss.ast_grep(source).root(), origin, &mut symbols),
@@ -483,6 +487,7 @@ macro_rules! grammar {
 }
 
 grammar!(Heex, tree_sitter_heex::LANGUAGE);
+grammar!(Racket, tree_sitter_racket::LANGUAGE);
 grammar!(Scss, tree_sitter_scss::language());
 grammar!(Sql, tree_sitter_sequel::LANGUAGE);
 grammar!(Zig, tree_sitter_zig::LANGUAGE);
@@ -768,6 +773,128 @@ fn zig_declaration<D: Doc>(node: &Node<'_, D>) -> Option<(String, &'static str)>
             _ => None,
         })?;
     Some((name.text().into_owned(), kind))
+}
+
+/// Racket has no definition nodes, only lists, so a form is recognised by its
+/// head symbol. Only module-level forms count: `module`/`begin` bodies are
+/// searched, function bodies are not.
+fn racket(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
+    let grep = Racket.ast_grep(source);
+    let root = grep.root();
+    racket_forms(&root, symbols);
+    has_errors(&root)
+}
+
+fn racket_items<'r, D: Doc>(form: &Node<'r, D>) -> Vec<Node<'r, D>> {
+    form.children()
+        .filter(|child| child.is_named() && !child.kind().contains("comment"))
+        .collect()
+}
+
+fn racket_forms<D: Doc>(parent: &Node<'_, D>, symbols: &mut Vec<CodeSymbol>) {
+    for form in parent.children().filter(|child| child.kind() == "list") {
+        let items = racket_items(&form);
+        let Some(head) = items.first().filter(|head| head.kind() == "symbol") else {
+            continue;
+        };
+        let head = head.text();
+        match head.as_ref() {
+            "begin" => racket_forms(&form, symbols),
+            "require" => {
+                for spec in &items[1..] {
+                    if let Some(name) = racket_module_path(spec) {
+                        symbols.push(node_symbol(spec, name, "import", Origin::default()));
+                    }
+                }
+            }
+            "module" | "module*" | "module+" => {
+                if let Some(name) = items.get(1) {
+                    symbols.push(node_symbol(
+                        &form,
+                        name.text().into_owned(),
+                        "module",
+                        Origin::default(),
+                    ));
+                    racket_forms(&form, symbols);
+                }
+            }
+            "struct" | "define-struct" => {
+                if let Some(name) = items.get(1).filter(|name| name.kind() == "symbol") {
+                    symbols.push(node_symbol(
+                        &form,
+                        name.text().into_owned(),
+                        "struct",
+                        Origin::default(),
+                    ));
+                }
+            }
+            "define" | "define-syntax" | "define-syntax-rule" => {
+                let macro_form = head != "define";
+                if let Some((name, kind)) = items
+                    .get(1)
+                    .and_then(|target| racket_definition(target, items.get(2), macro_form))
+                {
+                    symbols.push(node_symbol(&form, name, kind, Origin::default()));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `(define name ...)`, `(define (name arg ...) ...)`, or the curried
+/// `(define ((name a) b) ...)`; a plain `name` is a function only when bound to
+/// a lambda.
+fn racket_definition<D: Doc>(
+    target: &Node<'_, D>,
+    value: Option<&Node<'_, D>>,
+    macro_form: bool,
+) -> Option<(String, &'static str)> {
+    match target.kind().as_ref() {
+        "symbol" => {
+            let kind = if macro_form {
+                "macro"
+            } else if value.is_some_and(|value| racket_is_lambda(value)) {
+                "function"
+            } else {
+                "constant"
+            };
+            Some((target.text().into_owned(), kind))
+        }
+        "list" => {
+            let head = racket_items(target).into_iter().next()?;
+            let (name, _) = racket_definition(&head, None, macro_form)?;
+            Some((name, if macro_form { "macro" } else { "function" }))
+        }
+        _ => None,
+    }
+}
+
+fn racket_is_lambda<D: Doc>(node: &Node<'_, D>) -> bool {
+    node.kind() == "list"
+        && racket_items(node)
+            .first()
+            .is_some_and(|head| matches!(head.text().as_ref(), "lambda" | "λ" | "case-lambda"))
+}
+
+/// A `require` spec: a module path, a string, or a wrapper such as
+/// `(only-in mod id ...)` or `(prefix-in p: mod)` around one.
+fn racket_module_path<D: Doc>(spec: &Node<'_, D>) -> Option<String> {
+    match spec.kind().as_ref() {
+        "symbol" => Some(spec.text().into_owned()),
+        "string" => Some(spec.text().trim_matches('"').to_owned()),
+        "list" => {
+            let items = racket_items(spec);
+            let index = match items.first()?.text().as_ref() {
+                "prefix-in" => 2,
+                "file" | "lib" | "planet" | "only-in" | "except-in" | "rename-in"
+                | "for-syntax" | "for-template" | "for-label" | "for-meta" => 1,
+                _ => return Some(spec.text().into_owned()),
+            };
+            racket_module_path(items.get(index)?)
+        }
+        _ => None,
+    }
 }
 
 fn javascript(

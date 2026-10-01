@@ -106,7 +106,7 @@ fn git(directory: &Path, args: &[&str]) {
 fn outlines_every_supported_language_with_nesting_and_ranges() {
     let sandbox = Sandbox::new("languages");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("20 indexed"), "{indexed}");
+    assert!(indexed.contains("21 indexed"), "{indexed}");
 
     let expectations: &[(&str, &[&str])] = &[
         (
@@ -169,6 +169,22 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "12-12\tenum Mode",
                 "16-18\tfunction main",
                 "20-23\ttest point sum",
+            ],
+        ),
+        (
+            "lisp/billing.rkt",
+            &[
+                "\tracket\tcomplete",
+                "3-3\timport racket/list",
+                "5-5\timport racket/string",
+                "7-7\tstruct invoice",
+                "9-9\tconstant limit",
+                "11-13\tfunction charge",
+                "15-15\tfunction adder",
+                "17-17\tfunction double",
+                "19-20\tmacro twice",
+                "22-23\tmodule test",
+                "23-23\t  function check",
             ],
         ),
         (
@@ -361,6 +377,7 @@ fn imports_lists_declared_imports_across_supported_languages() {
         ("native/widget.h", "string"),
         ("native/widget.cpp", "widget.h"),
         ("native/build.zig", "std"),
+        ("lisp/billing.rkt", "util.rkt"),
         ("app/service.py", "os"),
         ("app/service.py", "pathlib"),
         ("web/cart.jsx", "react"),
@@ -538,7 +555,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     )
     .expect("untracked non-UTF-8 filename is written");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("20 indexed"), "{indexed}");
+    assert!(indexed.contains("21 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
@@ -580,7 +597,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 19 unchanged, 0 removed, 1 skipped"),
+        reindexed.contains("0 indexed, 20 unchanged, 0 removed, 1 skipped"),
         "{reindexed}"
     );
 

@@ -20,5 +20,6 @@ returned by `find_symbol` only when `kind: "import"` is passed.
 | EEx | `expression` | each `<% %>` directive; coverage is always partial |
 | SQL | the object type of each `CREATE`: `table`, `view`, `index`, `function`, `trigger`, `type`, ... | named as written, so a schema-qualified `public.users` is found by `users` |
 | Zig | `struct`, `enum`, `union`, `opaque`, `error_set`, `field`, `function`, `test`, `import` | a `const` is a symbol only when its value is a container or `@import` |
+| Racket | `module`, `struct`, `function`, `macro`, `constant`, `import` | only module-level forms (inside `module`/`module+`/`begin`) are listed, not definitions nested in function bodies; `.rkt` and `.rktl` files |
 | Bash | `function` | |
 | CSS/SCSS | `selector`, `media`, `supports`, `keyframes`, `mixin`, `function`, `variable`, `import` | a rule is named by its whole selector list (`.btn, .btn-primary`); `@media` by its query; variables are `--custom` properties and `$scss` variables; `@include` is not listed |

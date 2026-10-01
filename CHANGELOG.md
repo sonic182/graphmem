@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Racket (`.rkt`, `.rktl`) is indexed by the code tools: modules, structs,
+  functions, macros, constants, and `require` imports.
+
 ## [0.8.0] - 2026-10-01
 
 ### Added

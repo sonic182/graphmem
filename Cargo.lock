@@ -1845,6 +1845,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tree-sitter-heex",
+ "tree-sitter-racket",
  "tree-sitter-scss 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tree-sitter-scss 1.0.0 (git+https://github.com/tree-sitter-grammars/tree-sitter-scss?rev=9ab738d22bb248771d42e8678d1a307d14990df1)",
  "tree-sitter-sequel",
@@ -5126,6 +5127,16 @@ name = "tree-sitter-python"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bf85fd39652e740bf60f46f4cda9492c3a9ad75880575bf14960f775cb74a1c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-racket"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "066bd54f4513d35a21b44f733da74bb065bb6734e565db96b516a79dd7c29e5f"
 dependencies = [
  "cc",
  "tree-sitter-language",

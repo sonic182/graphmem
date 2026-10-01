@@ -727,8 +727,8 @@ impl MemoryServer {
              `next_offset <n> of <total>` line when more symbols follow. Pass depth (0 for \
              top-level symbols only) to skip deeper nesting; pagination then counts only the \
              symbols within that depth. Supports Rust, Go, Zig, C, C++ (including .h), Python, \
-             JavaScript/JSX, TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, \
-             Bash, CSS, SCSS, and HTML/HEEx <script> and <style>."
+             JavaScript/JSX, TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, \
+             Racket, SQL, Bash, CSS, SCSS, and HTML/HEEx <script> and <style>."
     )]
     async fn code_outline(
         &self,

@@ -175,7 +175,7 @@ large checkout ahead of time, or to see which files could not be indexed, run
 
 Supported files: Rust, Go, Zig, C, C++ (`.h` headers are parsed as C++),
 Python, JavaScript/JSX, TypeScript/TSX, Elixir (including `~H` sigils), HEEx,
-EEx (directives only), Ruby, PHP, SQL, Bash, CSS, SCSS, and the `<script>` and
+EEx (directives only), Ruby, PHP, Racket, SQL, Bash, CSS, SCSS, and the `<script>` and
 `<style>` elements of HTML and HEEx. CSS rule sets are named by their selector
 list. Symbols are syntactic definitions and imports; nested Elixir modules
 are named in full (`Parent.Child`), and a JavaScript/TypeScript
