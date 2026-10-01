@@ -1029,7 +1029,7 @@ fn validate_scopes(scopes: &[String]) -> Result<(), CallToolResult> {
         scope == "global"
             || scope
                 .strip_prefix("repo:")
-                .is_some_and(|path| Path::new(path).is_absolute())
+                .is_some_and(|path| Path::new(path).has_root())
     }) {
         Ok(())
     } else {

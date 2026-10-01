@@ -698,7 +698,12 @@ fn checkout_path(root: &Path, path: &str) -> Result<String> {
     let relative = resolved
         .strip_prefix(root)
         .map_err(|_| code_error(format!("{path}: outside the checkout {}", root.display())))?;
-    root_key(relative)
+    relative
+        .iter()
+        .map(|part| part.to_str())
+        .collect::<Option<Vec<_>>>()
+        .map(|parts| parts.join("/"))
+        .ok_or_else(|| code_error(format!("{} is not valid UTF-8", relative.display())))
 }
 
 fn is_minified(path: &Path) -> bool {

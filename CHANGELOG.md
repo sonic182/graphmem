@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   freshness, and signature only when they apply. Its `N of TOTAL matches`
   and `truncated` notes now go to stdout. `gmem code outline` adds
   signatures.
+- The session-start context tells the agent to load the
+  `graphmem-code-analysis` skill before its first code lookup, and the skill
+  now also triggers on addressing PR review comments and reading another
+  checkout.
 
 ### Fixed
 

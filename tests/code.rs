@@ -523,7 +523,7 @@ fn syntax_errors_and_missing_nodes_mark_the_outline_partial() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
