@@ -102,11 +102,18 @@ impl CodeDiff {
             short(&self.base),
             short(&self.head)
         )];
+        let path = |path: &str| {
+            if path.contains(char::is_control) {
+                format!("{path:?}")
+            } else {
+                path.to_owned()
+            }
+        };
         for file in &self.files {
-            let mut header = format!("{}\t{}", file.path, file.status.as_str());
+            let mut header = format!("{}\t{}", path(&file.path), file.status.as_str());
             if let Some(old_path) = &file.old_path {
                 header.push_str(" from ");
-                header.push_str(old_path);
+                header.push_str(&path(old_path));
             }
             if !matches!(file.coverage, Coverage::Complete) {
                 header.push('\t');
@@ -134,11 +141,11 @@ impl CodeDiff {
                 lines.push(line);
             }
         }
-        let mut reasons: Vec<(&str, Vec<&str>)> = Vec::new();
-        for (path, reason) in &self.skipped {
+        let mut reasons: Vec<(&str, Vec<String>)> = Vec::new();
+        for (skipped, reason) in &self.skipped {
             match reasons.iter_mut().find(|(known, _)| known == reason) {
-                Some((_, paths)) => paths.push(path),
-                None => reasons.push((reason, vec![path])),
+                Some((_, paths)) => paths.push(path(skipped)),
+                None => reasons.push((reason, vec![path(skipped)])),
             }
         }
         for (reason, paths) in reasons {
@@ -447,9 +454,10 @@ pub fn diff(directory: &Path, base: &str, head: &str) -> Result<CodeDiff> {
         resolve_commit(&root, revision)
             .ok_or_else(|| code_error(format!("{revision}: unknown revision")))
     };
-    let head = resolve(head)?;
-    let base = merge_base(&root, &resolve(base)?, &head)
+    let head_commit = resolve(head)?;
+    let base = merge_base(&root, &resolve(base)?, &head_commit)
         .ok_or_else(|| code_error(format!("{base} and {head} have no common ancestor")))?;
+    let head = head_commit;
     let changed = changed_files(&root, &base, &head)
         .ok_or_else(|| code_error(format!("git diff failed in {}", root.display())))?;
     let mut report = CodeDiff {
@@ -460,8 +468,7 @@ pub fn diff(directory: &Path, base: &str, head: &str) -> Result<CodeDiff> {
     };
     for file in changed {
         match diff_file(&root, &report.base, &report.head, &file) {
-            Ok(Some(diff)) => report.files.push(diff),
-            Ok(None) => {}
+            Ok(diff) => report.files.push(diff),
             Err(reason) => report.skipped.push((file.path, reason)),
         }
     }
@@ -473,13 +480,17 @@ fn diff_file(
     base: &str,
     head: &str,
     file: &ChangedFile,
-) -> std::result::Result<Option<FileDiff>, String> {
+) -> std::result::Result<FileDiff, String> {
+    if !file.utf8 {
+        return Err("path not valid UTF-8".to_owned());
+    }
     let status = match file.status {
-        'A' => FileStatus::Added,
+        'A' | 'C' => FileStatus::Added,
         'D' => FileStatus::Deleted,
-        'M' | 'T' => FileStatus::Modified,
+        'M' => FileStatus::Modified,
         'R' => FileStatus::Renamed,
-        _ => return Ok(None),
+        'T' => return Err("file type changed".to_owned()),
+        other => return Err(format!("git status {other}")),
     };
     let language = CodeLanguage::for_path(Path::new(&file.path))
         .filter(|_| !is_minified(Path::new(&file.path)))
@@ -507,7 +518,7 @@ fn diff_file(
         .find(|coverage| !matches!(coverage, Coverage::Complete))
         .cloned()
         .unwrap_or(Coverage::Complete);
-    Ok(Some(FileDiff {
+    Ok(FileDiff {
         path: file.path.clone(),
         old_path: file.old_path.clone(),
         status,
@@ -518,7 +529,7 @@ fn diff_file(
             head_source,
             &definitions(head_outline.symbols),
         ),
-    }))
+    })
 }
 
 fn definitions(symbols: Vec<CodeSymbol>) -> Vec<CodeSymbol> {

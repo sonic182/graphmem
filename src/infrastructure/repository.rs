@@ -74,6 +74,7 @@ pub struct ChangedFile {
     pub status: char,
     pub old_path: Option<String>,
     pub path: String,
+    pub utf8: bool,
 }
 
 #[cfg(feature = "code")]
@@ -93,22 +94,30 @@ pub fn changed_files(checkout_root: &Path, base: &str, head: &str) -> Option<Vec
     let mut fields = output
         .split(|&byte| byte == 0)
         .filter(|field| !field.is_empty())
-        .map(|field| String::from_utf8_lossy(field).into_owned());
+        .map(|field| {
+            (
+                String::from_utf8_lossy(field).into_owned(),
+                str::from_utf8(field).is_ok(),
+            )
+        });
     let mut files = Vec::new();
-    while let Some(status) = fields.next() {
+    while let Some((status, _)) = fields.next() {
         let status = status.chars().next()?;
-        let first = fields.next()?;
+        let (first, first_utf8) = fields.next()?;
         files.push(if matches!(status, 'R' | 'C') {
+            let (path, utf8) = fields.next()?;
             ChangedFile {
                 status,
                 old_path: Some(first),
-                path: fields.next()?,
+                path,
+                utf8: utf8 && first_utf8,
             }
         } else {
             ChangedFile {
                 status,
                 old_path: None,
                 path: first,
+                utf8: first_utf8,
             }
         });
     }

@@ -658,6 +658,16 @@ fn diff_reports_changed_symbols_between_revisions() {
         "def build(flag):\n    tools = [Old()]\n    if flag:\n        from extra import Tool\n    return tools\n",
     )
     .expect("nested import file is written");
+    fs::write(
+        repo.join("app/indent.py"),
+        "def run(flag):\n    if flag:\n        a()\n    b()\n",
+    )
+    .expect("indentation file is written");
+    fs::write(
+        repo.join("app/smile.py"),
+        "# done :)\ndef two():\n    pass\n",
+    )
+    .expect("comment file is written");
     git(repo, &["add", "."]);
     git(repo, &["commit", "-q", "-m", "base"]);
 
@@ -700,6 +710,8 @@ fn diff_reports_changed_symbols_between_revisions() {
     git(repo, &["mv", "app/service.py", "app/billing.py"]);
     edit("app/billing.py", "return amount", "return -amount");
     edit("app/tools.py", "Old()", "New()");
+    edit("app/indent.py", "    b()", "        b()");
+    edit("app/smile.py", "# done :)", "# done :) twice");
     git(repo, &["rm", "-q", "scripts/deploy.sh"]);
     fs::write(
         repo.join("web/refund.ts"),
@@ -718,6 +730,10 @@ fn diff_reports_changed_symbols_between_revisions() {
         output,
         "app/billing.py\trenamed from app/service.py\n\
          \x20 ~ 5-6\tmethod charge\tdef charge(self, amount):\n\
+         app/indent.py\tmodified\n\
+         \x20 ~ 1-4\tfunction run\tdef run(flag):\n\
+         app/smile.py\tmodified\n\
+         \x20 ~ 2-3\tfunction two\tdef two():\n\
          app/tools.py\tmodified\n\
          \x20 ~ 1-5\tfunction build\tdef build(flag):\n\
          lib/demo_web/components/core_components.ex\tmodified\n\

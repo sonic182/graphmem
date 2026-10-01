@@ -136,10 +136,14 @@ large checkout ahead of time, or to see which files could not be indexed, run
   names, and its occurrence among symbols sharing those, and it is modified
   when its signature or its own text changed. Its own text includes the
   comment and attribute lines directly above it and excludes nested symbols,
-  whitespace, `,`, and `;`, so an edited method is reported without its
-  `impl` or module. A renamed symbol appears as removed plus added. Changed
-  files that are not supported, minified, binary, not UTF-8, or larger than
-  1 MiB are listed on `skipped (<reason>): …` lines. Revisions starting with
+  so an edited method is reported without its `impl` or module. Blank lines,
+  `,`, `;`, and repeated spaces inside a line are ignored; indentation is
+  compared, so re-indenting Python counts as a change. A renamed symbol
+  appears as removed plus added. Changed files that are not supported,
+  minified, binary, not UTF-8 (content or path), larger than 1 MiB, or whose
+  type changed (for example into a symlink) are listed on
+  `skipped (<reason>): …` lines. Paths with control characters are printed
+  quoted and escaped. Revisions starting with
   `-` are refused. `gmem code diff <BASE> [HEAD]` prints the same text.
 
 Supported files: Rust, Go, Zig, C, C++ (`.h` headers are parsed as C++),

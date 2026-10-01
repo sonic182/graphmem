@@ -116,8 +116,23 @@ outline both versions in memory, and never touch code.sqlite. A symbol is
 modified when its signature or own text changed: its span plus the comment and
 attribute lines directly above it, minus nested symbols, whitespace, `,`, and
 `;`, so edits are not reported on enclosing impls or modules. The CLI has no
---json yet (the MCP tool returns JSON), head cannot be the working tree, and
-the MCP response is not paginated.
+--json yet, head cannot be the working tree, and the MCP response is not
+paginated. The MCP tool answers in plain text (see docs/mcp.md).
+
+**Follow-up from the local review**
+
+- [ ] Cost is quadratic in symbols per file: `own_text` scans every symbol for
+  children and `span`'s `taken` scans every symbol for each line it walks.
+  A 28k-method `impl` took 8.6 s in release. Precompute children and covered
+  lines once per file.
+- [ ] Cap the MCP output: a 40k-selector generated CSS edit returned about
+  1 MB. Add a `limit` (or a hard cap) on symbol lines and files, with a
+  truncation line.
+- [ ] Check blob size with `git cat-file -s` (or `--batch-check`) before
+  reading it; today `MAX_FILE_BYTES` is checked after the blob is buffered.
+- [ ] Optionally match same-name symbols (Elixir clauses, C++ overloads) by
+  signature before occurrence, so inserting a clause does not mark later
+  ones as modified.
 
 Add a structural view of changes between two Git revisions. Git diff shows
 changed lines; Graphmem should show which symbols changed without explaining

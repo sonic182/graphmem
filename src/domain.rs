@@ -365,8 +365,15 @@ impl<'a> SourceText<'a> {
             cursor = child.end.clamp(cursor, span.end);
         }
         text.push_str(&self.source[cursor..span.end]);
-        text.retain(|character| !character.is_whitespace() && !matches!(character, ',' | ';'));
-        text
+        text.retain(|character| !matches!(character, ',' | ';'));
+        text.lines()
+            .filter_map(|line| {
+                let indent = line.len() - line.trim_start().len();
+                let words = line.split_whitespace().collect::<Vec<_>>();
+                (!words.is_empty()).then(|| format!("{}{}", &line[..indent], words.join(" ")))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn span(&self, symbols: &[CodeSymbol], index: usize) -> std::ops::Range<usize> {
@@ -384,7 +391,12 @@ impl<'a> SourceText<'a> {
                 })
         };
         let start = self.offset(symbol.start);
-        let line_start = self.line_starts[symbol.start.line - 1];
+        let line_start = self
+            .line_starts
+            .get(symbol.start.line.saturating_sub(1))
+            .copied()
+            .unwrap_or(start)
+            .min(start);
         let mut lead = symbol.start.line;
         if self.source[line_start..start].trim().is_empty() {
             let mut line = lead;
@@ -394,7 +406,7 @@ impl<'a> SourceText<'a> {
                 let Some(text) = self.lines.get(line - 2).map(|text| text.trim()) else {
                     break;
                 };
-                if text.is_empty() && depth <= 0 && !heredoc {
+                if text.is_empty() && !heredoc {
                     break;
                 }
                 line -= 1;
@@ -404,15 +416,18 @@ impl<'a> SourceText<'a> {
                 if heredoc {
                     continue;
                 }
-                depth += text.matches([')', ']', '}']).count().cast_signed()
-                    - text.matches(['(', '[', '{']).count().cast_signed();
+                let comment = ["//", "/*", "*", "--", "<!--"]
+                    .iter()
+                    .any(|marker| text.starts_with(marker))
+                    || (text.starts_with('#') && !text.starts_with("#["));
+                if !comment {
+                    depth += text.matches([')', ']', '}']).count().cast_signed()
+                        - text.matches(['(', '[', '{']).count().cast_signed();
+                }
                 if depth > 0 {
                     continue;
                 }
-                if !["//", "/*", "*", "#", "@", "--", "<!--"]
-                    .iter()
-                    .any(|marker| text.starts_with(marker))
-                {
+                if !comment && !text.starts_with('#') && !text.starts_with('@') {
                     break;
                 }
                 depth = 0;
