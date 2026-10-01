@@ -28,7 +28,7 @@ show call sites, references, types, or arbitrary text.
 | --- | --- | --- |
 | Where is X defined? | `find_symbol` X | read that range |
 | Which imports does a file declare? | MCP `code_imports` or `gmem code imports <FILE>` | inspect the import names and source ranges; this does not resolve them to files |
-| Understand or edit a large file | `code_outline` path | read only the symbols involved |
+| Understand or edit a large file | `code_outline` path with `depth: 0` or `1` | raise `depth` only where needed, then read only the symbols involved |
 | Stack trace or error names a function | `find_symbol` with `kind: "function"` or `"method"` | read the frame's range |
 | Review or refactor a diff | `code_outline` each changed file | `rg`/`ast-grep` for callers of what changed |
 | Rename, or impact of a signature change | `find_symbol` for the definition | `rg -w`/`ast-grep` for every reference |
@@ -76,7 +76,9 @@ the way you expected.
 - `freshness: stale` or `missing` means the file changed between the refresh
   and the read. Call again rather than trusting the line numbers.
 - `code_outline` returns at most 500 symbols per call. Continue from
-  `next_offset` while it is present.
+  `next_offset` while it is present. With `depth`, `total` and `next_offset`
+  count only the symbols within that depth; `index` and `parent` still refer
+  to the full outline.
 - `.h` headers are parsed as C++. HTML and HEEx `<script>`/`<style>` bodies are
   outlined at their real lines in the file, including inside Elixir `~H`.
 - The first call in a large checkout that was never indexed can be slow. To

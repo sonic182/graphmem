@@ -66,8 +66,10 @@ large checkout ahead of time, or to see which files could not be indexed, run
 
 - `code_outline`: lists the definitions in `path` (relative to the checkout
   root, or absolute inside it), with optional `offset`, `limit` (1 to 500,
-  default 200), and `root` (an absolute directory inside another checkout;
-  defaults to the server's startup directory). Each symbol has an `index`, the
+  default 200), `depth` (0 for top-level symbols only, 1 adds their direct
+  children; omitted for every level), and `root` (an absolute directory inside
+  another checkout; defaults to the server's startup directory). `total` and
+  `next_offset` count only the symbols within `depth`. Each symbol has an `index`, the
   `index` of its syntactic `parent`, `name`, `kind`, 1-based
   `start_line`/`start_column`/`end_line`/`end_column`, and a one-line
   `signature`. The file is re-indexed first when it changed, so the result

@@ -644,6 +644,10 @@ struct CodeOutlineInput {
     /// Maximum symbols to return, 1 to 500. Defaults to 200.
     #[serde(default)]
     limit: Option<usize>,
+    /// Deepest nesting level to return: 0 for top-level symbols only, 1 adds
+    /// their direct children. Omit for every level.
+    #[serde(default)]
+    depth: Option<usize>,
     /// Absolute path inside the Git checkout to read. Omit to use the
     /// server's startup directory.
     #[serde(default)]
@@ -783,7 +787,8 @@ impl MemoryServer {
              column ranges and the index of each symbol's syntactic parent. Reads the file itself \
              and re-indexes it when it changed, so the result is never stale. coverage is \
              \"partial: <reason>\" when syntax errors or template limits may hide symbols. \
-             Supports Rust, Go, Zig, C, C++ (including .h), Python, JavaScript/JSX, \
+             Pass depth (0 for top-level symbols only) to skip deeper nesting; total and \
+             next_offset then count only the symbols within that depth. Supports Rust, Go, Zig, C, C++ (including .h), Python, JavaScript/JSX, \
              TypeScript/TSX, Elixir (including ~H), HEEx, EEx, Ruby, PHP, SQL, Bash, CSS, SCSS, \
              and HTML/HEEx <script> and <style>."
     )]
@@ -801,23 +806,21 @@ impl MemoryServer {
         let outline = self
             .run_code(move |code| code.outline(&directory, &path))
             .await?;
-        let total = outline.symbols.len();
+        let total = outline.within_depth(input.depth).count();
         let symbols = outline
-            .symbols
-            .into_iter()
-            .enumerate()
+            .within_depth(input.depth)
             .skip(offset)
             .take(limit)
             .map(|(index, symbol)| CodeSymbolRecord {
                 index,
                 parent: symbol.parent,
-                name: symbol.name,
-                kind: symbol.kind,
+                name: symbol.name.clone(),
+                kind: symbol.kind.clone(),
                 start_line: symbol.start.line,
                 start_column: symbol.start.column,
                 end_line: symbol.end.line,
                 end_column: symbol.end.column,
-                signature: symbol.signature,
+                signature: symbol.signature.clone(),
             })
             .collect();
         let next_offset = offset.saturating_add(limit);

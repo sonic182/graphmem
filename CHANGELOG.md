@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `require_relative`/`load`, PHP `require`/`include`, Bash `source`, Rust
   `extern crate`, and JavaScript/TypeScript `require()`, `import()`,
   `export ... from`, and `import x = require()` are listed too.
+- `gmem code outline <FILE> --depth N` and the MCP `code_outline` `depth`
+  argument limit how deeply nested symbols are listed; 0 returns top-level
+  symbols only. Pagination counts only the symbols within that depth.
 
 ### Changed
 

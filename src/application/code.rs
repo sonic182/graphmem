@@ -58,6 +58,23 @@ impl FileOutline {
     pub fn imports(&self) -> impl Iterator<Item = &CodeSymbol> {
         self.symbols.iter().filter(|symbol| symbol.kind == "import")
     }
+
+    /// How many enclosing symbols the symbol at `index` has.
+    pub fn depth(&self, index: usize) -> usize {
+        std::iter::successors(self.symbols[index].parent, |&parent| {
+            self.symbols[parent].parent
+        })
+        .count()
+    }
+
+    /// The symbols nested at most `max` levels deep, with their outline
+    /// index; every symbol when `max` is `None`.
+    pub fn within_depth(&self, max: Option<usize>) -> impl Iterator<Item = (usize, &CodeSymbol)> {
+        self.symbols
+            .iter()
+            .enumerate()
+            .filter(move |(index, _)| max.is_none_or(|max| self.depth(*index) <= max))
+    }
 }
 
 pub struct SymbolHit {

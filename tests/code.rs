@@ -318,6 +318,34 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
 }
 
 #[test]
+fn outline_depth_limits_nesting() {
+    let sandbox = Sandbox::new("outline-depth");
+    let path = "lib/demo_web/components/core_components.ex";
+    let top = sandbox.run(&["code", "outline", path, "--depth", "0"]);
+    assert_eq!(
+        top.lines().skip(1).collect::<Vec<_>>(),
+        [
+            "1-40\tmodule DemoWeb.CoreComponents",
+            "42-42\timport Logger"
+        ],
+        "{top}"
+    );
+    let children = sandbox.run(&["code", "outline", path, "--depth", "1"]);
+    for line in [
+        "8-15\t  function flash/1",
+        "33-39\t  module DemoWeb.CoreComponents.Helpers",
+    ] {
+        assert!(children.contains(line), "missing {line:?} in\n{children}");
+    }
+    for line in ["component .icon", "function hide/2"] {
+        assert!(
+            !children.contains(line),
+            "unexpected {line:?} in\n{children}"
+        );
+    }
+}
+
+#[test]
 fn imports_lists_declared_imports_across_supported_languages() {
     let sandbox = Sandbox::new("imports");
     let expectations = [

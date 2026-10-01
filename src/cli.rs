@@ -85,7 +85,11 @@ enum CodeCommand {
     /// Index the Git checkout containing PATH (default: the current directory).
     Index { path: Option<std::path::PathBuf> },
     /// List the symbols in FILE, re-indexing it first if it changed.
-    Outline { file: String },
+    Outline {
+        file: String,
+        #[arg(long)]
+        depth: Option<usize>,
+    },
     /// List the imports declared in FILE, re-indexing it first if it changed.
     Imports { file: String },
     /// Find indexed symbols by name, exact matches first.
@@ -305,7 +309,7 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
                 eprintln!("failed: {failure}");
             }
         }
-        CodeCommand::Outline { file } => {
+        CodeCommand::Outline { file, depth } => {
             let outline = service.outline(&directory, &file)?;
             println!(
                 "{}\t{}\t{}",
@@ -313,15 +317,12 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
                 outline.language,
                 outline.coverage.as_text()
             );
-            for symbol in &outline.symbols {
-                let depth =
-                    std::iter::successors(symbol.parent, |&parent| outline.symbols[parent].parent)
-                        .count();
+            for (index, symbol) in outline.within_depth(depth) {
                 println!(
                     "{}-{}\t{}{} {}",
                     symbol.start.line,
                     symbol.end.line,
-                    "  ".repeat(depth),
+                    "  ".repeat(outline.depth(index)),
                     symbol.kind,
                     symbol.name
                 );

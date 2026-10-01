@@ -1395,6 +1395,11 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     )
     .expect("source file is written");
     fs::write(
+        repo.join("lib/nested.ex"),
+        "defmodule A do\n  defmodule B do\n    def c, do: 1\n  end\n  def d, do: 2\nend\n",
+    )
+    .expect("nested source file is written");
+    fs::write(
         repo.join("lib/imports.rs"),
         "use alpha::One;\nuse beta::{\n    Two,\n    Three,\n};\nuse gamma::Four;\n",
     )
@@ -1458,6 +1463,22 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     assert_eq!(outline["symbols"][1]["name"], "charge/1");
     assert_eq!(outline["symbols"][1]["parent"], 0);
     assert_eq!(outline["symbols"][1]["start_line"], 2);
+
+    let shallow = mcp.request(
+        11,
+        "tools/call",
+        json!({
+            "name":"code_outline",
+            "arguments":{"path":"lib/nested.ex","depth":1,"offset":1,"limit":1}
+        }),
+    );
+    let shallow = &shallow["result"]["structuredContent"];
+    assert_eq!(shallow["total"], 3);
+    assert_eq!(shallow["next_offset"], 2);
+    assert_eq!(shallow["symbols"].as_array().unwrap().len(), 1);
+    assert_eq!(shallow["symbols"][0]["name"], "A.B");
+    assert_eq!(shallow["symbols"][0]["index"], 1);
+    assert_eq!(shallow["symbols"][0]["parent"], 0);
 
     let imports = mcp.request(
         8,
