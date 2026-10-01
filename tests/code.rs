@@ -500,6 +500,23 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
     }
 }
 
+#[test]
+fn syntax_errors_and_missing_nodes_mark_the_outline_partial() {
+    let sandbox = Sandbox::new("syntax-errors");
+    let cases = [
+        ("app/broken.ts", "function f( {\n"),
+        ("native/missing.rs", "fn main() { let x = 1 }\n"),
+    ];
+    for (path, source) in cases {
+        fs::write(sandbox.repo.join(path), source).expect("broken source is written");
+        let outline = sandbox.run(&["code", "outline", path]);
+        assert!(
+            outline.contains("\tpartial: syntax errors\n"),
+            "{path}: {outline}"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_filenames_do_not_abort_checkout_discovery() {
