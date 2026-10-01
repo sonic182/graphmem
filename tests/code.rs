@@ -653,6 +653,11 @@ fn indexes_each_linked_worktree_separately() {
 fn diff_reports_changed_symbols_between_revisions() {
     let sandbox = Sandbox::new("diff");
     let repo = &sandbox.repo;
+    fs::write(
+        repo.join("app/tools.py"),
+        "def build(flag):\n    tools = [Old()]\n    if flag:\n        from extra import Tool\n    return tools\n",
+    )
+    .expect("nested import file is written");
     git(repo, &["add", "."]);
     git(repo, &["commit", "-q", "-m", "base"]);
 
@@ -689,6 +694,7 @@ fn diff_reports_changed_symbols_between_revisions() {
     );
     git(repo, &["mv", "app/service.py", "app/billing.py"]);
     edit("app/billing.py", "return amount", "return -amount");
+    edit("app/tools.py", "Old()", "New()");
     git(repo, &["rm", "-q", "scripts/deploy.sh"]);
     fs::write(
         repo.join("web/refund.ts"),
@@ -712,6 +718,8 @@ fn diff_reports_changed_symbols_between_revisions() {
         String::from_utf8_lossy(&output.stdout),
         "app/billing.py\trenamed from app/service.py\n\
          \x20 ~ 5-6\tmethod charge\n\
+         app/tools.py\tmodified\n\
+         \x20 ~ 1-5\tfunction build\n\
          lib/demo_web/components/core_components.ex\tmodified\n\
          \x20 ~ 17-23\tfunction button/1\n\
          lib/demo_web/controllers/page_html/home.html.heex\tmodified\n\

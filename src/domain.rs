@@ -401,15 +401,38 @@ impl<'a> SourceText<'a> {
         let start = self.offset(symbol.start);
         let line_start = self.line_starts[symbol.start.line - 1];
         let mut lead = symbol.start.line;
-        while self.source[line_start..start].trim().is_empty()
-            && lead > 1
-            && !taken(lead - 1)
-            && self
-                .lines
-                .get(lead - 2)
-                .is_some_and(|line| !line.trim().is_empty())
-        {
-            lead -= 1;
+        if self.source[line_start..start].trim().is_empty() {
+            let mut line = lead;
+            let mut depth = 0_isize;
+            let mut heredoc = false;
+            while line > 1 && !taken(line - 1) {
+                let Some(text) = self.lines.get(line - 2).map(|text| text.trim()) else {
+                    break;
+                };
+                if text.is_empty() && depth <= 0 && !heredoc {
+                    break;
+                }
+                line -= 1;
+                if text.matches("\"\"\"").count() % 2 == 1 {
+                    heredoc = !heredoc;
+                }
+                if heredoc {
+                    continue;
+                }
+                depth += text.matches([')', ']', '}']).count().cast_signed()
+                    - text.matches(['(', '[', '{']).count().cast_signed();
+                if depth > 0 {
+                    continue;
+                }
+                if !["//", "/*", "*", "#", "@", "--", "<!--"]
+                    .iter()
+                    .any(|marker| text.starts_with(marker))
+                {
+                    break;
+                }
+                depth = 0;
+                lead = line;
+            }
         }
         let start = if lead < symbol.start.line {
             self.line_starts[lead - 1]
