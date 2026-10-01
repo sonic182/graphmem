@@ -682,6 +682,9 @@ struct CodeDiffInput {
     /// Head revision. Defaults to "HEAD".
     #[serde(default)]
     head: Option<String>,
+    /// Maximum changed files to report, 1 to 1000. Defaults to 200.
+    #[serde(default)]
+    limit: Option<usize>,
     /// Absolute path inside the Git checkout to compare. Omit to use the
     /// server's startup directory.
     #[serde(default)]
@@ -819,7 +822,9 @@ impl MemoryServer {
              a third column when coverage is partial); then one `  <+|-|~> start-end<TAB>kind \
              name[<TAB>signature]` line per symbol, the signature only when it adds to the name \
              and the symbol was not removed; and `skipped (<reason>): paths` lines for files that \
-             could not be outlined. Lines refer to head, or to the merge base for removed \
+             could not be outlined. At most limit changed files are reported (1 to 1000, default \
+             200), and a `<n> of <total> changed files` line follows when more changed. Lines \
+             refer to head, or to the merge base for removed \
              symbols. This is structural, not semantic: a symbol is modified when its signature \
              or own text changed (an edit inside a nested symbol is reported on that symbol \
              only), and a renamed symbol appears as removed plus added. HEEx component and slot \
@@ -830,10 +835,14 @@ impl MemoryServer {
         &self,
         Parameters(input): Parameters<CodeDiffInput>,
     ) -> Result<CallToolResult, CallToolResult> {
+        let limit = input.limit.unwrap_or(200);
+        if !(1..=1000).contains(&limit) {
+            return Err(tool_error("limit must be between 1 and 1000"));
+        }
         let directory = code_directory(input.root)?;
         let head = input.head.unwrap_or_else(|| "HEAD".to_owned());
         let base = input.base;
-        let diff = tokio::task::spawn_blocking(move || code::diff(&directory, &base, &head))
+        let diff = tokio::task::spawn_blocking(move || code::diff(&directory, &base, &head, limit))
             .await
             .map_err(|error| tool_error(format!("code diff task failed: {error}")))?
             .map_err(|error| tool_error(error.to_string()))?;

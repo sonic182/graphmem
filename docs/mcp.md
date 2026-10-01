@@ -131,7 +131,10 @@ large checkout ahead of time, or to see which files could not be indexed, run
   `[code] max_files`, so a definition may be missing. No match returns empty
   text.
 - `code_diff`: lists the symbols `added`, `removed`, or `modified` between two
-  Git revisions, with `base`, optional `head` (default `HEAD`), and `root`.
+  Git revisions, with `base`, optional `head` (default `HEAD`), `limit` (1 to
+  1000 changed files, default 200), and `root`. When more files changed, the
+  first `limit` are reported and a final `<n> of <total> changed files` line
+  says how many were left out.
   Like a pull request, the merge base of `base` and `head` is compared with
   `head`. Both versions of each changed file are outlined in memory; the index
   is neither read nor written. The result is plain text:
@@ -160,7 +163,8 @@ large checkout ahead of time, or to see which files could not be indexed, run
   when its signature or its own text changed. Its own text includes the
   comment and attribute lines directly above it and excludes nested symbols,
   so an edited method is reported without its `impl` or module. Blank lines,
-  `,`, `;`, and repeated spaces inside a line are ignored; indentation is
+  repeated spaces inside a line, and the `,` and `;` that separate nested
+  symbols are ignored; indentation is
   compared, so re-indenting Python counts as a change. A renamed symbol
   appears as removed plus added. Changed files that are not supported,
   minified, binary, not UTF-8 (content or path), larger than 1 MiB, or whose

@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside a nested symbol are reported on that symbol only; renamed symbols
   appear as removed plus added; unsupported and binary files are listed as
   skipped. The MCP tool answers in compact plain text rather than JSON (about
-  7× smaller than `git diff` on real repositories).
+  7× smaller than `git diff` on real repositories) and reports at most `limit`
+  changed files (default 200).
 
 ### Changed
 

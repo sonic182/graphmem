@@ -207,6 +207,7 @@ pub struct CodeDiff {
     pub head: String,
     pub files: Vec<FileDiff>,
     pub skipped: Vec<(String, String)>,
+    pub total: usize,
 }
 
 impl CodeDiff {
@@ -257,6 +258,13 @@ impl CodeDiff {
         }
         for (reason, paths) in reasons {
             lines.push(format!("skipped ({reason}): {}", paths.join(", ")));
+        }
+        let shown = self.files.len() + self.skipped.len();
+        if shown < self.total {
+            lines.push(format!(
+                "{shown} of {} changed files; raise limit or narrow base and head for more",
+                self.total
+            ));
         }
         lines.push(String::new());
         lines.join("\n")
@@ -555,7 +563,7 @@ fn outline_bytes(
     Ok((source, outline(language, source)))
 }
 
-pub fn diff(directory: &Path, base: &str, head: &str) -> Result<CodeDiff> {
+pub fn diff(directory: &Path, base: &str, head: &str, limit: usize) -> Result<CodeDiff> {
     let root = checkout_root(directory)?;
     let resolve = |revision: &str| {
         resolve_commit(&root, revision)
@@ -572,8 +580,9 @@ pub fn diff(directory: &Path, base: &str, head: &str) -> Result<CodeDiff> {
         head,
         files: Vec::new(),
         skipped: Vec::new(),
+        total: changed.len(),
     };
-    for file in changed {
+    for file in changed.into_iter().take(limit) {
         match diff_file(&root, &report.base, &report.head, &file) {
             Ok(diff) => report.files.push(diff),
             Err(reason) => report.skipped.push((file.path, reason)),
@@ -603,6 +612,7 @@ fn diff_file(
         .filter(|_| !is_minified(Path::new(&file.path)))
         .ok_or("unsupported file type")?;
     let old_path = file.old_path.as_deref().unwrap_or(&file.path);
+    let base_language = CodeLanguage::for_path(Path::new(old_path)).unwrap_or(language);
     let read = |commit: &str, path: &str| {
         let bytes = file_at(root, commit, path).ok_or("git cat-file failed")?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
@@ -618,7 +628,7 @@ fn diff_file(
         FileStatus::Deleted => Vec::new(),
         _ => read(head, &file.path)?,
     };
-    let (base_source, base_outline) = outline_bytes(language, &base_bytes)?;
+    let (base_source, base_outline) = outline_bytes(base_language, &base_bytes)?;
     let (head_source, head_outline) = outline_bytes(language, &head_bytes)?;
     let coverage = [&base_outline.coverage, &head_outline.coverage]
         .into_iter()

@@ -691,6 +691,11 @@ fn diff_reports_changed_symbols_between_revisions() {
         "# done :)\ndef two():\n    pass\n",
     )
     .expect("comment file is written");
+    fs::write(
+        repo.join("app/split.py"),
+        "def parts(text):\n    return text.split(\",\")\n",
+    )
+    .expect("separator file is written");
     git(repo, &["add", "."]);
     git(repo, &["commit", "-q", "-m", "base"]);
 
@@ -735,6 +740,7 @@ fn diff_reports_changed_symbols_between_revisions() {
     edit("app/tools.py", "Old()", "New()");
     edit("app/indent.py", "    b()", "        b()");
     edit("app/smile.py", "# done :)", "# done :) twice");
+    edit("app/split.py", "\",\"", "\";\"");
     git(repo, &["rm", "-q", "scripts/deploy.sh"]);
     fs::write(
         repo.join("web/refund.ts"),
@@ -757,6 +763,8 @@ fn diff_reports_changed_symbols_between_revisions() {
          \x20 ~ 1-4\tfunction run\tdef run(flag):\n\
          app/smile.py\tmodified\n\
          \x20 ~ 2-3\tfunction two\tdef two():\n\
+         app/split.py\tmodified\n\
+         \x20 ~ 1-2\tfunction parts\tdef parts(text):\n\
          app/tools.py\tmodified\n\
          \x20 ~ 1-5\tfunction build\tdef build(flag):\n\
          lib/demo_web/components/core_components.ex\tmodified\n\

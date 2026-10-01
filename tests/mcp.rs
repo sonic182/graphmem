@@ -1571,6 +1571,25 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
         text,
         "lib/billing.ex\tmodified\n  ~ 2-2\tfunction charge/1\tdef charge(amount), do: amount * 2\n"
     );
+    fs::write(repo.join("lib/nested.ex"), "defmodule A do\nend\n")
+        .expect("second source file is changed");
+    git(&["commit", "-q", "-am", "second"]);
+    let limited = mcp.request(
+        14,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"HEAD~2","limit":1}}),
+    );
+    let text = limited["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.ends_with("\n1 of 2 changed files; raise limit or narrow base and head for more\n"),
+        "{text}"
+    );
+    let invalid = mcp.request(
+        15,
+        "tools/call",
+        json!({"name":"code_diff","arguments":{"base":"HEAD~1","limit":0}}),
+    );
+    assert_eq!(invalid["result"]["isError"], true);
     let injected = mcp.request(
         13,
         "tools/call",

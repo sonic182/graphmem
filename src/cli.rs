@@ -326,7 +326,7 @@ fn run_code(command: CodeCommand) -> Result<(), Box<dyn Error>> {
         CodeCommand::Diff { base, head } => {
             print!(
                 "{}",
-                graphmem::application::code::diff(&directory, &base, &head)?.to_text()
+                graphmem::application::code::diff(&directory, &base, &head, usize::MAX)?.to_text()
             );
         }
         CodeCommand::Find { query, kind, limit } => {

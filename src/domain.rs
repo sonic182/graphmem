@@ -355,17 +355,19 @@ impl<'a> SourceText<'a> {
     }
 
     fn own_text(&self, symbols: &[CodeSymbol], index: usize) -> String {
+        let separator = [' ', '\t', ',', ';'];
         let span = self.span(symbols, index);
         let mut text = String::new();
         let mut cursor = span.start;
         for child in (0..symbols.len()).filter(|&child| symbols[child].parent == Some(index)) {
             let child = self.span(symbols, child);
             let start = child.start.clamp(cursor, span.end);
-            text.push_str(&self.source[cursor..start]);
+            text.push_str(self.source[cursor..start].trim_end_matches(separator));
             cursor = child.end.clamp(cursor, span.end);
+            let rest = &self.source[cursor..span.end];
+            cursor += rest.len() - rest.trim_start_matches(separator).len();
         }
         text.push_str(&self.source[cursor..span.end]);
-        text.retain(|character| !matches!(character, ',' | ';'));
         text.lines()
             .filter_map(|line| {
                 let indent = line.len() - line.trim_start().len();
