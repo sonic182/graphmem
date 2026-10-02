@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Racket (`.rkt`, `.rktl`) is indexed by the code tools: modules, structs,
   functions, macros, constants, and `require` imports.
 
+### Fixed
+
+- Code indexes use versioned filenames (`code-v{N}.sqlite`), so binaries with
+  different schema/extractor versions no longer wipe each other's cache.
+  Older caches are left untouched.
+
 ## [0.8.0] - 2026-10-01
 
 ### Added

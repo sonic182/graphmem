@@ -105,7 +105,7 @@ impl CodeIndex {
             field: "database path",
             message: "default database has no parent directory",
         })?;
-        Ok(data_dir.join("code.sqlite"))
+        Ok(data_dir.join(format!("code-v{INDEX_VERSION}.sqlite")))
     }
 
     pub fn open(path: &Path) -> Result<Self> {

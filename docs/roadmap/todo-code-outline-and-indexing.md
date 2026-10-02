@@ -12,7 +12,7 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
 ## Boundaries
 
 - Keep code symbols in a separate, rebuildable SQLite index
-  (`$GRAPHMEM_HOME/code.sqlite`), not the existing `entities`/`edges` tables or
+  (`$GRAPHMEM_HOME/code-v{N}.sqlite`), not the existing `entities`/`edges` tables or
   memory `recall` ranking. No automatic memory extraction from source.
 - Key an index by checkout root, not just Git's common directory: linked
   worktrees share memories but can contain different code. Only read files
@@ -119,11 +119,10 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       timing.
 - [ ] Content hash in the stamp if size + mtime ever reports a changed file as
       fresh.
-- [ ] Two binaries with different `INDEX_VERSION`s sharing one
-      `$GRAPHMEM_HOME` (e.g. a plugin and a dev build) wipe each other's
-      `code.sqlite` on open, and a server already running keeps writing its
-      older output into the rebuilt file. Name the file by version
-      (`code-v{N}.sqlite`) or store the version per checkout.
+- [x] Isolate binaries with different `INDEX_VERSION`s sharing one
+      `$GRAPHMEM_HOME` (e.g. a plugin and a dev build) by naming the index
+      `code-v{N}.sqlite`. Old caches, including legacy `code.sqlite`, are
+      left untouched; each version rebuilds its own index from source.
 - [ ] Code tools hold a `std::sync::Mutex` on a Tokio worker for a whole
       refresh (seconds on a first index); several parallel `find_symbol`
       calls can stall the memory tools. Run them through `spawn_blocking`.
