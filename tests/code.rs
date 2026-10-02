@@ -425,36 +425,58 @@ fn racket_imports_include_every_phase_shifted_spec() {
     fs::write(
         sandbox.repo.join("lisp/billing.rkt"),
         "#lang racket/base\n\
-         (require (for-meta 1 racket/base racket/list)\n\
-                  (for-syntax racket/string (only-in racket/match match))\n\
-                  (for-template racket/set racket/vector)\n\
-                  (for-label racket/math racket/format)\n\
-                  (for-meta #f (prefix-in p: racket/function) (only-in racket/port port->string)))\n",
+         (require (for-meta 1\n\
+                    racket/base\n\
+                    racket/list)\n\
+                  (for-syntax\n\
+                    racket/string\n\
+                    (only-in racket/match match))\n\
+                  (for-template\n\
+                    racket/set\n\
+                    racket/vector)\n\
+                  (for-label\n\
+                    racket/math\n\
+                    racket/format)\n\
+                  (for-meta #f\n\
+                    (prefix-in p:\n\
+                      racket/function)\n\
+                    (only-in\n\
+                      racket/port port->string)))\n",
     )
     .expect("Racket phase-import fixture is written");
     let imports = sandbox.run(&["code", "imports", "lisp/billing.rkt"]);
     assert!(imports.contains("\tracket\tcomplete\n"), "{imports}");
-    let names = imports
+    let expected = [
+        ("3-3", "racket/base"),
+        ("4-4", "racket/list"),
+        ("6-6", "racket/string"),
+        ("7-7", "racket/match"),
+        ("9-9", "racket/set"),
+        ("10-10", "racket/vector"),
+        ("12-12", "racket/math"),
+        ("13-13", "racket/format"),
+        ("16-16", "racket/function"),
+        ("18-18", "racket/port"),
+    ];
+    let actual = imports
         .lines()
         .skip(1)
-        .map(|line| line.split_once('\t').expect("import has a range").1)
+        .map(|line| line.split_once('\t').expect("import has a range"))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected, "{imports}");
+    let top = sandbox.run(&["code", "outline", "lisp/billing.rkt", "--depth", "0"]);
+    let expected_outline = expected
+        .iter()
+        .map(|(range, name)| format!("{range}\timport {name}"))
         .collect::<Vec<_>>();
     assert_eq!(
-        names,
-        [
-            "racket/base",
-            "racket/list",
-            "racket/string",
-            "racket/match",
-            "racket/set",
-            "racket/vector",
-            "racket/math",
-            "racket/format",
-            "racket/function",
-            "racket/port",
-        ],
-        "{imports}"
+        top.lines().skip(1).collect::<Vec<_>>(),
+        expected_outline,
+        "phase imports must remain siblings:\n{top}"
     );
+    let found = sandbox.run(&["code", "find", "racket/list", "--kind", "import"]);
+    assert!(found.contains(":4-4\timport racket/list"), "{found}");
+    assert!(!found.contains("\tin "), "{found}");
 }
 
 #[test]

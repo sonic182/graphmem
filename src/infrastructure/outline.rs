@@ -802,8 +802,8 @@ fn racket_forms<D: Doc>(parent: &Node<'_, D>, symbols: &mut Vec<CodeSymbol>) {
             "begin" => racket_forms(&form, symbols),
             "require" => {
                 for spec in &items[1..] {
-                    for name in racket_module_paths(spec) {
-                        symbols.push(node_symbol(spec, name, "import", Origin::default()));
+                    for (module, name) in racket_module_paths(spec) {
+                        symbols.push(node_symbol(&module, name, "import", Origin::default()));
                     }
                 }
             }
@@ -877,11 +877,11 @@ fn racket_is_lambda<D: Doc>(node: &Node<'_, D>) -> bool {
             .is_some_and(|head| matches!(head.text().as_ref(), "lambda" | "λ" | "case-lambda"))
 }
 
-/// A `require` spec may wrap one module or phase-shift several nested specs.
-fn racket_module_paths<D: Doc>(spec: &Node<'_, D>) -> Vec<String> {
+/// Preserve each module's source node through wrappers and phase shifts.
+fn racket_module_paths<'r, D: Doc>(spec: &Node<'r, D>) -> Vec<(Node<'r, D>, String)> {
     match spec.kind().as_ref() {
-        "symbol" => vec![spec.text().into_owned()],
-        "string" => vec![spec.text().trim_matches('"').to_owned()],
+        "symbol" => vec![(spec.clone(), spec.text().into_owned())],
+        "string" => vec![(spec.clone(), spec.text().trim_matches('"').to_owned())],
         "list" => {
             let items = racket_items(spec);
             let Some(head) = items.first() else {
@@ -898,7 +898,7 @@ fn racket_module_paths<D: Doc>(spec: &Node<'_, D>) -> Vec<String> {
                 }
                 "prefix-in" => 2,
                 "file" | "lib" | "planet" | "only-in" | "except-in" | "rename-in" => 1,
-                _ => return vec![spec.text().into_owned()],
+                _ => return vec![(spec.clone(), spec.text().into_owned())],
             };
             items
                 .get(index)
