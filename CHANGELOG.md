@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-02
+
 ### Added
 
 - Racket (`.rkt`, `.rktl`) is indexed by the code tools: modules, structs,
@@ -245,15 +247,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.8.0...HEAD
-[0.8.0]: https://github.com/sonic182/graphmem/releases/tag/0.8.0
-[0.7.1]: https://github.com/sonic182/graphmem/releases/tag/0.7.1
-[0.7.0]: https://github.com/sonic182/graphmem/releases/tag/0.7.0
-[0.6.0]: https://github.com/sonic182/graphmem/releases/tag/0.6.0
-[0.5.0]: https://github.com/sonic182/graphmem/releases/tag/0.5.0
-[0.4.0]: https://github.com/sonic182/graphmem/releases/tag/0.4.0
-[0.3.2]: https://github.com/sonic182/graphmem/releases/tag/0.3.2
-[0.3.1]: https://github.com/sonic182/graphmem/releases/tag/0.3.1
-[0.3.0]: https://github.com/sonic182/graphmem/releases/tag/0.3.0
-[0.2.0]: https://github.com/sonic182/graphmem/releases/tag/0.2.0
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/sonic182/graphmem/compare/0.8.0...0.9.0
+[0.8.0]: https://github.com/sonic182/graphmem/compare/0.7.1...0.8.0
+[0.7.1]: https://github.com/sonic182/graphmem/compare/0.7.0...0.7.1
+[0.7.0]: https://github.com/sonic182/graphmem/compare/0.6.0...0.7.0
+[0.6.0]: https://github.com/sonic182/graphmem/compare/0.5.0...0.6.0
+[0.5.0]: https://github.com/sonic182/graphmem/compare/0.4.0...0.5.0
+[0.4.0]: https://github.com/sonic182/graphmem/compare/0.3.2...0.4.0
+[0.3.2]: https://github.com/sonic182/graphmem/compare/0.3.1...0.3.2
+[0.3.1]: https://github.com/sonic182/graphmem/compare/0.3.0...0.3.1
+[0.3.0]: https://github.com/sonic182/graphmem/compare/0.2.0...0.3.0
+[0.2.0]: https://github.com/sonic182/graphmem/compare/0.1.1...0.2.0
 [0.1.1]: https://github.com/sonic182/graphmem/releases/tag/0.1.1
