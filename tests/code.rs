@@ -325,6 +325,11 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             );
         }
     }
+    let racket = sandbox.run(&["code", "outline", "lisp/billing.rkt"]);
+    assert!(
+        !racket.contains("constant tax"),
+        "function-local definitions are not symbols:\n{racket}"
+    );
     let heex = sandbox.run(&[
         "code",
         "outline",
@@ -365,6 +370,44 @@ fn outline_depth_limits_nesting() {
             "unexpected {line:?} in\n{children}"
         );
     }
+}
+
+#[test]
+fn racket_imports_include_every_phase_shifted_spec() {
+    let sandbox = Sandbox::new("racket-phase-imports");
+    fs::write(
+        sandbox.repo.join("lisp/billing.rkt"),
+        "#lang racket/base\n\
+         (require (for-meta 1 racket/base racket/list)\n\
+                  (for-syntax racket/string (only-in racket/match match))\n\
+                  (for-template racket/set racket/vector)\n\
+                  (for-label racket/math racket/format)\n\
+                  (for-meta #f (prefix-in p: racket/function) (only-in racket/port port->string)))\n",
+    )
+    .expect("Racket phase-import fixture is written");
+    let imports = sandbox.run(&["code", "imports", "lisp/billing.rkt"]);
+    assert!(imports.contains("\tracket\tcomplete\n"), "{imports}");
+    let names = imports
+        .lines()
+        .skip(1)
+        .map(|line| line.split_once('\t').expect("import has a range").1)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "racket/base",
+            "racket/list",
+            "racket/string",
+            "racket/match",
+            "racket/set",
+            "racket/vector",
+            "racket/math",
+            "racket/format",
+            "racket/function",
+            "racket/port",
+        ],
+        "{imports}"
+    );
 }
 
 #[test]

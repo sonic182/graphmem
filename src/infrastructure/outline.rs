@@ -802,7 +802,7 @@ fn racket_forms<D: Doc>(parent: &Node<'_, D>, symbols: &mut Vec<CodeSymbol>) {
             "begin" => racket_forms(&form, symbols),
             "require" => {
                 for spec in &items[1..] {
-                    if let Some(name) = racket_module_path(spec) {
+                    for name in racket_module_paths(spec) {
                         symbols.push(node_symbol(spec, name, "import", Origin::default()));
                     }
                 }
@@ -877,23 +877,35 @@ fn racket_is_lambda<D: Doc>(node: &Node<'_, D>) -> bool {
             .is_some_and(|head| matches!(head.text().as_ref(), "lambda" | "λ" | "case-lambda"))
 }
 
-/// A `require` spec: a module path, a string, or a wrapper such as
-/// `(only-in mod id ...)` or `(prefix-in p: mod)` around one.
-fn racket_module_path<D: Doc>(spec: &Node<'_, D>) -> Option<String> {
+/// A `require` spec may wrap one module or phase-shift several nested specs.
+fn racket_module_paths<D: Doc>(spec: &Node<'_, D>) -> Vec<String> {
     match spec.kind().as_ref() {
-        "symbol" => Some(spec.text().into_owned()),
-        "string" => Some(spec.text().trim_matches('"').to_owned()),
+        "symbol" => vec![spec.text().into_owned()],
+        "string" => vec![spec.text().trim_matches('"').to_owned()],
         "list" => {
             let items = racket_items(spec);
-            let index = match items.first()?.text().as_ref() {
-                "prefix-in" => 2,
-                "file" | "lib" | "planet" | "only-in" | "except-in" | "rename-in"
-                | "for-syntax" | "for-template" | "for-label" | "for-meta" => 1,
-                _ => return Some(spec.text().into_owned()),
+            let Some(head) = items.first() else {
+                return Vec::new();
             };
-            racket_module_path(items.get(index)?)
+            let index = match head.text().as_ref() {
+                "for-syntax" | "for-template" | "for-label" | "for-meta" => {
+                    let skip = if head.text() == "for-meta" { 2 } else { 1 };
+                    return items
+                        .iter()
+                        .skip(skip)
+                        .flat_map(racket_module_paths)
+                        .collect();
+                }
+                "prefix-in" => 2,
+                "file" | "lib" | "planet" | "only-in" | "except-in" | "rename-in" => 1,
+                _ => return vec![spec.text().into_owned()],
+            };
+            items
+                .get(index)
+                .map(racket_module_paths)
+                .unwrap_or_default()
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
