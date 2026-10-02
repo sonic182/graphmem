@@ -2,6 +2,12 @@
 
 [![CI](https://github.com/sonic182/graphmem/actions/workflows/ci.yml/badge.svg)](https://github.com/sonic182/graphmem/actions/workflows/ci.yml)
 
+---
+
+![Graphmem — Shared, local memory for coding agents](docs/assets/graphmem-banner.png)
+
+----
+
 Graphmem gives coding agents shared, local memory and optional code navigation. Claude Code, Codex, OpenCode, pi, and other MCP clients can use the same store, so project decisions and context survive new sessions and switches between tools. It finds relevant memories even when a query uses different words.
 
 Its code helpers find definitions, outline files, list declared imports, and show which symbols changed between Git revisions. Agents get compact results with source ranges before reading code; the rebuildable code index stays separate from durable memories.
