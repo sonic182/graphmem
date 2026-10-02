@@ -113,10 +113,13 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
 - [x] Integration tests: every language, edits/deletes, ignored files, path
       traversal and symlinks, stale results, two worktrees, config off; the
       memory tools' behavior unchanged (`tests/code.rs`, `tests/mcp.rs`).
-- [ ] Compare common navigation questions against `rg`/`ast-grep` on real
-      Phoenix and Python repositories. Ship more only if the index saves tool
-      calls or improves precision; measure misses and false matches, not only
-      timing.
+- [x] Compare common navigation questions against `rg`/`ast-grep` on real
+      Phoenix and Python repositories. See the
+      [2026-10-02 validation baseline](code-navigation-validation.md) for
+      timing, definition coverage, and the Memoize extraction gap.
+- [ ] Measure actual agent tool-call savings on representative navigation tasks;
+      the baseline measured output reduction, not tool-call savings. Ship more
+      only if the index saves tool calls or improves precision.
 - [ ] Content hash in the stamp if size + mtime ever reports a changed file as
       fresh.
 - [x] Isolate binaries with different `INDEX_VERSION`s sharing one
