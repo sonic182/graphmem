@@ -242,7 +242,10 @@ CLI equivalent.
 Only in binaries built with `--features code`. Disabled by `[code] enabled =
 false` in `config.toml` or `GRAPHMEM_CODE=off`. It works on the Git checkout
 containing the current directory; each linked worktree is indexed separately
-into `$GRAPHMEM_HOME/code.sqlite`, which can be deleted and rebuilt at any time.
+into `$GRAPHMEM_HOME/code-v{N}.sqlite` (`N` is the schema/extractor version),
+which can be deleted and rebuilt at any time. Different index versions use
+separate files. Older caches, including legacy `code.sqlite`, are left untouched;
+delete them only when no older binary uses them.
 
 - `gmem code index [PATH]` indexes the tracked and untracked, non-ignored
   source files of the checkout containing `PATH` (default: the current

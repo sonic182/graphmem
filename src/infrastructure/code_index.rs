@@ -7,7 +7,7 @@ use crate::domain::{CodeSymbol, Coverage, SourcePoint};
 
 /// Bump when the schema or the extracted symbols change; a mismatch rebuilds
 /// the index from scratch, since it can always be regenerated from source.
-const INDEX_VERSION: i64 = 6;
+const INDEX_VERSION: i64 = 8;
 
 const USAGE_KINDS: &str = "'import', 'component', 'slot', 'expression'";
 
@@ -105,7 +105,7 @@ impl CodeIndex {
             field: "database path",
             message: "default database has no parent directory",
         })?;
-        Ok(data_dir.join("code.sqlite"))
+        Ok(data_dir.join(format!("code-v{INDEX_VERSION}.sqlite")))
     }
 
     pub fn open(path: &Path) -> Result<Self> {

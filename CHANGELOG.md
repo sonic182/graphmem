@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Racket (`.rkt`, `.rktl`) is indexed by the code tools: modules, structs,
   functions, macros, constants, and `require` imports.
+- A real-repository [code navigation validation baseline](docs/roadmap/code-navigation-validation.md)
+  for Phoenix/Elixir and Python, covering indexing and query timings,
+  definition accuracy, output size, and the known Memoize extraction gap.
+
+### Fixed
+
+- Code indexes use versioned filenames (`code-v{N}.sqlite`), so binaries with
+  different schema/extractor versions no longer wipe each other's cache.
+  Older caches are left untouched.
+- Racket phase-shifted `require` forms (`for-syntax`, `for-template`,
+  `for-label`, and `for-meta`) extract every nested module spec.
+  `for-meta` skips its phase argument, including `#f`. Imports retain their
+  individual source ranges and remain siblings, avoiding missing imports in
+  depth-limited outlines and false parent names in symbol lookups.
 
 ## [0.8.0] - 2026-10-01
 

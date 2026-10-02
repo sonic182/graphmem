@@ -12,7 +12,7 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
 ## Boundaries
 
 - Keep code symbols in a separate, rebuildable SQLite index
-  (`$GRAPHMEM_HOME/code.sqlite`), not the existing `entities`/`edges` tables or
+  (`$GRAPHMEM_HOME/code-v{N}.sqlite`), not the existing `entities`/`edges` tables or
   memory `recall` ranking. No automatic memory extraction from source.
 - Key an index by checkout root, not just Git's common directory: linked
   worktrees share memories but can contain different code. Only read files
@@ -113,17 +113,19 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
 - [x] Integration tests: every language, edits/deletes, ignored files, path
       traversal and symlinks, stale results, two worktrees, config off; the
       memory tools' behavior unchanged (`tests/code.rs`, `tests/mcp.rs`).
-- [ ] Compare common navigation questions against `rg`/`ast-grep` on real
-      Phoenix and Python repositories. Ship more only if the index saves tool
-      calls or improves precision; measure misses and false matches, not only
-      timing.
+- [x] Compare common navigation questions against `rg`/`ast-grep` on real
+      Phoenix and Python repositories. See the
+      [2026-10-02 validation baseline](code-navigation-validation.md) for
+      timing, definition coverage, and the Memoize extraction gap.
+- [ ] Measure actual agent tool-call savings on representative navigation tasks;
+      the baseline measured output reduction, not tool-call savings. Ship more
+      only if the index saves tool calls or improves precision.
 - [ ] Content hash in the stamp if size + mtime ever reports a changed file as
       fresh.
-- [ ] Two binaries with different `INDEX_VERSION`s sharing one
-      `$GRAPHMEM_HOME` (e.g. a plugin and a dev build) wipe each other's
-      `code.sqlite` on open, and a server already running keeps writing its
-      older output into the rebuilt file. Name the file by version
-      (`code-v{N}.sqlite`) or store the version per checkout.
+- [x] Isolate binaries with different `INDEX_VERSION`s sharing one
+      `$GRAPHMEM_HOME` (e.g. a plugin and a dev build) by naming the index
+      `code-v{N}.sqlite`. Old caches, including legacy `code.sqlite`, are
+      left untouched; each version rebuilds its own index from source.
 - [ ] Code tools hold a `std::sync::Mutex` on a Tokio worker for a whole
       refresh (seconds on a first index); several parallel `find_symbol`
       calls can stall the memory tools. Run them through `spawn_blocking`.

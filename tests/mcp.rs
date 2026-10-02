@@ -1627,8 +1627,6 @@ fn code_failures_leave_the_memory_tools_available() {
             .success()
     );
     fs::create_dir_all(&home).expect("home is created");
-    fs::write(home.join("code.sqlite"), "not a database").expect("corrupt index is written");
-
     let tool_names = |mcp: &mut Mcp| {
         mcp.request(
             1,
@@ -1642,6 +1640,11 @@ fn code_failures_leave_the_memory_tools_available() {
             .map(|tool| tool["name"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>()
     };
+
+    let mut mcp = Mcp::spawn_with(&home, &repo, &[("GRAPHMEM_CODE", "on")]);
+    tool_names(&mut mcp);
+    drop(mcp);
+    fs::write(code_index_path(&home), "not a database").expect("corrupt index is written");
 
     let mut mcp = Mcp::spawn_with(&home, &repo, &[("GRAPHMEM_CODE", "on")]);
     let names = tool_names(&mut mcp);
@@ -1689,6 +1692,17 @@ fn code_failures_leave_the_memory_tools_available() {
         }
     }
     fs::remove_dir_all(root).expect("MCP code failure test data is removed");
+}
+
+fn code_index_path(home: &Path) -> std::path::PathBuf {
+    fs::read_dir(home)
+        .expect("home is readable")
+        .map(|entry| entry.expect("home entry").path())
+        .find(|path| {
+            let name = path.file_name().unwrap().to_string_lossy();
+            name.starts_with("code-v") && name.ends_with(".sqlite")
+        })
+        .expect("versioned code index exists")
 }
 
 /// A first index of a large checkout takes seconds. It must run off the Tokio
@@ -1742,7 +1756,7 @@ fn code_refresh_does_not_block_memory_tools() {
             "initialize",
             json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
         );
-        let code_index = rusqlite::Connection::open(home.join("code.sqlite"))
+        let code_index = rusqlite::Connection::open(code_index_path(&home))
             .expect("code index database is available");
         code_index
             .busy_timeout(std::time::Duration::from_secs(5))

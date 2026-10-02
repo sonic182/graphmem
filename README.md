@@ -2,13 +2,16 @@
 
 [![CI](https://github.com/sonic182/graphmem/actions/workflows/ci.yml/badge.svg)](https://github.com/sonic182/graphmem/actions/workflows/ci.yml)
 
-Graphmem gives coding agents a shared, local memory. Claude Code, Codex, OpenCode, pi, and other MCP clients can use the same store, so project decisions and context survive new sessions and switches between tools. It finds relevant memories even when a query uses different words.
+Graphmem gives coding agents shared, local memory and optional code navigation. Claude Code, Codex, OpenCode, pi, and other MCP clients can use the same store, so project decisions and context survive new sessions and switches between tools. It finds relevant memories even when a query uses different words.
 
-Under the hood, Graphmem stores scoped notes and linked entities in SQLite. Recall combines local embeddings with graph context and Personalized PageRank — the non-trained retrieval approach of [HippoRAG 2](https://proceedings.mlr.press/v267/gutierrez25a.html) (Gutiérrez et al., ICML 2025). SQLite FTS5 provides lexical search when embeddings are disabled or for per-request comparison.
+Its code helpers find definitions, outline files, list declared imports, and show which symbols changed between Git revisions. Agents get compact results with source ranges before reading code; the rebuildable code index stays separate from durable memories.
 
 ## Highlights
 
 - Local SQLite storage; no hosted service required.
+- Optional syntax-aware code navigation through `find_symbol`, `code_outline`,
+  `code_imports`, and `code_diff`, with matching `gmem code` commands.
+  Disable it with `GRAPHMEM_CODE=off` or `[code] enabled = false`.
 - Scoped memories (`global` or `repo:/absolute/path`) with scope isolation.
 - Verified entities and directed relations attached atomically to memories.
 - Local `sentence-transformers/msmarco-MiniLM-L6-cos-v5` embeddings through Candle.
@@ -17,6 +20,10 @@ Under the hood, Graphmem stores scoped notes and linked entities in SQLite. Reca
 - `recall` accepts `use_embeddings: false` to force lexical FTS5 ranking.
 - Keyboard-driven `gmem tui` to browse memories and graph nodes, filter and
   edit memories, and delete with confirmation.
+
+Memory recall combines local embeddings, graph context, and Personalized PageRank
+(inspired by [HippoRAG 2](https://proceedings.mlr.press/v267/gutierrez25a.html)),
+with SQLite FTS5 for lexical search.
 
 ## Install
 
@@ -66,8 +73,8 @@ On Windows, extract the ZIP into a directory on your user `PATH`, then run `gmem
 Alternatively, install with Rust (this puts `gmem` in `~/.cargo/bin`):
 
 ```sh
-cargo install --locked --path .                                   # from a checkout
-cargo install --locked --git https://github.com/sonic182/graphmem # latest from GitHub
+cargo install --locked --features code --path .                                   # from a checkout
+cargo install --locked --features code --git https://github.com/sonic182/graphmem # latest from GitHub
 ```
 
 The editor plugins assume `gmem` is on your `PATH`; see [docs/plugins.md](docs/plugins.md). `git` must also be on your `PATH` for repository-scoped memory: `gmem` runs `git rev-parse --show-toplevel` to derive the current repository, and falls back to `global` when it cannot.
@@ -94,6 +101,40 @@ opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --g
 ```
 
 pi has no native MCP support and needs a one-time adapter; see [docs/plugins.md](docs/plugins.md) for pi and the full details.
+
+## Code navigation (optional)
+
+Only need memory? Set `GRAPHMEM_CODE=off` or `[code] enabled = false` in
+`config.toml` to disable the code helpers without affecting memory tools.
+
+Use the code helpers to locate source before grepping or reading whole files:
+
+| MCP tool | What it answers |
+| --- | --- |
+| `find_symbol` | Where is this function, class, module, or other definition? |
+| `code_outline` | What definitions and nesting does this file contain? |
+| `code_imports` | Which imports does this file declare? |
+| `code_diff` | Which symbols were added, removed, or modified between Git revisions? |
+
+The same helpers work from the CLI. For example, in the Graphmem checkout:
+
+```sh
+gmem code find CodeService
+gmem code outline src/application/code.rs
+gmem code imports src/application/code.rs
+gmem code diff origin/master
+```
+
+Release binaries include these tools; source builds need `--features code`.
+They work on Git checkouts. Outlines, imports, and symbol lookups refresh their
+syntax index on demand; diffs outline the two revisions without using the index.
+No embedding model is needed. Imports are not resolved to files, and call sites
+and cross-file references are not indexed: use `rg` or `ast-grep` for those. The
+diff is structural, not a semantic review.
+
+See [docs/cli.md](docs/cli.md#gmem-code) and
+[docs/mcp.md](docs/mcp.md#code-navigation-tools) for supported languages, options,
+and coverage limits.
 
 ## Build
 

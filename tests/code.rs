@@ -325,6 +325,11 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             );
         }
     }
+    let racket = sandbox.run(&["code", "outline", "lisp/billing.rkt"]);
+    assert!(
+        !racket.contains("constant tax"),
+        "function-local definitions are not symbols:\n{racket}"
+    );
     let heex = sandbox.run(&[
         "code",
         "outline",
@@ -365,6 +370,113 @@ fn outline_depth_limits_nesting() {
             "unexpected {line:?} in\n{children}"
         );
     }
+}
+
+#[test]
+fn indexing_leaves_other_versions_and_legacy_caches_untouched() {
+    let sandbox = Sandbox::new("index-versions");
+    let other_paths = ["code.sqlite", "code-v0.sqlite"];
+    let other_indexes = other_paths.map(|name| {
+        let connection =
+            rusqlite::Connection::open(sandbox.home.join(name)).expect("older index is created");
+        connection
+            .execute_batch(
+                "PRAGMA user_version = 999;
+                 CREATE TABLE checkouts (marker TEXT);
+                 INSERT INTO checkouts VALUES ('older index');",
+            )
+            .expect("older index is populated");
+        connection
+    });
+    sandbox.run(&["code", "index"]);
+    for connection in &other_indexes {
+        let marker: String = connection
+            .query_row("SELECT marker FROM checkouts", [], |row| row.get(0))
+            .expect("older index is still readable");
+        assert_eq!(marker, "older index");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("older index version is readable");
+        assert_eq!(version, 999);
+    }
+    let active_path = fs::read_dir(&sandbox.home)
+        .expect("home is readable")
+        .map(|entry| entry.expect("home entry").path())
+        .find(|path| {
+            let name = path.file_name().unwrap().to_string_lossy();
+            name.starts_with("code-v") && name.ends_with(".sqlite") && name != "code-v0.sqlite"
+        })
+        .expect("a separate versioned index is created");
+    let active = rusqlite::Connection::open(&active_path).expect("active index is readable");
+    let version: i64 = active
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("active index version is readable");
+    assert_eq!(
+        active_path.file_name().unwrap().to_string_lossy(),
+        format!("code-v{version}.sqlite")
+    );
+    let reindexed = sandbox.run(&["code", "index"]);
+    assert!(reindexed.contains("0 indexed"), "{reindexed}");
+}
+
+#[test]
+fn racket_imports_include_every_phase_shifted_spec() {
+    let sandbox = Sandbox::new("racket-phase-imports");
+    fs::write(
+        sandbox.repo.join("lisp/billing.rkt"),
+        "#lang racket/base\n\
+         (require (for-meta 1\n\
+                    racket/base\n\
+                    racket/list)\n\
+                  (for-syntax\n\
+                    racket/string\n\
+                    (only-in racket/match match))\n\
+                  (for-template\n\
+                    racket/set\n\
+                    racket/vector)\n\
+                  (for-label\n\
+                    racket/math\n\
+                    racket/format)\n\
+                  (for-meta #f\n\
+                    (prefix-in p:\n\
+                      racket/function)\n\
+                    (only-in\n\
+                      racket/port port->string)))\n",
+    )
+    .expect("Racket phase-import fixture is written");
+    let imports = sandbox.run(&["code", "imports", "lisp/billing.rkt"]);
+    assert!(imports.contains("\tracket\tcomplete\n"), "{imports}");
+    let expected = [
+        ("3-3", "racket/base"),
+        ("4-4", "racket/list"),
+        ("6-6", "racket/string"),
+        ("7-7", "racket/match"),
+        ("9-9", "racket/set"),
+        ("10-10", "racket/vector"),
+        ("12-12", "racket/math"),
+        ("13-13", "racket/format"),
+        ("16-16", "racket/function"),
+        ("18-18", "racket/port"),
+    ];
+    let actual = imports
+        .lines()
+        .skip(1)
+        .map(|line| line.split_once('\t').expect("import has a range"))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected, "{imports}");
+    let top = sandbox.run(&["code", "outline", "lisp/billing.rkt", "--depth", "0"]);
+    let expected_outline = expected
+        .iter()
+        .map(|(range, name)| format!("{range}\timport {name}"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        top.lines().skip(1).collect::<Vec<_>>(),
+        expected_outline,
+        "phase imports must remain siblings:\n{top}"
+    );
+    let found = sandbox.run(&["code", "find", "racket/list", "--kind", "import"]);
+    assert!(found.contains(":4-4\timport racket/list"), "{found}");
+    assert!(!found.contains("\tin "), "{found}");
 }
 
 #[test]

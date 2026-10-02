@@ -53,11 +53,14 @@ The server exposes eight memory tools:
 Binaries built with `--features code` (release binaries are) add four tools,
 listed unless `[code] enabled = false` or `GRAPHMEM_CODE=off`; the
 `initialize` instructions then add a short note on when to use them. They use
-a separate, rebuildable index (`$GRAPHMEM_HOME/code.sqlite`) keyed by Git
-checkout root, so each linked worktree has its own. They never read or write
-memories, and `recall` ranking is unaffected. A corrupt `code.sqlite` is
-recreated; if the index still cannot be opened or `[code]` is invalid, the
-server logs a warning on stderr and starts with the memory tools only.
+a separate, rebuildable index (`$GRAPHMEM_HOME/code-v{N}.sqlite`, where `N`
+is the schema/extractor version) keyed by Git checkout root, so each linked
+worktree has its own. Different index versions use separate files; older
+caches, including legacy `code.sqlite`, are left untouched and can be deleted
+when no older binary uses them. They never read or write memories, and
+`recall` ranking is unaffected. A corrupt code index is recreated; if the
+index still cannot be opened or `[code]` is invalid, the server logs a warning
+on stderr and starts with the memory tools only.
 
 There is no MCP index tool: the tools refresh the index on demand, re-reading
 only files whose size or modification time changed. To build the index of a
