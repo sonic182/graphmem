@@ -1,13 +1,13 @@
 {
   "name": "@sonic182/graphmem",
-  "version": "0.9.1",
-  "description": "Durable project memory for coding agents: skill and session guidance for gmem.",
-  "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development"],
+  "version": "0.9.2",
+  "description": "Shared local memory for coding agents with semantic recall, knowledge graph, and code navigation.",
+  "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development", "coding-agent", "agent-memory", "semantic-search", "knowledge-graph"],
   "license": "MIT",
   "publishConfig": { "access": "public" },
   "type": "module",
   "main": "./plugin/opencode/index.ts",
-  "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "README.md", "LICENSE"],
+  "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "docs/", "!docs/assets/", "README.md", "LICENSE"],
   "bin": {
     "gmem": "scripts/gmem.js",
     "gmem-install": "scripts/npm-install.js"
@@ -26,6 +26,7 @@
     "url": "git+https://github.com/sonic182/graphmem.git"
   },
   "pi": {
+    "image": "https://raw.githubusercontent.com/sonic182/graphmem/master/docs/assets/graphmem-banner.png",
     "skills": ["./plugin/skills"],
     "extensions": ["./plugin/pi/extensions"]
   }
