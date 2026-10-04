@@ -5,12 +5,18 @@ import { constants, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// A binary discovery probe must not enter another npm launcher's discovery.
+if (process.env.GMEM_NPM_BINARY_PROBE === "1") process.exit(1);
+
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const bundled = path.join(packageRoot, "vendor", process.platform === "win32" ? "x86_64-pc-windows-msvc" : `${process.arch === "arm64" ? "aarch64" : "x86_64"}-${process.platform === "darwin" ? "apple-darwin" : "unknown-linux-gnu"}`, process.platform === "win32" ? "gmem.exe" : "gmem");
 const executable = process.platform === "win32" ? "gmem.exe" : "gmem";
 
 function usable(candidate) {
-  const result = spawnSync(candidate, ["version"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+  const result = spawnSync(candidate, ["version"], {
+    encoding: "utf8", timeout: 5000, windowsHide: true,
+    env: { ...process.env, GMEM_NPM_BINARY_PROBE: "1" },
+  });
   return result.status === 0 && !result.error;
 }
 

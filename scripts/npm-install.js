@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import path from "node:path";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -21,7 +20,10 @@ const target = {
 }[`${process.platform}-${process.arch}`];
 
 function isUsableBinary(candidate) {
-  const result = spawnSync(candidate, ["version"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+  const result = spawnSync(candidate, ["version"], {
+    encoding: "utf8", timeout: 5000, windowsHide: true,
+    env: { ...process.env, GMEM_NPM_BINARY_PROBE: "1" },
+  });
   return result.status === 0 && !result.error;
 }
 
@@ -58,9 +60,11 @@ async function install() {
   const releaseUrl = `https://github.com/sonic182/graphmem/releases/download/${version}`;
   const directory = path.join(packageRoot, "vendor", target);
   await mkdir(directory, { recursive: true });
-  const archivePath = path.join(os.tmpdir(), `${archiveName}-${process.pid}`);
+  // Keep extraction and the final rename on the destination filesystem.
+  const tempDir = await mkdtemp(path.join(directory, ".install-"));
+  const archivePath = path.join(tempDir, archiveName);
   const binaryPath = path.join(directory, executable);
-  const temporaryBinary = `${binaryPath}.${process.pid}.tmp`;
+  const temporaryBinary = path.join(tempDir, executable);
 
   try {
     const [archiveResponse, sumsResponse] = await Promise.all([
@@ -76,33 +80,16 @@ async function install() {
     const actual = createHash("sha256").update(archiveBuffer).digest("hex");
     if (actual !== expected) throw new Error(`SHA256 mismatch for ${archiveName}`);
 
+    await writeFile(archivePath, archiveBuffer);
     if (isWindows) {
-      const { mkdtemp } = await import("node:fs/promises");
-      const { execFileSync } = await import("node:child_process");
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "gmem-npm-"));
-      try {
-        const zipPath = path.join(tempDir, archiveName);
-        await writeFile(zipPath, archiveBuffer);
-        execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath $env:GMEM_ZIP -DestinationPath $env:GMEM_DEST -Force"], {
-          env: { ...process.env, GMEM_ZIP: zipPath, GMEM_DEST: tempDir },
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        await rename(path.join(tempDir, executable), temporaryBinary);
-      } finally {
-        await rm(tempDir, { recursive: true, force: true });
-      }
+      execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath $env:GMEM_ZIP -DestinationPath $env:GMEM_DEST -Force"], {
+        env: { ...process.env, GMEM_ZIP: archivePath, GMEM_DEST: tempDir },
+        stdio: "ignore",
+        windowsHide: true,
+      });
     } else {
-      await writeFile(archivePath, archiveBuffer);
       // Extract only the named executable from tar without shell interpolation.
-      const { execFileSync } = await import("node:child_process");
-      const tempDir = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), "gmem-npm-")));
-      try {
-        execFileSync("tar", ["-xzf", archivePath, "-C", tempDir, executable], { stdio: "ignore" });
-        await rename(path.join(tempDir, executable), temporaryBinary);
-      } finally {
-        await rm(tempDir, { recursive: true, force: true });
-      }
+      execFileSync("tar", ["-xzf", archivePath, "-C", tempDir, executable], { stdio: "ignore" });
     }
 
     if (!isWindows) await chmod(temporaryBinary, 0o755);
@@ -110,7 +97,7 @@ async function install() {
     await rename(temporaryBinary, binaryPath);
     console.log(`Installed gmem ${version} for ${target}`);
   } finally {
-    await Promise.all([rm(archivePath, { force: true }), rm(temporaryBinary, { force: true })]);
+    await rm(tempDir, { recursive: true, force: true });
   }
 }
 
