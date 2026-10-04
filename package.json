@@ -6,6 +6,16 @@
   "license": "MIT",
   "type": "module",
   "main": "./plugin/opencode/index.ts",
+  "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "README.md", "LICENSE"],
+  "bin": {
+    "gmem": "./scripts/gmem.js",
+    "gmem-install": "./scripts/npm-install.js"
+  },
+  "scripts": {
+    "postinstall": "node ./scripts/npm-install.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=18" },
   "exports": {
     "./server": "./plugin/opencode/index.ts"
   },
