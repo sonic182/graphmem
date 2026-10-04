@@ -1,15 +1,16 @@
 {
-  "name": "graphmem",
+  "name": "@sonic182/graphmem",
   "version": "0.9.1",
   "description": "Durable project memory for coding agents: skill and session guidance for gmem.",
   "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development"],
   "license": "MIT",
+  "publishConfig": { "access": "public" },
   "type": "module",
   "main": "./plugin/opencode/index.ts",
   "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "README.md", "LICENSE"],
   "bin": {
-    "gmem": "./scripts/gmem.js",
-    "gmem-install": "./scripts/npm-install.js"
+    "gmem": "scripts/gmem.js",
+    "gmem-install": "scripts/npm-install.js"
   },
   "scripts": {
     "postinstall": "node ./scripts/npm-install.js",
@@ -20,7 +21,10 @@
     "./server": "./plugin/opencode/index.ts"
   },
   "homepage": "https://github.com/sonic182/graphmem",
-  "repository": "https://github.com/sonic182/graphmem",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sonic182/graphmem.git"
+  },
   "pi": {
     "skills": ["./plugin/skills"],
     "extensions": ["./plugin/pi/extensions"]

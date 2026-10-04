@@ -38,7 +38,7 @@ with SQLite FTS5 for lexical search.
 ```text
 Install gmem (Graphmem) for me:
 1. Check whether a working `gmem` is already on my PATH with `gmem version`.
-2. If it is, keep using it. Otherwise install Graphmem with `npm install --global graphmem`.
+2. If it is, keep using it. Otherwise install Graphmem with `npm install --global @sonic182/graphmem`.
 3. If npm installation is unavailable for my platform, download the matching gmem release binary from
    https://github.com/sonic182/graphmem/releases/latest, verify it against `SHA256SUMS`, and install it in a directory on my PATH.
 4. Check it works with `gmem version`.
@@ -55,7 +55,7 @@ For more references, run
 `curl --silent https://raw.githubusercontent.com/sonic182/graphmem/refs/heads/master/README.md`
 ```
 
-The simplest option is `npm install --global graphmem`. It provides the `gmem` command and downloads the matching release binary only if a working `gmem` is not already on your PATH. The downloaded archive is verified against the release `SHA256SUMS`. If you use `--ignore-scripts`, run `gmem-install` afterward. npm does not replace or update a separately installed binary.
+The simplest option is `npm install --global @sonic182/graphmem`. It provides the `gmem` command and downloads the matching release binary only if a working `gmem` is not already on your PATH. The downloaded archive is verified against the release `SHA256SUMS`. If you use `--ignore-scripts`, run `gmem-install` afterward. npm does not replace or update a separately installed binary.
 
 Or install by hand: download the **CPU binary** for your platform from [GitHub Releases](https://github.com/sonic182/graphmem/releases/latest):
 

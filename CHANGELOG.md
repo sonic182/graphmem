@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- npm installation via `npm install --global graphmem`, with a `gmem` launcher
+- npm installation via `npm install --global @sonic182/graphmem`, with a `gmem` launcher
   that reuses an existing working binary or downloads and verifies the matching
   GitHub Release binary. `gmem-install` retries binary installation when npm
   lifecycle scripts are disabled.
