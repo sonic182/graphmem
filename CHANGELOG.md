@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- npm installation via `npm install --global graphmem`, with a `gmem` launcher
+  that reuses an existing working binary or downloads and verifies the matching
+  GitHub Release binary. `gmem-install` retries binary installation when npm
+  lifecycle scripts are disabled.
+- npm package tests and a package file allowlist; installation instructions now
+  cover npm alongside manual binary and Cargo installation.
+
 ## [0.9.0] - 2026-10-02
 
 ### Added
