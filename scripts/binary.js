@@ -25,7 +25,7 @@ export const binaryInfo = { version, target, platform: `${process.platform}/${pr
 export function installerCommand() {
   const script = fileURLToPath(new URL("./npm-install.js", import.meta.url));
   const quoted = process.platform === "win32"
-    ? `'${script.replaceAll("'", "''")}'`
+    ? `"${script}"`
     : `'${script.replaceAll("'", "'\\''")}'`;
   return `node ${quoted}`;
 }

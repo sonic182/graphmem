@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Export the npm package root for OpenCode plugin loading, alongside `/server`.
+- Quote Windows installer recovery paths with double quotes so commands also
+  work in Command Prompt, including paths with spaces or apostrophes.
 
 ## [0.9.3] - 2026-10-05
 

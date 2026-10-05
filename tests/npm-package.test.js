@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -77,6 +77,38 @@ test("npm installer skips release downloads when a working gmem is on PATH", { s
     assert.match(result.stderr, /Using gmem:/);
     assert.equal(result.stdout, "");
   });
+});
+
+test("Windows recovery command preserves paths with spaces and apostrophes", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "graphmem-npm-quoting-test-"));
+  try {
+    const directory = path.join(dir, "package with spaces and user's files & (cache)");
+    await copyPackage(directory);
+    const script = path.join(directory, "scripts/npm-install.js");
+    await writeFile(script, "console.log(process.argv[1]);\n");
+    const moduleUrl = pathToFileURL(path.join(directory, "scripts/binary.js")).href;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      Object.defineProperty(process, "platform", {value: "win32"});
+      const {installerCommand} = await import(${JSON.stringify(moduleUrl)});
+      console.log(JSON.stringify(installerCommand()));
+    `], { encoding: "utf8", timeout: 5000 });
+    assert.equal(result.status, 0, result.stderr);
+    const command = JSON.parse(result.stdout);
+    assert.equal(command, `node "${script}"`, "cmd.exe requires double quotes around the script path");
+    if (process.platform === "win32") {
+      // Run the printed command in both real Windows shells, without downloads.
+      for (const shell of [process.env.ComSpec || "cmd.exe", "powershell.exe"]) {
+        const executed = spawnSync(command, {
+          shell, encoding: "utf8", timeout: 10000,
+          env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` },
+        });
+        assert.equal(executed.status, 0, `${shell}: ${executed.stderr}`);
+        assert.equal(executed.stdout.trim(), script);
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("binary discovery probes reject npm launchers", () => {
