@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-04
+
+### Changed
+
+- The npm package now includes the Markdown documentation while excluding the
+  large banner asset; README and Pi gallery images use the stable GitHub URL.
+- The Pi package listing has a descriptive summary, gallery image, and keywords
+  highlighting coding-agent memory, semantic search, and the knowledge graph.
+- The Pi host package is declared as an optional peer dependency, keeping
+  standalone npm installs from pulling in Pi.
+- The README highlights the Pi npm install command, and Pi setup instructions use
+  its built-in MCP configuration instead of the obsolete adapter workflow.
+
 ## [0.9.1] - 2026-10-04
 
 ### Added
@@ -258,7 +271,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.9.1...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.9.2...HEAD
+[0.9.2]: https://github.com/sonic182/graphmem/releases/tag/0.9.2
 [0.9.1]: https://github.com/sonic182/graphmem/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/sonic182/graphmem/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/sonic182/graphmem/compare/0.7.1...0.8.0

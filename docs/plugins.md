@@ -9,7 +9,7 @@ All flows need `gmem` on your `PATH`. Install it with `npm install --global @son
 | Claude Code | skill + `SessionStart`/`SubagentStart` hooks + MCP server | bundled (`.mcp.json`) |
 | Codex | skill + lifecycle hooks + MCP server | bundled (`.mcp.json`) |
 | OpenCode | skill + session guidance + MCP server | plugin `config` hook |
-| pi | skill + session-start guidance extension | shared MCP config (`pi-mcp-adapter`) |
+| pi | skill + session-start guidance extension | native `pi mcp add` configuration |
 
 ## Claude Code
 
@@ -110,37 +110,44 @@ Restart OpenCode after installing or changing the plugin, then run `opencode mcp
 
 ## pi
 
-pi has no built-in MCP support, so install [`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) and configure `gmem mcp` once in pi's shared MCP config. The Graphmem package itself only adds its skills and session-start guidance.
-
-With `gmem` installed, set up pi:
+Pi has built-in MCP support. If you previously installed `pi-mcp-adapter`,
+remove it before switching: its `/mcp` command overrides Pi's native MCP support,
+even when `pi mcp list` reports a successful connection.
 
 ```sh
-pi install npm:pi-mcp-adapter   # once, if you do not already use it
-pi install git:github.com/sonic182/graphmem
-mkdir -p ~/.config/mcp
+pi remove npm:pi-mcp-adapter
 ```
 
-To install from a local checkout instead, build the binary and replace the `pi install` command with:
+If you installed the adapter from another source or loaded it manually, remove
+that package source or extension entry instead. Re-register servers from the
+adapter's `~/.config/mcp/mcp.json` in Pi's native configuration; the old file is
+not read by native MCP support.
+
+Install Graphmem's package for its skills and session-start guidance, then
+register the MCP server once:
 
 ```sh
-cargo install --locked --path .
+pi install npm:@sonic182/graphmem
+pi mcp add gmem -- gmem mcp
+```
+
+The package adds the `graphmem-mcp-for-dev` and `graphmem-code-analysis` skills
+and the session-start guidance extension; it does not register the MCP server,
+so the `pi mcp add` step is required. The command writes to
+`~/.pi/agent/mcp.json` by default. Add `--local` to configure only the current
+project in `.pi/mcp.json`.
+
+To install the package from a local checkout instead:
+
+```sh
 pi install ./
 ```
 
-Create `~/.config/mcp/mcp.json`:
+Ensure `gmem` is on your `PATH` before starting pi. Restart pi after installing
+or changing the server, or run `/reload` then `/mcp reconnect gmem`. Use
+`pi mcp list` to confirm the server is connected and `pi list` to confirm the
+package. Uninstall it with:
 
-```json
-{
-  "mcpServers": {
-    "gmem": {
-      "command": "/absolute/path/to/gmem",
-      "args": ["mcp"],
-      "lifecycle": "lazy",
-      "directTools": true,
-      "toolPrefix": "none"
-    }
-  }
-}
+```sh
+pi remove npm:@sonic182/graphmem
 ```
-
-Restart pi after installing or changing the config, or run `/reload` then `/mcp reconnect gmem`. `pi -e <source>` still loads the skill and guidance for quick testing, but MCP setup remains in the shared config. Use `pi list` to confirm the package and `pi remove <source>` (the same source you installed) to uninstall it.

@@ -4,13 +4,17 @@
 
 ---
 
-![Graphmem — Shared, local memory for coding agents](docs/assets/graphmem-banner.png)
+![Graphmem — Shared, local memory for coding agents](https://raw.githubusercontent.com/sonic182/graphmem/master/docs/assets/graphmem-banner.png)
 
 ----
 
 Graphmem gives coding agents shared, local memory and optional code navigation. Claude Code, Codex, OpenCode, pi, and other MCP clients can use the same store, so project decisions and context survive new sessions and switches between tools. It finds relevant memories even when a query uses different words.
 
 Its code helpers find definitions, outline files, list declared imports, and show which symbols changed between Git revisions. Agents get compact results with source ranges before reading code; the rebuildable code index stays separate from durable memories.
+
+> **Using pi?** Install Graphmem with `pi install npm:@sonic182/graphmem`, then
+> register its MCP server with `pi mcp add gmem -- gmem mcp`. See
+> [the pi setup guide](docs/plugins.md#pi).
 
 ## Highlights
 
@@ -108,7 +112,13 @@ codex plugin add graphmem@graphmem
 opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
-pi has no native MCP support and needs a one-time adapter; see [docs/plugins.md](docs/plugins.md) for pi and the full details.
+```sh
+# pi
+pi install npm:@sonic182/graphmem
+pi mcp add gmem -- gmem mcp
+```
+
+See [docs/plugins.md](docs/plugins.md#pi) for details.
 
 ## Code navigation (optional)
 
