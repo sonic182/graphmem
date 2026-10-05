@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,7 +9,7 @@ import test from "node:test";
 const root = fileURLToPath(new URL("../", import.meta.url));
 
 test("packed npm package installs offline with scripts disabled and gives usable recovery without PATH", { skip: process.platform === "win32" || !process.env.npm_execpath }, async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "graphmem-fresh-install-"));
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "graphmem-fresh-install-")));
   try {
     const npm = args => spawnSync(process.execPath, [process.env.npm_execpath, ...args], {
       cwd: root, encoding: "utf8", timeout: 30000,

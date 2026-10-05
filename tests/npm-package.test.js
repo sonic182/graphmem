@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -80,7 +80,7 @@ test("npm installer skips release downloads when a working gmem is on PATH", { s
 });
 
 test("Windows recovery command preserves paths with spaces and apostrophes", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "graphmem-npm-quoting-test-"));
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "graphmem-npm-quoting-test-")));
   try {
     const directory = path.join(dir, "package with spaces and user's files & (cache)");
     await copyPackage(directory);

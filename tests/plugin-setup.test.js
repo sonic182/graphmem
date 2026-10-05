@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +10,7 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 async function fixture(run) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "graphmem-plugin-test-"));
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "graphmem-plugin-test-")));
   const originalPath = process.env.PATH;
   const originalAgent = process.env.PI_CODING_AGENT_DIR;
   const originalError = console.error;
