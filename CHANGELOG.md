@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- npm installation no longer runs `postinstall` or downloads a binary. Run the
+  explicit installer, or approve Pi's first-session download prompt.
+- Pi and OpenCode resolve native or package-local binaries by absolute path,
+  preserve user MCP configuration, and inject guidance only after connection.
+  Pi provides `/graphmem-setup`; OpenCode reports an explicit installer command.
+
+### Fixed
+
+- Export the npm package root for OpenCode plugin loading, alongside `/server`.
+
 ## [0.9.3] - 2026-10-05
 
 ### Fixed

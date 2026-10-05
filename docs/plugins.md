@@ -2,14 +2,27 @@
 
 Graphmem ships its skills, lifecycle guidance, and MCP server configuration to Claude Code, Codex, OpenCode, and pi.
 
-All flows need `gmem` on your `PATH`. Install it with `npm install --global @sonic182/graphmem` (the installer reuses a working `gmem` already on your PATH), [install a prebuilt binary](../README.md#install), or build with Cargo. npm installs provide the launcher and download the matching release binary when needed; `gmem-install` retries after an install with scripts disabled. npm does not replace a separately installed binary. Cargo installs `gmem` at `$HOME/.cargo/bin/gmem`; if that directory is not on your editor's `PATH`, add it there. For the manual `mcp add` fallbacks below, you can instead replace `gmem` with `"$HOME/.cargo/bin/gmem"`. The Claude Code and Codex hooks also need `node`; without it the MCP server still works, but the agent does not receive the recall/store guidance. OpenCode runs the plugin on Bun and needs no extra runtime.
+The npm package ships no binaries and runs no installation scripts. For the
+standalone CLI, Claude Code, or Codex, run `npm install --global @sonic182/graphmem`
+and then `gmem-install`, or [install a prebuilt binary](../README.md#install) or
+build with Cargo. The explicit installer reuses a working native `gmem` on your
+`PATH`; otherwise it downloads and verifies the package version's CPU binary.
+It never replaces a separately installed binary.
+
+Pi and OpenCode can also use their package-local binary without changing your
+`PATH`. Pi asks before downloading; OpenCode provides an explicit installer
+command. No download occurs during package installation or plugin loading.
+Cargo installs `gmem` at `$HOME/.cargo/bin/gmem`; for manual MCP registration,
+you can use that absolute path instead of `gmem`. Claude Code and Codex hooks
+need `node`. OpenCode loads the plugin with Bun; its recovery command requires
+Node.js 18+ or can be run with `bun` instead of `node`.
 
 | Harness | What the plugin provides | MCP registration |
 | --- | --- | --- |
 | Claude Code | skill + `SessionStart`/`SubagentStart` hooks + MCP server | bundled (`.mcp.json`) |
 | Codex | skill + lifecycle hooks + MCP server | bundled (`.mcp.json`) |
 | OpenCode | skill + session guidance + MCP server | plugin `config` hook |
-| pi | skill + session-start guidance extension | native `pi mcp add` configuration |
+| pi | skill + session-start guidance and consent extension | session-local native MCP registration; existing config wins |
 
 ## Claude Code
 
@@ -85,13 +98,37 @@ The plugin uses Codex's `gmem mcp` server, so semantic calls reuse the same in-m
 
 ## OpenCode
 
-With `gmem` installed, install the plugin directly from GitHub (no npm publication needed):
+Install the npm plugin:
+
+```sh
+opencode plugin @sonic182/graphmem --global
+```
+
+The plugin adds both Graphmem skills through `skills.paths`. It reuses a working
+native `gmem` or its package-local cache, registers the MCP server using the
+absolute executable path, and injects guidance only when the server is connected.
+Existing user-defined `gmem` entries, including disabled entries, are unchanged.
+
+If no binary is available, OpenCode prints one recovery message containing an
+absolute installer command. Run that command only if you approve the download,
+then restart OpenCode and check `opencode mcp list`. For example (replace the
+placeholder with the actual path shown in the message):
+
+```sh
+node '/absolute/package/path/scripts/npm-install.js'
+```
+
+There is no automatic download or blocking confirmation prompt during plugin
+loading. If Node.js is unavailable, use `bun` with the same script path.
+
+To install directly from GitHub instead (no npm publication needed):
 
 ```sh
 opencode plugin graphmem@git+https://github.com/sonic182/graphmem.git#master --global
 ```
 
-The plugin provides three things: the `graphmem-mcp-for-dev` and `graphmem-code-analysis` skills (registered through `skills.paths`), the recall/store and code-navigation guidance injected into the system prompt (the memory part is also preserved across compaction), and the `gmem mcp` server registered through the plugin `config` hook. An existing user-defined `gmem` MCP entry is left unchanged. Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand, which has known cache/path-resolution issues.
+Use the explicit `graphmem@git+https://...` form rather than the `github:` shorthand,
+which has known cache/path-resolution issues.
 
 Pin to a commit for reproducibility, and re-run with `--force` to update:
 
@@ -123,19 +160,40 @@ that package source or extension entry instead. Re-register servers from the
 adapter's `~/.config/mcp/mcp.json` in Pi's native configuration; the old file is
 not read by native MCP support.
 
-Install Graphmem's package for its skills and session-start guidance, then
-register the MCP server once:
+Install Graphmem's package:
 
 ```sh
 pi install npm:@sonic182/graphmem
-pi mcp add gmem -- gmem mcp
 ```
 
-The package adds the `graphmem-mcp-for-dev` and `graphmem-code-analysis` skills
-and the session-start guidance extension; it does not register the MCP server,
-so the `pi mcp add` step is required. The command writes to
-`~/.pi/agent/mcp.json` by default. Add `--local` to configure only the current
-project in `.pi/mcp.json`.
+On the next interactive startup, the extension reuses a working native `gmem` or
+its package-local cache. If neither exists, it offers **Download**, **Use existing
+executable**, or **Not now**. Download selects the matching platform and package
+version, verifies `SHA256SUMS`, smoke-tests the executable, and caches it. No
+network activity occurs before approval. Unsupported platforms need a source
+build or an existing compatible executable.
+
+**Not now** defers setup for the session without repeated prompts. Run
+`/graphmem-setup` to retry, or `/graphmem-setup /absolute/path/to/gmem` to explicitly
+select a trusted executable. Headless modes, including RPC, never wait for
+approval input: they print an absolute installer command. Run it explicitly and
+restart Pi, or invoke `/graphmem-setup` after installation.
+
+The package adds both skills and registers `gmem mcp` for the current session
+using the resolved absolute executable path. It does not write `mcp.json`.
+Existing user configuration in `~/.pi/agent/mcp.json`, trusted project entries in
+`.pi/mcp.json`, and other extensions' `gmem` registrations are preserved, even
+when disabled. Use `/mcp` to check actual connectivity; shell-level `pi mcp list`
+does not load extensions and therefore cannot see session-only registrations.
+Guidance is injected only after MCP tools become available.
+
+For persistent manual registration instead, install `gmem` first and run:
+
+```sh
+pi mcp add gmem -- /absolute/path/to/gmem mcp
+```
+
+This writes user-level configuration; add `--local` for the current project.
 
 To install the package from a local checkout instead:
 
@@ -143,10 +201,13 @@ To install the package from a local checkout instead:
 pi install ./
 ```
 
-Ensure `gmem` is on your `PATH` before starting pi. Restart pi after installing
-or changing the server, or run `/reload` then `/mcp reconnect gmem`. Use
-`pi mcp list` to confirm the server is connected and `pi list` to confirm the
-package. Uninstall it with:
+Restart Pi after package updates or run `/reload`. A new package version needs
+its own cached binary, so approve the new download or keep using your existing
+native executable. Check `/mcp` for connectivity and `pi list` for the package.
+Failed downloads can be retried with `/graphmem-setup`; failures do not leave a
+partially installed executable. Linux release binaries require glibc 2.39 and
+OpenSSL 3; CUDA and other unsupported systems need a source build.
+Uninstall the package with:
 
 ```sh
 pi remove npm:@sonic182/graphmem

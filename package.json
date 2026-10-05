@@ -6,14 +6,13 @@
   "license": "MIT",
   "publishConfig": { "access": "public" },
   "type": "module",
-  "main": "./plugin/opencode/index.ts",
-  "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "docs/", "!docs/assets/", "README.md", "LICENSE"],
+  "main": "./plugin/opencode/index.js",
+  "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "scripts/binary.js", "docs/", "!docs/assets/", "README.md", "LICENSE"],
   "bin": {
     "gmem": "scripts/gmem.js",
     "gmem-install": "scripts/npm-install.js"
   },
   "scripts": {
-    "postinstall": "node ./scripts/npm-install.js",
     "test": "node --test"
   },
   "engines": { "node": ">=18" },
@@ -24,7 +23,8 @@
     "@earendil-works/pi-coding-agent": { "optional": true }
   },
   "exports": {
-    "./server": "./plugin/opencode/index.ts"
+    ".": "./plugin/opencode/index.js",
+    "./server": "./plugin/opencode/index.js"
   },
   "homepage": "https://github.com/sonic182/graphmem",
   "repository": {
