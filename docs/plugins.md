@@ -110,8 +110,21 @@ Restart OpenCode after installing or changing the plugin, then run `opencode mcp
 
 ## pi
 
-Pi has built-in MCP support. Install Graphmem's package for its skills and
-session-start guidance, then register the MCP server once:
+Pi has built-in MCP support. If you previously installed `pi-mcp-adapter`,
+remove it before switching: its `/mcp` command overrides Pi's native MCP support,
+even when `pi mcp list` reports a successful connection.
+
+```sh
+pi remove npm:pi-mcp-adapter
+```
+
+If you installed the adapter from another source or loaded it manually, remove
+that package source or extension entry instead. Re-register servers from the
+adapter's `~/.config/mcp/mcp.json` in Pi's native configuration; the old file is
+not read by native MCP support.
+
+Install Graphmem's package for its skills and session-start guidance, then
+register the MCP server once:
 
 ```sh
 pi install npm:@sonic182/graphmem
