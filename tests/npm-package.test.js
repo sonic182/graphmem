@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -15,6 +15,7 @@ async function copyPackage(directory) {
   await mkdir(path.join(directory, "scripts"), { recursive: true });
   await copyFile(launcher, path.join(directory, "scripts/gmem.js"));
   await copyFile(installer, path.join(directory, "scripts/npm-install.js"));
+  await copyFile(path.join(root, "scripts/binary.js"), path.join(directory, "scripts/binary.js"));
   await writeFile(path.join(directory, "package.json"), JSON.stringify({ type: "module", version: "0.9.0" }));
 }
 
@@ -73,8 +74,41 @@ test("npm installer skips release downloads when a working gmem is on PATH", { s
       env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Using existing gmem on PATH/);
+    assert.match(result.stderr, /Using gmem:/);
+    assert.equal(result.stdout, "");
   });
+});
+
+test("Windows recovery command preserves paths with spaces and apostrophes", async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "graphmem-npm-quoting-test-")));
+  try {
+    const directory = path.join(dir, "package with spaces and user's files & (cache)");
+    await copyPackage(directory);
+    const script = path.join(directory, "scripts/npm-install.js");
+    await writeFile(script, "console.log(process.argv[1]);\n");
+    const moduleUrl = pathToFileURL(path.join(directory, "scripts/binary.js")).href;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      Object.defineProperty(process, "platform", {value: "win32"});
+      const {installerCommand} = await import(${JSON.stringify(moduleUrl)});
+      console.log(JSON.stringify(installerCommand()));
+    `], { encoding: "utf8", timeout: 5000 });
+    assert.equal(result.status, 0, result.stderr);
+    const command = JSON.parse(result.stdout);
+    assert.equal(command, `node "${script}"`, "cmd.exe requires double quotes around the script path");
+    if (process.platform === "win32") {
+      // Run the printed command in both real Windows shells, without downloads.
+      for (const shell of [process.env.ComSpec || "cmd.exe", "powershell.exe"]) {
+        const executed = spawnSync(command, {
+          shell, encoding: "utf8", timeout: 10000,
+          env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` },
+        });
+        assert.equal(executed.status, 0, `${shell}: ${executed.stderr}`);
+        assert.equal(executed.stdout.trim(), script);
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("binary discovery probes reject npm launchers", () => {
@@ -131,7 +165,7 @@ test("multiple npm installations do not recursively probe each other", { skip: p
   });
 });
 
-for (const scenario of ["valid", "checksum mismatch", "unusable binary"]) {
+for (const scenario of ["valid", "checksum mismatch", "unusable binary", "wrong version", "download failure", "interrupted", "concurrent"]) {
   test(`release installation: ${scenario}`, { skip: process.platform === "win32" }, async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "graphmem-npm-download-test-"));
     let systemTemp;
@@ -142,7 +176,7 @@ for (const scenario of ["valid", "checksum mismatch", "unusable binary"]) {
       await mkdir(payload);
       await writeFile(path.join(payload, "gmem"), scenario === "unusable binary"
         ? "#!/bin/sh\nexit 1\n"
-        : "#!/bin/sh\necho 'gmem 0.9.0'\n");
+        : `#!/bin/sh\necho 'gmem ${scenario === "wrong version" ? "0.8.0" : "0.9.0"}'\n`);
       const archive = path.join(dir, "release.tar.gz");
       const packed = spawnSync("tar", ["-czf", archive, "-C", payload, "gmem"], { encoding: "utf8" });
       assert.equal(packed.status, 0, packed.stderr);
@@ -151,9 +185,18 @@ for (const scenario of ["valid", "checksum mismatch", "unusable binary"]) {
       const preload = path.join(dir, "download.cjs");
       // Fake only the network boundary; verification, tar, smoke testing and
       // filesystem operations remain real.
+      const requests = path.join(dir, "requests.txt");
       await writeFile(preload, `
         const fs = require('node:fs');
-        global.fetch = async (url) => {
+        let cancelling = false;
+        global.fetch = async (url, options) => {
+          fs.appendFileSync(${JSON.stringify(requests)}, 'request\\n');
+          if (${JSON.stringify(scenario)} === 'download failure') return new Response('', {status: 503});
+          if (${JSON.stringify(scenario)} === 'interrupted') {
+            if (!cancelling) { cancelling = true; setTimeout(() => process.kill(process.pid, 'SIGINT'), 20); }
+            return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), {once: true}));
+          }
+          if (${JSON.stringify(scenario)} === 'concurrent') await new Promise(resolve => setTimeout(resolve, 150));
           if (url === ${JSON.stringify(`https://github.com/sonic182/graphmem/releases/download/0.9.0/${archiveName}`)})
             return new Response(fs.readFileSync(${JSON.stringify(archive)}));
           if (url === 'https://github.com/sonic182/graphmem/releases/download/0.9.0/SHA256SUMS')
@@ -169,12 +212,27 @@ for (const scenario of ["valid", "checksum mismatch", "unusable binary"]) {
       } catch {
         systemTemp = path.join(dir, "unavailable-system-temp");
       }
-      const result = spawnSync(process.execPath, ["--require", preload, path.join(directory, "scripts/npm-install.js")], {
+      const args = ["--require", preload, path.join(directory, "scripts/npm-install.js")];
+      const options = {
         encoding: "utf8", timeout: 10000,
         env: { ...process.env, PATH: "/usr/bin:/bin", TMPDIR: systemTemp, TMP: systemTemp, TEMP: systemTemp },
-      });
-      const vendor = path.join(directory, "vendor", target);
-      if (scenario === "valid") {
+      };
+      let result;
+      if (scenario === "concurrent") {
+        const run = () => new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, args, options);
+          let stderr = "";
+          child.stderr.on("data", chunk => { stderr += chunk; });
+          child.on("error", reject);
+          child.on("close", status => resolve({ status, stderr }));
+        });
+        const results = await Promise.all([run(), run()]);
+        for (const entry of results) assert.equal(entry.status, 0, entry.stderr);
+        assert.equal((await readFile(requests, "utf8")).trim().split("\n").length, 2, "concurrent installers must download only one archive and checksum file");
+        result = results[0];
+      } else result = spawnSync(process.execPath, args, options);
+      const vendor = path.join(directory, "vendor", "0.9.0", target);
+      if (scenario === "valid" || scenario === "concurrent") {
         assert.equal(result.status, 0, result.stderr);
         assert.deepEqual(await readdir(vendor), ["gmem"]);
         const launched = spawnSync(process.execPath, [path.join(directory, "scripts/gmem.js"), "version"], {
@@ -184,7 +242,14 @@ for (const scenario of ["valid", "checksum mismatch", "unusable binary"]) {
         assert.equal(launched.stdout, "gmem 0.9.0\n");
       } else {
         assert.equal(result.status, 1);
-        assert.match(result.stderr, scenario === "checksum mismatch" ? /SHA256 mismatch/ : /failed `gmem version` smoke test/);
+        const error = {
+          "checksum mismatch": /SHA256 mismatch/,
+          "unusable binary": /failed `gmem version` smoke test/,
+          "wrong version": /does not report gmem 0\.9\.0/,
+          "download failure": /download failed \(503\)/,
+          "interrupted": /cancelled/i,
+        }[scenario];
+        assert.match(result.stderr, error);
         assert.deepEqual(await readdir(vendor), []);
       }
     } finally {
