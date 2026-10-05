@@ -27,12 +27,18 @@ Release version declarations:
 
 1. Set the target version in `Cargo.toml`, `package.json`, and both plugin manifests.
 2. In `CHANGELOG.md`, retain an empty `## [Unreleased]` section and move its completed entries under `## [<version>] - <date>`.
-3. Add the release link and move the `[unreleased]` comparison link to `<version>...HEAD`:
+3. Use GitHub comparison links for changelog version references, not release-page
+   links. Compare the previous released version with the target version, and move
+   the `[unreleased]` comparison link to `<version>...HEAD`:
 
    ```markdown
    [unreleased]: https://github.com/sonic182/graphmem/compare/<version>...HEAD
-   [<version>]: https://github.com/sonic182/graphmem/releases/tag/<version>
+   [<version>]: https://github.com/sonic182/graphmem/compare/<previous-version>...<version>
    ```
+
+   For example, version `0.9.3` compares `0.9.2...0.9.3`. If a preceding changelog
+   entry uses `/releases/tag/`, replace it with the corresponding comparison link
+   while updating the release.
 
 4. Run `just check` so Cargo regenerates `Cargo.lock` with the new crate version. Do not hand-edit dependency lock entries.
 
