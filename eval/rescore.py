@@ -13,7 +13,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from harness import DEFAULT_MODEL, Record, summarize
+from harness import Record, extract_answer, summarize
 from score import load_gold, score_task
 
 HERE = Path(__file__).resolve().parent
@@ -24,7 +24,6 @@ def main() -> int:
     parser.add_argument("--runs", type=Path, default=HERE / "results" / "runs.jsonl")
     parser.add_argument("--gold", type=Path, default=HERE / "gold.json")
     parser.add_argument("--summary", type=Path, default=HERE / "results" / "summary.md")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Fill in a missing model field")
     args = parser.parse_args()
 
     gold = load_gold(args.gold)
@@ -32,12 +31,15 @@ def main() -> int:
     for line in args.runs.read_text().splitlines():
         if not line.strip():
             continue
-        record = Record(**json.loads(line))
+        data = json.loads(line)
+        if "assistant_messages" not in data:
+            parser.error("run has no assistant_messages; regenerate it with the current harness")
+        record = Record(**data)
+        record.answer = extract_answer(record.assistant_messages)
         scored = score_task(record.task, record.answer, gold[record.task])
         record.score = scored["score"]
-        record.correct = scored["score"] >= 1.0
+        record.correct = record.error is None and scored["score"] >= 1.0
         record.details = scored["details"]
-        record.model = record.model or args.model
         records.append(record)
 
     with args.runs.open("w") as handle:

@@ -13,10 +13,5 @@
     "input": 0.15,
     "output": 0.50,
     "cache_read": 0.03
-  },
-  "fireworks_ai/accounts/fireworks/models/minimax-m3": {
-    "input": 0.30,
-    "output": 1.20,
-    "cache_read": 0.06
   }
 }

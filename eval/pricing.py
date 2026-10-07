@@ -26,13 +26,13 @@ def load_pricing(path: Path | None = None) -> dict[str, dict[str, float]]:
 def cost_usd(
     pricing: dict[str, dict[str, float]],
     model: str,
-    input_tokens: int,
-    output_tokens: int,
-    cache_read_tokens: int,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    cache_read_tokens: int | None,
 ) -> float | None:
     """Cost of one run, or ``None`` when the model has no pricing entry."""
     rates = pricing.get(model)
-    if rates is None:
+    if rates is None or input_tokens is None or output_tokens is None or cache_read_tokens is None:
         return None
     fresh_input = max(0, input_tokens - cache_read_tokens)
     cache_rate = rates.get("cache_read", rates["input"])
@@ -48,15 +48,13 @@ def mean_cost(
     model: str,
     records: list,
 ) -> float | None:
-    """Mean cost over records that carry a known price, or ``None``."""
+    """Return the group mean, or ``None`` if any run's cost is unknown."""
     costs = [
-        cost
-        for record in records
-        if (
-            cost := cost_usd(
-                pricing, model, record.input_tokens, record.output_tokens, record.cache_read_tokens
-            )
+        cost_usd(
+            pricing, model, record.input_tokens, record.output_tokens, record.cache_read_tokens
         )
-        is not None
+        for record in records
     ]
-    return sum(costs) / len(costs) if costs else None
+    if not costs or any(cost is None for cost in costs):
+        return None
+    return sum(costs) / len(costs)

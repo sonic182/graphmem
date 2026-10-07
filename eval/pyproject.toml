@@ -8,6 +8,13 @@ dependencies = [
     "litellm",
 ]
 
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+pythonpath = ["."]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

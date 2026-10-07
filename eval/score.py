@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 INT = re.compile(r"\d+")
@@ -39,12 +39,10 @@ def _basename(path: str) -> str:
 
 
 def _file_matches(candidate: str, expected: str) -> bool:
-    candidate = candidate.replace("\\", "/")
-    return (
-        candidate.endswith(expected)
-        or expected.endswith(candidate)
-        or _basename(candidate) == _basename(expected)
-    )
+    candidate = candidate.strip().replace("\\", "/")
+    if not candidate or PurePosixPath(candidate).is_absolute() or ".." in candidate.split("/"):
+        return False
+    return str(PurePosixPath(candidate)) == str(PurePosixPath(expected))
 
 
 def _window_has_range(answer: str, file: str, start: int, end: int, tolerance: int) -> bool:

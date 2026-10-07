@@ -43,26 +43,20 @@ def load(paths: list[Path]) -> list[Record]:
     return records
 
 
-def mean(values: list[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
-
-
 def group_cost(pricing: dict, group: list[Record]) -> float | None:
     costs = [
-        cost
-        for record in group
-        if (
-            cost := cost_usd(
-                pricing,
-                record.model,
-                record.input_tokens,
-                record.output_tokens,
-                record.cache_read_tokens,
-            )
+        cost_usd(
+            pricing,
+            record.model,
+            record.input_tokens,
+            record.output_tokens,
+            record.cache_read_tokens,
         )
-        is not None
+        for record in group
     ]
-    return sum(costs) / len(costs) if costs else None
+    if not costs or any(cost is None for cost in costs):
+        return None
+    return sum(costs) / len(costs)
 
 
 def main() -> int:
@@ -107,20 +101,23 @@ def main() -> int:
         if not group:
             return "n/a"
         correct = sum(r.correct for r in group)
-        return f"{st.median([r.total_tokens for r in group]):,.0f}<br>{correct}/{len(group)}"
+        tokens = [r.total_tokens for r in group]
+        median = "n/a" if any(value is None for value in tokens) else f"{st.median(tokens):,.0f}"
+        return f"{median}<br>{correct}/{len(group)}"
 
     def mean_cost(task: str, model: str, variant: str) -> str:
         group = cell(task, model, variant)
         cost = group_cost(pricing, group) if group else None
-        if cost is None:
+        if not group:
             return "n/a"
         correct = sum(r.correct for r in group)
-        return f"${cost:.4f}<br>{correct}/{len(group)}"
+        formatted = "n/a" if cost is None else f"${cost:.4f}"
+        return f"{formatted}<br>{correct}/{len(group)}"
 
     def token_reduction(task: str, model: str, variant: str) -> str:
         group = cell(task, model, variant)
         control = cell(task, model, "control")
-        if not group or not control:
+        if not group or not control or any(r.total_tokens is None for r in [*group, *control]):
             return "n/a"
         control_median = st.median([r.total_tokens for r in control])
         if not control_median:
@@ -136,7 +133,48 @@ def main() -> int:
             return "n/a"
         return f"{(1 - cost / control_cost) * 100:+.0f}%"
 
-    lines = ["# Cross-model comparison", "", "## Median total tokens and accuracy", ""]
+    def setting(group: list[Record], name: str) -> str:
+        values = {getattr(record, name) for record in group}
+        if len(values) != 1:
+            return "mixed"
+        value = values.pop()
+        if value is None:
+            return "not recorded"
+        return f"${value:.8f}" if name == "max_matrix_cost_usd" else str(value)
+
+    lines = [
+        "# Cross-model comparison",
+        "",
+        "## Run settings and limit stops",
+        "",
+        "Accuracy and spend include all attempts, including limit stops. Resource",
+        "limits may differ across models; these are not controlled model-quality rankings.",
+        "Generation values are ceilings; a remaining token budget can lower a call's cap.",
+        "",
+        "| model | attempts | generation ceiling | temperature | jobs | matrix cost ceiling | run token caps | limit stops | other errors |",
+        "|---|---:|---:|---:|---:|---:|---|---:|---:|",
+    ]
+    for model in models:
+        group = [record for record in records if short_model(record.model) == model]
+        limits = sum(record.budget_stop_reason is not None for record in group)
+        other_errors = sum(
+            record.error is not None and record.budget_stop_reason is None for record in group
+        )
+        token_caps = (
+            "enabled"
+            if all(record.max_run_tokens is not None for record in group)
+            else "not recorded"
+        )
+        values = [
+            setting(group, name)
+            for name in ("max_tokens", "temperature", "jobs", "max_matrix_cost_usd")
+        ]
+        lines.append(
+            f"| `{model}` | {len(group)} | "
+            + " | ".join(values)
+            + f" | {token_caps} | {limits} | {other_errors} |"
+        )
+    lines += ["", "## Median total tokens and accuracy", ""]
     lines += pivot(columns, median_tokens)
     lines += ["", "## Mean cost USD and accuracy", ""]
     lines += pivot(columns, mean_cost)

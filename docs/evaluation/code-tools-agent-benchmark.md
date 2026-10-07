@@ -1,176 +1,181 @@
 # Code-tool agent benchmark: gmem vs a plain agent
 
-Does a coding agent reach the same answer using less context when the gmem
-code tools are available? The harness lives in
-[`eval/`](../../eval/README.md). Raw data is in `eval/results/`, and the wide
-cross-model table is in `eval/results/comparison.md`.
+Does a coding agent reach the same answer using less context when gmem's
+code tools are available? The harness is in [`eval/`](../../eval/README.md).
+Raw attempts and generated summaries are in `eval/results/`; the generated
+[cross-model comparison](../../eval/results/comparison.md) reports median
+tokens, mean estimated cost, accuracy, and resource settings.
 
-This report uses the latest full DeepSeek rerun: **75/75 correct**, with a
-16,384-token generation cap, at an estimated total cost of **$0.7239**.
-Nemotron's stored runs have been rescored with the same corrected scorer,
-but have not been rerun with the higher cap.
+## Current results
+
+All three matrices contain 75 fresh attempts: five tasks × three variants ×
+five runs. They use the corrected version-2 harness, temperature 0, eight
+jobs, and a 16,384-token generation **ceiling**.
+
+| model | correct | estimated matrix cost | additional resource caps |
+|---|---:|---:|---|
+| DeepSeek V4.1 Flash | 75/75 | $0.8823 | none; baseline predates caps |
+| Nemotron Lightning 3.5 30B A3B | 53/75 | $0.4462 | none; baseline predates caps |
+| GLM 5.3 Flash | 70/75 | $0.5124 | shared cost budget and per-task token caps |
+
+DeepSeek and Nemotron have no invocation errors. GLM has four deliberate
+per-run token-budget stops and one incorrect symbol answer; no other
+invocation errors. All retained attempts have known provider usage. Failed
+and stopped attempts remain in accuracy, token, and cost aggregates.
+
+GLM's preliminary provider check cost $0.00099149 and is not included in its
+75-attempt matrix. It was deducted from the agreed $1.15 allowance, leaving
+$1.14900851 for the matrix. Combined estimated GLM spend was **$0.51336**;
+the cost ceiling did not bind.
+
+**Do not treat these as controlled model-quality rankings:** GLM ran with
+additional token budgets while the two baselines did not. Compare variants
+within each matrix, and retain the budget-stop counts alongside accuracy.
+No failed samples were selectively replaced.
 
 ## Conclusions
 
-1. **Cost and tokens answer different questions.** On DeepSeek, neutral gmem
-   is cheaper on four of five tasks, but uses more mean total tokens on
-   three. Cached input is much cheaper than fresh input, so report both
-   provider token usage and estimated cost, rather than treating them as
-   interchangeable.
-2. **The tools locate code; the agent still has to understand it.** DeepSeek
-   reads fewer shell/file source lines with either gmem variant on every
-   task. Total tool output does not always fall: tool definitions, guidance,
-   skill loads, and repeated navigation can offset the smaller source reads.
-3. **Guidance helps some tasks and adds overhead to others.** Guided DeepSeek
-   is 30% cheaper on the workflow task and 11% cheaper on the diff task, but
-   36% more expensive on imports and 4% more expensive on a single-symbol
-   lookup. The shipped guidance is not a universal savings switch.
-4. **Value is model-dependent.** Both gmem variants rescue Nemotron's symbol
-   lookup accuracy from 2/5 to 5/5, while neutral gmem reduces its accuracy
-   on other tasks. Lower cost is not a win if the answer is wrong.
-5. **There is no stable, universal savings percentage.** Repeated DeepSeek
-   matrices produced materially different workflow and diff costs. Five
-   samples per cell, changing cache state, and different generation caps do
-   not support a claim that gmem reliably reduces variance or wins every
-   structural task.
-6. **Method matters.** Use deterministic scoring, show accuracy beside cost,
-   distinguish means from medians, and bound runaway agent loops. Normalize
-   harmless import quoting instead of counting it as a semantic error.
+1. **Savings are task- and model-dependent.** Neutral GLM reduces diff mean
+   cost and tokens by about 55%, with 5/5 correct in both cells. Neutral
+   DeepSeek instead uses 5% more mean diff tokens and costs 1% more.
+2. **Cost is not total tokens.** Neutral DeepSeek costs 48% less on symbol
+   lookup and 20% less on outline, despite using 30% and 46% more mean tokens.
+   Cache hits and model-specific cached-input rates matter.
+3. **Less shell/file reading is not always less context.** DeepSeek's gmem
+   variants read fewer shell/file lines on four of five tasks, but both read
+   more on workflow. MCP text, tool definitions, and guidance add context.
+4. **Guidance is not a universal savings switch.** Guided GLM imports finishes
+   only 2/5: three runs hit the token allowance. Guided Nemotron imports
+   reaches 5/5 at 79% lower mean cost than its control.
+5. **Cheaper incorrect answers are not a win.** Nemotron's diff task has only
+   one fully correct answer across all 15 attempts, despite lower gmem costs.
+6. **Protect the budget before requests, not after a whole agent finishes.**
+   Shared reservations include all eight workers and retries. Historical
+   medians, rather than runaway maxima, define new per-task allowances.
 
-## Setup
+## Method
 
-- **Corpus:** `openclaw/openclaw`, pinned to `8f5c33c3` (the llama.cpp
-  host-compatibility fix; parent `4de57f22` is the diff base). 45,457 indexed
-  source files.
-- **Agents:** three variants, fresh `Agent` per run, same model, temperature
-  (0.0), checkout and limits within each model's matrix:
-  - `control`: `shell`, `read_file`.
-  - `gmem`: the two shared tools plus the gmem MCP tools `find_symbol`,
-    `code_outline`, `code_imports`, `code_diff` (memory tools filtered out),
-    with a **neutral** system prompt that never mentions gmem.
-  - `gmem-guided`: as `gmem`, plus the shipped Graphmem plugin guidance and
-    a `skill` tool that loads `plugin/skills/*` on demand.
-- **Models:** Fireworks `deepseek-v4p1-flash` and
-  `nemotron-lightning-3p5-30b-a3b`.
-- **Runs:** 5 tasks × 3 variants × 5 runs = 75 runs per model.
-- **Generation cap:** latest DeepSeek matrix uses `--max-tokens 16384`;
-  stored Nemotron matrix used 8192. The harness default remains 8192.
-- **Scoring:** deterministic against `eval/gold.json`; no LLM judge.
-  Import strings have matching surrounding quotes/backticks removed before
-  computing F1. Both model files were rescored with this correction.
-- **Cost:** derived per run from `eval/pricing.json` (rates from models.dev),
-  not actual invoice data.
+- **Corpus:** `openclaw/openclaw@8f5c33c3`; diff base `4de57f22`.
+- **Control:** `shell` and `read_file`, retaining rg/sed/git. It is not
+  handicapped; gmem tools are additive.
+- **Neutral gmem:** control tools plus `find_symbol`, `code_outline`,
+  `code_imports`, and `code_diff`; memory tools are filtered out. Same shared
+  system prompt as control.
+- **Guided gmem:** neutral gmem plus shipped plugin guidance and an on-demand
+  skill loader. Each attempt starts a fresh agent.
+- **Scoring:** deterministic against `eval/gold.json`, not an LLM judge.
+  Only the terminal assistant response is scored. Unfinished tool turns and
+  errored invocations cannot count correct. Repository-relative paths must
+  match fully; basename-only, unrelated, absolute, and traversal paths fail.
+  Import F1 normalizes matching surrounding quotes/backticks.
+- **Usage:** accumulated provider input/output/cache counts are retained on
+  failure. Unknown complete usage is `null`/`n/a`; `known_usage` retains any
+  measured lower bounds. Cost uses `eval/pricing.json` list rates, not invoices.
+- **Tool delivery:** all text, including MCP and skills, shares a 50,000-character
+  per-result cap including the truncation marker. Character metrics are
+  collected at delivery. Shell/file line counts exclude metadata and discarded
+  lines, and do not include MCP source text.
+- **Retries:** explicit LiteLLM/native throttling backoff, six attempts with
+  waits of 4/8/16/32/64 seconds. Retrying a model call retains the existing
+  agent and paid history; authentication/configuration errors are not retried.
 
 ## DeepSeek V4.1 Flash
 
-Mean per run. All 15 cells answered 5/5 correctly. `tool out` is characters;
-`src lines` counts only shell and file reads, not MCP source text.
+Means per attempt; every cell is 5/5 correct. `tool chars` measures delivered
+text; `src lines` includes only shell/file output, not MCP.
 
-| task | variant | tokens | cost usd | tool out | src lines | cycles |
+| task | variant | tokens | cost usd | tool chars | src lines | cycles |
 |---|---|---:|---:|---:|---:|---:|
-| `symbol-001` | control | 9,149 | $0.0010 | 9,103 | 166 | 4.2 |
-| `symbol-001` | gmem | 11,011 | $0.0007 | 3,163 | 64 | 3.6 |
-| `symbol-001` | gmem-guided | 14,703 | $0.0011 | 8,467 | 20 | 3.0 |
-| `outline-001` | control | 12,071 | $0.0018 | 7,056 | 212 | 5.4 |
-| `outline-001` | gmem | 10,848 | $0.0009 | 4,167 | 28 | 3.0 |
-| `outline-001` | gmem-guided | 21,913 | $0.0012 | 11,810 | 35 | 3.8 |
-| `imports-001` | control | 11,524 | $0.0010 | 22,570 | 501 | 2.6 |
-| `imports-001` | gmem | 7,955 | $0.0007 | 2,653 | 55 | 2.4 |
-| `imports-001` | gmem-guided | 16,797 | $0.0013 | 10,138 | 59 | 3.2 |
-| `diff-001` | control | 35,082 | $0.0059 | 17,308 | 418 | 8.0 |
-| `diff-001` | gmem | 50,209 | $0.0067 | 18,880 | 271 | 8.0 |
-| `diff-001` | gmem-guided | 42,811 | $0.0052 | 21,960 | 173 | 5.6 |
-| `workflow-001` | control | 780,805 | $0.0438 | 79,535 | 2,758 | 27.6 |
-| `workflow-001` | gmem | 788,386 | $0.0427 | 75,444 | 2,378 | 24.0 |
-| `workflow-001` | gmem-guided | 695,266 | $0.0308 | 87,853 | 2,286 | 24.4 |
+| `diff-001` | control | 36,719 | $0.0060 | 19,757 | 450 | 7.6 |
+| `diff-001` | gmem | 38,680 | $0.0061 | 17,327 | 231 | 6.4 |
+| `diff-001` | gmem-guided | 51,989 | $0.0059 | 23,315 | 205 | 6.6 |
+| `imports-001` | control | 12,919 | $0.0007 | 22,508 | 500 | 2.8 |
+| `imports-001` | gmem | 11,790 | $0.0008 | 2,749 | 54 | 3.4 |
+| `imports-001` | gmem-guided | 14,863 | $0.0018 | 9,819 | 154 | 3.0 |
+| `outline-001` | control | 9,159 | $0.0020 | 7,527 | 205 | 4.4 |
+| `outline-001` | gmem | 13,377 | $0.0016 | 6,050 | 70 | 3.4 |
+| `outline-001` | gmem-guided | 26,246 | $0.0016 | 12,332 | 45 | 4.4 |
+| `symbol-001` | control | 9,083 | $0.0018 | 8,462 | 159 | 4.2 |
+| `symbol-001` | gmem | 11,802 | $0.0009 | 1,175 | 20 | 4.0 |
+| `symbol-001` | gmem-guided | 15,098 | $0.0012 | 10,455 | 64 | 3.0 |
+| `workflow-001` | control | 967,219 | $0.0477 | 130,718 | 2,388 | 30.6 |
+| `workflow-001` | gmem | 1,030,933 | $0.0481 | 162,708 | 3,227 | 28.4 |
+| `workflow-001` | gmem-guided | 1,003,091 | $0.0503 | 156,989 | 2,576 | 27.0 |
 
-Change vs control, based on unrounded means. Negative values mean fewer
-tokens or lower estimated cost.
+Neutral gmem increases mean total tokens on four tasks and guided gmem on
+all five. Neutral is cheaper on two tasks; guided on three. Workflow costs
+rise about 1% and 6%, respectively. This matrix does not establish a general
+workflow or structural-navigation win.
 
-| task | gmem tokens | gmem cost | guided tokens | guided cost |
-|---|---:|---:|---:|---:|
-| `diff-001` | +43% | +13% | +22% | −11% |
-| `imports-001` | −31% | −30% | +46% | +36% |
-| `outline-001` | −10% | −52% | +82% | −32% |
-| `symbol-001` | +20% | −35% | +61% | +4% |
-| `workflow-001` | +1% | −3% | −11% | −30% |
+## Nemotron Lightning 3.5 30B A3B
 
-### What it says
-
-- **Neutral gmem is cheaper on four of five tasks**, but not on the diff
-  task. Guided gmem is cheaper on three of five. Claims that `code_diff`
-  always wins on both cost and tokens are not supported by this rerun.
-- **Guidance helps the workflow task:** mean cost falls 30% and mean total
-  tokens fall 11%. Its median tokens fall 31%; the mean and median are
-  different statistics, not contradictory results.
-- **Source reads shrink more consistently than total tool output.** Neutral
-  gmem cuts shell/file lines by about 14–89%; guided cuts them by 17–88%.
-  On the diff task, however, both gmem variants ingest more total tool-output
-  characters than control. Guided outline and workflow output also increases.
-- **Small lookups pay a fixed prompt overhead.** The added tool definitions
-  and guidance can outweigh navigation savings. On `symbol-001`, neutral
-  gmem uses 20% more mean tokens but costs 35% less; guided costs 4% more.
-
-### Why the matrix was rerun
-
-The preceding 8192-token matrix scored 73/75. One guided diff run stopped
-mid-tool-call with `MaxTokensReachedException`. A guided import run returned
-all correct specifiers, but with literal quotes inside the JSON strings;
-this scored zero before quote normalization. Rescoring fixed the latter,
-leaving 74/75. Rather than selectively replacing the failed sample, the
-entire DeepSeek matrix was rerun with a 16,384-token cap. The current 75/75
-result contains only that full rerun.
-
-## Cross-model: Nemotron Lightning 3.5 30B A3B
-
-Median tokens / mean cost per run, with accuracy. These are the stored
-8192-token runs, rescored without new API calls: **53/75 correct**.
+Median tokens / mean USD / correct attempts. Do not confuse these token
+medians with the DeepSeek means above.
 
 | task | control | gmem | gmem-guided |
 |---|---:|---:|---:|
-| `diff-001` | 386,450 / $0.0102 (1/5) | 210,226 / $0.0062 (1/5) | 203,658 / $0.0043 (2/5) |
-| `imports-001` | 27,487 / $0.0012 (4/5) | 56,834 / $0.0016 (3/5) | 8,326 / $0.0003 (5/5) |
-| `outline-001` | 84,876 / $0.0023 (5/5) | 101,900 / $0.0026 (3/5) | 121,319 / $0.0089 (4/5) |
-| `symbol-001` | 14,389 / $0.0003 (2/5) | 6,202 / $0.0001 (5/5) | 7,572 / $0.0002 (5/5) |
-| `workflow-001` | 366,803 / $0.0082 (5/5) | 606,263 / $0.0268 (3/5) | 505,470 / $0.0081 (5/5) |
+| `diff-001` | 219,897 / $0.0193 / 0/5 | 130,536 / $0.0050 / 1/5 | 172,188 / $0.0043 / 0/5 |
+| `imports-001` | 47,149 / $0.0020 / 5/5 | 25,402 / $0.0030 / 4/5 | 9,142 / $0.0004 / 5/5 |
+| `outline-001` | 71,437 / $0.0019 / 4/5 | 99,003 / $0.0025 / 4/5 | 67,050 / $0.0029 / 5/5 |
+| `symbol-001` | 49,643 / $0.0011 / 3/5 | 6,202 / $0.0001 / 5/5 | 7,493 / $0.0004 / 5/5 |
+| `workflow-001` | 272,629 / $0.0058 / 5/5 | 797,354 / $0.0327 / 4/5 | 453,126 / $0.0077 / 3/5 |
 
-### What it says
+Both gmem variants improve symbol lookup to 5/5 and reduce its cost. Guided
+imports is also substantially cheaper with unchanged accuracy. Neither
+variant improves workflow accuracy or cost. Long loops reached 132 cycles;
+median tokens limit their influence on the displayed central tendency, but
+mean costs retain their spend.
 
-- **The tools can rescue a weak model.** On `symbol-001`, Nemotron's control
-  scores 2/5 on 14k median tokens; both gmem variants score 5/5 on roughly
-  6–8k. Guided imports reaches 5/5 at $0.0003 against 4/5 at $0.0012.
-- **The tools can also hurt it.** Neutral gmem drops accuracy on outline,
-  workflow, and imports; guided outline is 4/5 at nearly four times the cost.
-- **Diff cost savings are not reliable answers.** Guided diff is 58% cheaper
-  than control, but only 2/5 answers are fully correct.
-- **Runaway loops distort means.** One guided outline run used 107 cycles,
-  102 shell calls, and 2.7M tokens. The cross-model token table uses medians;
-  costs remain means because the outlier still incurs spend.
+## GLM 5.3 Flash
 
-## Limitations
+Median tokens / mean USD / correct attempts. Every variant shares the same
+per-task token allowance. Stopped attempts remain included.
 
-- Five runs per cell and one corpus. Differences are directional, not precise.
-  Repeated matrices changed the apparent workflow and diff winners; this is
-  not enough evidence to claim a general reduction in run-to-run variance.
-- DeepSeek and Nemotron currently have different generation caps. Compare
-  variants within a model; cross-model differences are not controlled for
-  that setting. Rerun Nemotron with the same cap before making stronger claims.
-- `--max-tokens` limits one generation, not total cycles, elapsed time, or
-  total run tokens. There is still no explicit agent-loop cap.
-- Cache state and concurrent request ordering are not controlled. Cost uses
-  published list prices and the models.dev cached-input rate.
-- `source_lines_read` excludes MCP output. Use `tool_output_chars` alongside
-  it; fewer shell/file lines alone does not prove less total context.
-- Provider-reported token counts include reasoning tokens when reported.
-  The runs logged LiteLLM warnings that `reasoningContent` is unsupported in
-  multi-turn Chat Completions; its effect on agent behavior was not isolated.
-- Run records do not currently capture the generation cap or a complete
-  reproducibility manifest; the explicit commands and settings here matter.
+| task | control | gmem | gmem-guided |
+|---|---:|---:|---:|
+| `diff-001` | 28,768 / $0.0046 / 5/5 | 17,296 / $0.0020 / 5/5 | 34,884 / $0.0036 / 5/5 |
+| `imports-001` | 7,536 / $0.0007 / 5/5 | 8,469 / $0.0008 / 5/5 | 14,094 / $0.0015 / 2/5 |
+| `outline-001` | 8,696 / $0.0010 / 5/5 | 13,321 / $0.0014 / 5/5 | 21,441 / $0.0021 / 5/5 |
+| `symbol-001` | 7,842 / $0.0009 / 4/5 | 9,245 / $0.0006 / 5/5 | 13,462 / $0.0011 / 5/5 |
+| `workflow-001` | 215,887 / $0.0236 / 5/5 | 427,251 / $0.0345 / 4/5 | 348,693 / $0.0240 / 5/5 |
 
-## Next steps
+Neutral diff is 55% cheaper by mean cost, with 40% fewer median tokens;
+mean tokens fall 55%. Guided diff is 22% cheaper but has 21% more median
+tokens. Neutral workflow has one budget stop and costs 46% more on average.
+Three guided import attempts stop before another call would exhaust the
+17,099-token allowance. The remaining non-correct attempt is a control symbol
+answer scoring 0.75. Budget stops do not prove those answers would remain
+incorrect with an unlimited allowance.
 
-1. Add GLM 5.3 Flash and MiniMax M3 to the cross-model table.
-2. Record the full run configuration and bound cycles or wall time; rerun
-   Nemotron at the same generation cap.
-3. Add larger structural navigation tasks and more corpora; repeat matrices
-   before claiming stable savings.
+## Resource controls and limitations
+
+[`eval/limits.json`](../../eval/limits.json) fixes new defaults at $1.15 per
+invocation and the larger baseline model/task median +30% for run tokens.
+Before each request, a shared ledger reserves conservative uncached-input
+and maximum-output cost, including in-flight calls and retries. Unknown
+usage consumes its reservation rather than becoming free. Missing prices or
+input estimates block calls. Paid usage survives stops.
+
+The per-run token guard uses projected input and clamps output to remaining
+allowance; inaccurate estimation can overshoot tokens on the last call.
+Unexpected cost-reservation overruns block further matrix calls. Controls
+use list rates and conservative local bounds, not an exact provider invoice
+or account-balance guarantee. Explicit overrides are documented in
+[`eval/README.md`](../../eval/README.md#resource-budgets).
+
+Other limitations:
+
+- Five samples per cell and a single corpus; no evidence of universal savings
+  or reduced variance. Means and medians can suggest different relative changes.
+- GLM's resource policy differs from the uncapped baselines. A future controlled
+  cross-model study would need fresh, consistently bounded matrices.
+- Cache state and concurrent request order are uncontrolled.
+- Fewer shell/file lines do not imply less total delivered text or billed context.
+- LiteLLM warns that multi-turn `reasoningContent` is unsupported; its behavioral
+  effect was not isolated.
+- Records capture model, generation/concurrency/resource settings and assistant
+  turns, but not a full binary/index/prompt-hash manifest.
+
+Future work: larger structural tasks, more corpora, repeated bounded matrices,
+and a complete reproducibility manifest. Local regression tests require no
+provider credentials, and no eval GitHub Actions job is added.
