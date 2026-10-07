@@ -1,3 +1,5 @@
 __pycache__/
 .ruff_cache/
 results/run.log
+results/*/run.log
+results/**/*.lock

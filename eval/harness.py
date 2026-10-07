@@ -32,7 +32,13 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl
+    fcntl = None
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -42,6 +48,7 @@ from strands import Agent
 from strands.models.litellm import LiteLLMModel
 from strands.tools.mcp import MCPClient
 
+from pricing import load_pricing, mean_cost
 from score import load_gold, score_task
 from tools import RunMetrics, make_skill_tool, make_tools
 
@@ -219,30 +226,45 @@ def mean(values: list[float]) -> float:
 
 
 def summarize(records: list[Record]) -> str:
-    lines = [
-        "| task | variant | success | score | total tok | input | output | cycles | tool calls | src lines | wall ms |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
+    pricing = load_pricing()
     present = [v for v in VARIANTS if any(r.variant == v for r in records)]
+    others = [v for v in present if v != "control"]
+    lines = [
+        "| task | variant | success | score | in tok | out tok | cache | cost usd | total tok | cycles | tool calls | src lines | wall ms |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
     for task in sorted({record.task for record in records}):
         for variant in present:
             group = [r for r in records if r.task == task and r.variant == variant]
             if not group:
                 continue
+            cost = mean_cost(pricing, group[0].model, group)
             lines.append(
                 f"| `{task}` | {variant} | {sum(r.correct for r in group)}/{len(group)} | "
-                f"{mean([r.score for r in group]):.2f} | {mean([r.total_tokens for r in group]):.0f} | "
-                f"{mean([r.input_tokens for r in group]):.0f} | {mean([r.output_tokens for r in group]):.0f} | "
-                f"{mean([r.cycles for r in group]):.1f} | {mean([r.tool_calls for r in group]):.1f} | "
-                f"{mean([r.source_lines_read for r in group]):.0f} | {mean([r.wall_ms for r in group]):.0f} |"
+                f"{mean([r.score for r in group]):.2f} | {mean([r.input_tokens for r in group]):.0f} | "
+                f"{mean([r.output_tokens for r in group]):.0f} | "
+                f"{mean([r.cache_read_tokens for r in group]):.0f} | "
+                f"{'n/a' if cost is None else format(cost, '.4f')} | "
+                f"{mean([r.total_tokens for r in group]):.0f} | {mean([r.cycles for r in group]):.1f} | "
+                f"{mean([r.tool_calls for r in group]):.1f} | "
+                f"{mean([r.source_lines_read for r in group]):.0f} | "
+                f"{mean([r.wall_ms for r in group]):.0f} |"
             )
-    others = [v for v in present if v != "control"]
-    header = " | ".join(f"{v} tok" for v in others)
-    separators = " | ".join("---:" for _ in others)
+    if not others:
+        return "\n".join(lines)
+
     lines += [
         "",
-        f"| task | control tok | {header} | " + " | ".join(f"{v} red." for v in others) + " |",
-        f"|---|---:|{separators}|" + "---:|" * len(others),
+        "| task | control tok | "
+        + " | ".join(f"{v} tok" for v in others)
+        + " | "
+        + " | ".join(f"{v} red." for v in others)
+        + " |",
+        "|---|---:|"
+        + " | ".join("---:" for _ in others)
+        + " | "
+        + " | ".join("---:" for _ in others)
+        + " |",
     ]
     for task in sorted({record.task for record in records}):
         control = [r for r in records if r.task == task and r.variant == "control"]
@@ -257,10 +279,47 @@ def summarize(records: list[Record]) -> str:
                 continue
             tokens = mean([r.total_tokens for r in group])
             reduction = 1 - tokens / control_tokens if control_tokens else 0.0
-            cells.append((f"{tokens:.0f}", f"{reduction * 100:.0f}%"))
+            cells.append((f"{tokens:.0f}", f"{reduction * 100:+.0f}%"))
         lines.append(
             f"| `{task}` | {control_tokens:.0f} | "
             + " | ".join(tokens for tokens, _ in cells)
+            + " | "
+            + " | ".join(reduction for _, reduction in cells)
+            + " |"
+        )
+
+    lines += [
+        "",
+        "| task | control usd | "
+        + " | ".join(f"{v} usd" for v in others)
+        + " | "
+        + " | ".join(f"{v} cost red." for v in others)
+        + " |",
+        "|---|---:|"
+        + " | ".join("---:" for _ in others)
+        + " | "
+        + " | ".join("---:" for _ in others)
+        + " |",
+    ]
+    for task in sorted({record.task for record in records}):
+        control = [r for r in records if r.task == task and r.variant == "control"]
+        if not control:
+            continue
+        control_cost = mean_cost(pricing, control[0].model, control)
+        if control_cost is None:
+            continue
+        cells = []
+        for variant in others:
+            group = [r for r in records if r.task == task and r.variant == variant]
+            cost = mean_cost(pricing, group[0].model, group) if group else None
+            if cost is None:
+                cells.append(("n/a", "n/a"))
+                continue
+            reduction = 1 - cost / control_cost if control_cost else 0.0
+            cells.append((format(cost, ".4f"), f"{reduction * 100:+.0f}%"))
+        lines.append(
+            f"| `{task}` | {format(control_cost, '.4f')} | "
+            + " | ".join(cost for cost, _ in cells)
             + " | "
             + " | ".join(reduction for _, reduction in cells)
             + " |"
@@ -327,21 +386,41 @@ def main() -> int:
         order = variants if run % 2 == 1 else list(reversed(variants))
         units += [(run, task, variant) for task in tasks for variant in order]
 
-    if args.jobs <= 1:
-        records = [run_and_log(args, run, task, variant, gold) for run, task, variant in units]
-    else:
-        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = {
-                pool.submit(run_and_log, args, run, task, variant, gold): (run, task, variant)
-                for run, task, variant in units
-            }
-            records = [future.result() for future in as_completed(futures)]
+    # Append every finished run immediately, so a crash or a kill never loses
+    # completed work. Refuse to start when another harness is writing the same
+    # file, which would interleave two processes' output.
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = args.out.with_suffix(args.out.suffix + ".lock")
+    lock_handle = lock_path.open("w")
+    if fcntl is not None:
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise SystemExit(
+                f"{args.out} is already being written by another harness "
+                f"(lock file {lock_path}); remove it if that is stale"
+            ) from None
+    lock = threading.Lock()
+
+    with args.out.open("w") as handle:
+
+        def run_and_write(run: int, task: dict, variant: str) -> Record:
+            record = run_and_log(args, run, task, variant, gold)
+            with lock:
+                handle.write(json.dumps(asdict(record)) + "\n")
+                handle.flush()
+            return record
+
+        if args.jobs <= 1:
+            records = [run_and_write(run, task, variant) for run, task, variant in units]
+        else:
+            with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+                futures = [
+                    pool.submit(run_and_write, run, task, variant) for run, task, variant in units
+                ]
+                records = [future.result() for future in as_completed(futures)]
     records.sort(key=lambda record: (record.run, record.task, record.variant))
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w") as handle:
-        for record in records:
-            handle.write(json.dumps(asdict(record)) + "\n")
     table = summarize(records)
     args.summary.write_text(table + "\n")
     print("\n" + table)

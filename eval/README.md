@@ -36,6 +36,9 @@ eval/
 ├── harness.py          # entrypoint: runs the matrix, writes runs.jsonl + summary.md
 ├── tools.py            # shell + read_file with per-run metrics and output truncation
 ├── score.py            # deterministic scorer (no LLM judge)
+├── pricing.py          # per-model token pricing and cost
+├── pricing.json        # rates (USD per 1M tokens) from models.dev
+├── compare.py          # merge per-model runs.jsonl files into one wide table
 ├── tasks.json          # task prompts
 ├── gold.json           # gold answers and the workflow rubric
 ├── prompts/system.txt  # system prompt, identical for both variants
@@ -73,13 +76,29 @@ uv run harness.py --repo ~/.cache/gmem-eval/openclaw-bench \
     --gmem ../target/release/gmem --runs 5
 ```
 
+Every finished run is appended to the output file immediately, so a crash or a
+kill never loses completed work; `rescore.py` regenerates the summary from the
+partial file.
+
 Runs execute concurrently (`--jobs`, default 4). Use `--jobs 1` to keep the
-strict interleaved order. Other flags: `--dry-run`, `--variants control,gmem`,
+strict interleaved order, or a lower value for models whose contexts grow
+large enough to pressure memory. Other flags: `--dry-run`, `--variants control,gmem`,
 `--task-filter a,b`, `--model`, `--temperature`, `--max-tokens`,
 `--skills-dir`, `--guidance`.
 
 To re-score stored answers after changing `gold.json` or `score.py` without
 re-running the agents: `uv run rescore.py`.
+
+To run another model, write to its own directory and then build the wide
+table:
+
+```bash
+uv run harness.py --repo ~/.cache/gmem-eval/openclaw-bench \
+    --gmem ../target/release/gmem --runs 5 --jobs 6 \
+    --model fireworks_ai/accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b \
+    --out results/nemotron/runs.jsonl --summary results/nemotron/summary.md
+uv run compare.py          # reads every results/**/runs.jsonl
+```
 
 ## Tasks
 
@@ -102,7 +121,12 @@ recall over required symbols for `outline-001` and `diff-001`, F1 for
 Recorded per run in `results/runs.jsonl`:
 
 - `input_tokens`, `output_tokens`, `total_tokens`, `cache_read_tokens` — from
-  the model provider, accumulated over every agent cycle.
+  the model provider, accumulated over every agent cycle. `cache_read_tokens`
+  is a subset of `input_tokens`, so `total_tokens = input + output`.
+- `cost_usd` — derived per run from `pricing.json`, because total tokens is a
+  poor cost proxy: cached input is far cheaper than fresh input (for example
+  deepseek-v4p1-flash is $0.006 vs $0.30 per 1M). Rates come from the
+  models.dev catalog (`https://models.dev/api.json`, provider `fireworks-ai`).
 - `cycles`, `wall_ms` — agent-loop cycles and wall time.
 - `tool_calls`, `tool_calls_by_name` — every tool call, including the four
   gmem tools.
