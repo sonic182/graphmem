@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ partial "title.html" . }} · Graphmem</title>
   <meta name="description" content="{{ site.Params.description }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400..800&display=swap">
   <link rel="canonical" href="{{ .Permalink }}">
   <link rel="icon" type="image/svg+xml" href="{{ "favicon.svg" | relURL }}">
-  <link rel="stylesheet" href="{{ "style.css" | relURL }}">
+  {{ $style := resources.Get "style.css" | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $style.RelPermalink }}" integrity="{{ $style.Data.Integrity }}">
 </head>
 <body>
   <a class="skip-link" href="#content">Skip to content</a>

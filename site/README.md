@@ -14,7 +14,8 @@ hugo --source site --minify
 
 Edit the existing Markdown in `docs/`; Hugo mounts it directly. Roadmap files
 are excluded. The landing page lives in `site/content/_index.md`; templates
-and plain CSS live in `site/layouts/` and `site/static/`.
+and plain CSS live in `site/layouts/` and `site/assets/`. Hugo minifies and
+fingerprints the stylesheet when building the site.
 
 Relative Markdown links resolve to site pages when published, or GitHub source
 files otherwise. HTML rendering is enabled for the guides' `<details>` blocks.
