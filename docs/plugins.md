@@ -106,6 +106,8 @@ Restart OpenCode after plugin changes.
 
 ## pi
 
+Pi 1.x includes native MCP support.
+
 ```sh
 pi install npm:@sonic182/graphmem
 ```
@@ -130,17 +132,7 @@ download or keep using your native executable. Uninstall with
 `pi remove npm:@sonic182/graphmem`.
 
 <details>
-<summary>Migration, headless setup, and manual registration</summary>
-
-Remove `pi-mcp-adapter` if installed; its `/mcp` overrides Pi's native support:
-
-```sh
-pi remove npm:pi-mcp-adapter
-```
-
-For other installation sources, remove the corresponding package or extension.
-Move server entries from `~/.config/mcp/mcp.json` to Pi's native configuration;
-native MCP does not read the adapter's file.
+<summary>Headless setup and manual registration</summary>
 
 Headless modes print an absolute installer command instead of prompting.
 Run it and restart Pi.
