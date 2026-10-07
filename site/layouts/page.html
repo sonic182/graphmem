@@ -1,0 +1,13 @@
+{{ define "main" }}
+  <div class="article-layout">
+    <article class="prose">{{ .Content }}</article>
+    {{ if gt (len .Fragments.Headings) 0 }}
+      <aside class="toc" aria-label="On this page">
+        <details open>
+          <summary>On this page</summary>
+          {{ .TableOfContents }}
+        </details>
+      </aside>
+    {{ end }}
+  </div>
+{{ end }}

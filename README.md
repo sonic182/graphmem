@@ -120,6 +120,9 @@ just verify
 Runs formatting checks, compilation, Clippy, and tests.
 [Design](docs/design.md) · [Schema evolution](docs/schema-evolution.md)
 
+To preview the documentation site, run `hugo server --source site`.
+See [site setup](site/README.md).
+
 ## License
 
 [MIT](LICENSE).

@@ -1,0 +1,75 @@
+baseURL = 'https://sonic182.github.io/graphmem/'
+locale = 'en-US'
+title = 'Graphmem'
+disableKinds = ['taxonomy', 'term', 'RSS']
+
+[params]
+repository = 'https://github.com/sonic182/graphmem'
+description = 'Shared, local memory for coding agents.'
+
+[module.hugoVersion]
+min = '0.167.0'
+
+[[module.mounts]]
+source = 'content'
+target = 'content'
+
+[[module.mounts]]
+source = '../docs'
+target = 'content/docs'
+files = ['! /roadmap/**', '! /assets/**', '/**']
+
+[[module.mounts]]
+source = 'static'
+target = 'static'
+
+[[module.mounts]]
+source = '../docs/assets'
+target = 'static/docs/assets'
+
+[markup.goldmark.renderer]
+unsafe = true
+
+[markup.tableOfContents]
+startLevel = 2
+endLevel = 3
+
+[[menus.main]]
+name = 'Overview'
+pageRef = '/'
+weight = 10
+
+[[menus.main]]
+name = 'Editor plugins'
+pageRef = '/docs/plugins'
+weight = 20
+
+[[menus.main]]
+name = 'CLI reference'
+pageRef = '/docs/cli'
+weight = 30
+
+[[menus.main]]
+name = 'MCP reference'
+pageRef = '/docs/mcp'
+weight = 40
+
+[[menus.main]]
+name = 'Build & configuration'
+pageRef = '/docs/setup'
+weight = 50
+
+[[menus.main]]
+name = 'Design'
+pageRef = '/docs/design'
+weight = 60
+
+[[menus.main]]
+name = 'Schema evolution'
+pageRef = '/docs/schema-evolution'
+weight = 70
+
+[[menus.main]]
+name = 'Evaluation'
+pageRef = '/docs/evaluation'
+weight = 80
