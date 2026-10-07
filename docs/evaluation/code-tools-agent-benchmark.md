@@ -5,6 +5,34 @@ code tools are available? This is the first run of the harness in
 [`eval/`](../../eval/README.md). Raw data is in `eval/results/`, and the wide
 cross-model table in `eval/results/comparison.md`.
 
+## Conclusions
+
+1. **The tools cut reading, not reasoning.** Tool output fell 22–86% and
+   source lines read fell on every task except the neutral open-ended run.
+   They locate and outline; they do not remove the need to read the
+   implementation, which is why the explain-a-behavior task stays expensive.
+2. **Cost is the metric, not tokens.** Cached input is ~90% of the input count
+   and priced at 2–8% of fresh input, and gmem's short outputs shift spend
+   toward cache reads. On deepseek gmem is cheaper on 4 of 5 tasks — including
+   `imports-001`, where it uses 20% more tokens but costs 33% less. Total
+   tokens understates the tools.
+3. **The four tool definitions are a fixed cost that small tasks cannot
+   amortize** (~2.5k tokens per model call). A one-symbol lookup is cheaper in
+   tokens with `rg` + `sed`, though often not in cost. gmem's home is large,
+   structural, multi-file navigation.
+4. **The agent, not the tool, is the bottleneck.** With a neutral prompt the
+   model ignored the tools on the open-ended task (+35% cost); with the
+   shipped guidance it used them and cost −33%. Guidance is not optional.
+5. **Value is model-dependent, so there is no single savings number.**
+   deepseek exploits the tools cleanly. Nemotron is a weak selector: the tools
+   rescue it on `symbol-001` (2/5 → 5/5) and hurt it on `outline-001`
+   (5/5 → 3/5), and it can loop (one run: 107 cycles, 2.7M tokens).
+6. **`code_diff` is the standout.** It wins in both models and both metrics
+   (deepseek −19% cost, nemotron −58% cost guided), is used every run, and
+   roughly halves source lines read.
+7. **Method.** Measure cost and bytes read, not just tokens; report medians
+   because one runaway loop can double a cell's mean; and bound the loop.
+
 ## Setup
 
 - **Corpus:** `openclaw/openclaw`, pinned to `8f5c33c3` (the llama.cpp
@@ -65,8 +93,9 @@ Change vs control:
   of file bodies, so it trades expensive output and fresh input for cheap
   cached input. `imports-001` is the clearest case: gmem uses **20% more
   tokens but costs 33% less**.
-- **By cost, gmem wins on four of five tasks**, and guided wins on three
-  (diff, outline, workflow). The token metric alone understates it.
+- **By cost, gmem wins on four of five tasks**, and guided also wins on four
+  of five (all but `imports-001`, where the guidance text costs more than it
+  saves). The token metric alone understates the tools badly.
 - **Guidance is decisive on the hard task.** Neutral `gmem` ignored the tools
   on `workflow-001` (0.8 gmem calls/run), explored more than control and cost
   **+35%**. Guided used them (3.0 calls + a skill load), read the fewest source
