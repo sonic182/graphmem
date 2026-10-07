@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="{{ site.Language.Locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ partial "title.html" . }} · Graphmem</title>
+  <meta name="description" content="{{ site.Params.description }}">
+  <link rel="canonical" href="{{ .Permalink }}">
+  <link rel="icon" type="image/svg+xml" href="{{ "favicon.svg" | relURL }}">
+  <link rel="stylesheet" href="{{ "style.css" | relURL }}">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="header">
+    <a class="brand" href="{{ site.Home.RelPermalink }}">Graphmem<span>docs</span></a>
+    <a href="{{ site.Params.repository }}">GitHub ↗</a>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <details class="navigation" open>
+        <summary>Documentation</summary>
+        <nav aria-label="Documentation">
+          {{ range site.Menus.main }}
+            <a href="{{ .URL }}"{{ if $.IsMenuCurrent "main" . }} aria-current="page"{{ end }}>{{ .Name }}</a>
+          {{ end }}
+        </nav>
+      </details>
+      <p class="sidebar-note">Local memory.<br>Shared context.</p>
+    </aside>
+    <main id="content" tabindex="-1">
+      {{ block "main" . }}{{ end }}
+      <footer>
+        {{ with .File }}
+          {{ $path := .Path }}
+          {{ if eq $path "_index.md" }}{{ $path = "site/content/_index.md" }}{{ end }}
+          <a href="{{ site.Params.repository }}/blob/master/{{ $path }}">View source on GitHub</a>
+        {{ end }}
+        <span>Graphmem · MIT</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

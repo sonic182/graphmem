@@ -1,0 +1,17 @@
+{{- $url := urls.Parse .Destination -}}
+{{- $destination := .Destination -}}
+{{- if and (not $url.IsAbs) (not (strings.HasPrefix .Destination "//")) $url.Path -}}
+  {{- $source := path.Clean (path.Join (path.Dir .Page.File.Path) $url.Path) -}}
+  {{- with site.GetPage $source -}}
+    {{- $destination = .RelPermalink -}}
+  {{- else -}}
+    {{- if strings.HasPrefix $source "docs/assets/" -}}
+      {{- $destination = $source | relURL -}}
+    {{- else -}}
+      {{- $destination = printf "%s/blob/master/%s" site.Params.repository $source -}}
+    {{- end -}}
+  {{- end -}}
+  {{- with $url.RawQuery -}}{{- $destination = printf "%s?%s" $destination . -}}{{- end -}}
+  {{- with $url.Fragment -}}{{- $destination = printf "%s#%s" $destination . -}}{{- end -}}
+{{- end -}}
+<a href="{{ $destination | safeURL }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text }}</a>
