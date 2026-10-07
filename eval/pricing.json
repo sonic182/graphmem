@@ -1,0 +1,17 @@
+{
+  "fireworks_ai/accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b": {
+    "input": 0.05,
+    "output": 0.20,
+    "cache_read": 0.01
+  },
+  "fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash": {
+    "input": 0.30,
+    "output": 1.20,
+    "cache_read": 0.006
+  },
+  "fireworks_ai/accounts/fireworks/models/glm-5p3-flash": {
+    "input": 0.15,
+    "output": 0.50,
+    "cache_read": 0.03
+  }
+}

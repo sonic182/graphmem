@@ -1,0 +1,127 @@
+{
+  "symbol-001": {
+    "file": "extensions/llama-cpp/src/setup.ts",
+    "kind": "function",
+    "start_line": 366,
+    "end_line": 488
+  },
+  "outline-001": {
+    "required": [
+      { "name": "UnsupportedLlamaServerHostError", "kind": "class", "start_line": 54, "end_line": 56 },
+      { "name": "sha256File", "kind": "function", "start_line": 129, "end_line": 158 },
+      { "name": "downloadVerifiedFile", "kind": "function", "start_line": 171, "end_line": 263 },
+      { "name": "ensureLlamaServerInstalled", "kind": "function", "start_line": 542, "end_line": 576 }
+    ]
+  },
+  "imports-001": {
+    "specifiers": [
+      "node:fs/promises",
+      "node:os",
+      "node:path",
+      "openclaw/plugin-sdk/agent-scope-runtime",
+      "openclaw/plugin-sdk/plugin-entry",
+      "openclaw/plugin-sdk/provider-model-shared",
+      "./auth-config.js",
+      "./defaults.js",
+      "./hardware.js",
+      "./llama-server-assets.js",
+      "./llama-server-install.js",
+      "./llama-server-preset.js",
+      "./managed-server.js",
+      "./model-catalog.js"
+    ]
+  },
+  "diff-001": {
+    "required": [
+      {
+        "file": "extensions/llama-cpp/src/llama-server-install.ts",
+        "symbol": "UnsupportedLlamaServerHostError",
+        "change": "added"
+      },
+      {
+        "file": "extensions/llama-cpp/src/llama-server-install.ts",
+        "symbol": "assertSupportedMacosRuntime",
+        "change": "added"
+      },
+      {
+        "file": "extensions/llama-cpp/src/llama-server-install.ts",
+        "symbol": "assertSupportedLinuxRuntime",
+        "change": "modified"
+      },
+      {
+        "file": "extensions/llama-cpp/src/llama-server-install.ts",
+        "symbol": "installLlamaServer",
+        "change": "modified"
+      },
+      {
+        "file": "extensions/llama-cpp/src/setup.ts",
+        "symbol": "runLlamaCppSetup",
+        "change": "modified"
+      }
+    ]
+  },
+  "workflow-001": {
+    "rubric": [
+      {
+        "id": "linux-check",
+        "type": "citation",
+        "file": "extensions/llama-cpp/src/llama-server-install.ts",
+        "start_line": 58,
+        "end_line": 75,
+        "tolerance": 8,
+        "note": "assertSupportedLinuxRuntime"
+      },
+      {
+        "id": "macos-check",
+        "type": "citation",
+        "file": "extensions/llama-cpp/src/llama-server-install.ts",
+        "start_line": 80,
+        "end_line": 102,
+        "tolerance": 8,
+        "note": "assertSupportedMacosRuntime"
+      },
+      {
+        "id": "error-surfacing",
+        "type": "citation",
+        "file": "extensions/llama-cpp/src/setup.ts",
+        "start_line": 366,
+        "end_line": 488,
+        "tolerance": 10,
+        "note": "runLlamaCppSetup catch block"
+      },
+      {
+        "id": "tests",
+        "type": "citation",
+        "file_any": [
+          "extensions/llama-cpp/src/llama-server-install.test.ts",
+          "extensions/llama-cpp/src/setup.test.ts"
+        ],
+        "note": "covering tests"
+      },
+      {
+        "id": "glibc-restriction",
+        "type": "fact",
+        "any_of": ["glibc"],
+        "note": "Linux requires glibc (musl/Alpine unsupported)"
+      },
+      {
+        "id": "macos-minimum",
+        "type": "fact",
+        "any_of": ["13.3", "macOS 13"],
+        "note": "macOS 13.3 minimum"
+      },
+      {
+        "id": "host-error",
+        "type": "fact",
+        "any_of": ["UnsupportedLlamaServerHostError"],
+        "note": "the unsupported-host error type"
+      },
+      {
+        "id": "user-facing-message",
+        "type": "fact",
+        "any_of": ["unavailable on this host", "Managed llama.cpp setup failed"],
+        "note": "user-facing setup error"
+      }
+    ]
+  }
+}

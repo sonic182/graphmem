@@ -1,0 +1,32 @@
+{
+  "repo": "https://github.com/openclaw/openclaw",
+  "base_commit": "4de57f22aa1dcd118ec156a08588adb1b54404bd",
+  "head_commit": "8f5c33c30d710d34c01a017a05f0ccbff8315452",
+  "tasks": [
+    {
+      "id": "symbol-001",
+      "type": "find_symbol",
+      "prompt": "In this repository, locate the definition of the function `runLlamaCppSetup`.\n\nReturn only a JSON object with exactly these keys:\n{\"file\": \"<path relative to the repository root>\", \"kind\": \"<symbol kind>\", \"start_line\": <int>, \"end_line\": <int>}\n\nDo not add any other text."
+    },
+    {
+      "id": "outline-001",
+      "type": "code_outline",
+      "prompt": "In this repository, inspect `extensions/llama-cpp/src/llama-server-install.ts`.\n\nReturn a JSON array of the exported top-level functions and classes declared in that file. Each item must have exactly these keys:\n{\"name\": \"<symbol name>\", \"kind\": \"function\" | \"class\", \"start_line\": <int>, \"end_line\": <int>}\n\nSort by start_line. Do not include imports, types, constants, or nested symbols. Do not add any other text."
+    },
+    {
+      "id": "imports-001",
+      "type": "code_imports",
+      "prompt": "In this repository, inspect `extensions/llama-cpp/src/setup.ts`.\n\nReturn a JSON array of every module specifier that this file imports, exactly as written (for example \"./defaults.js\"). Sort the array. Do not add any other text."
+    },
+    {
+      "id": "diff-001",
+      "type": "code_diff",
+      "prompt": "Compare two revisions of this repository:\n\nbase: 4de57f22aa1dcd118ec156a08588adb1b54404bd\nhead: 8f5c33c30d710d34c01a017a05f0ccbff8315452\n\nList the source symbols (functions, classes, methods) that were structurally added or modified for the llama.cpp host-compatibility change. Ignore tests and documentation.\n\nReturn a JSON array. Each item must have exactly these keys:\n{\"file\": \"<path relative to the repository root>\", \"symbol\": \"<symbol name>\", \"change\": \"added\" | \"modified\", \"start_line\": <int>, \"end_line\": <int>}\n\nDo not add any other text."
+    },
+    {
+      "id": "workflow-001",
+      "type": "workflow",
+      "prompt": "OpenClaw's managed llama.cpp setup must decide whether the bundled llama-server can execute on the host.\n\nFind the implementation of that behavior and explain:\n1. where OS compatibility is checked,\n2. which OS/runtime restrictions exist,\n3. where those failures are converted to the user-facing setup error,\n4. which tests cover the behavior.\n\nCite the source file and line range for every claim. Be concise."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "margin": 1.3,
+  "basis": "Largest per-model/task median across all three variants, plus 30%; matrix cost is the largest complete baseline matrix cost plus 30%, rounded up to cents.",
+  "baseline_models": ["deepseek-v4p1-flash", "nemotron-lightning-3p5-30b-a3b"],
+  "baseline_matrix_cost_usd": 0.8823,
+  "max_matrix_cost_usd": 1.15,
+  "max_run_tokens": {
+    "diff-001": 223845,
+    "imports-001": 17099,
+    "outline-001": 92869,
+    "symbol-001": 15327,
+    "workflow-001": 1339194
+  }
+}
