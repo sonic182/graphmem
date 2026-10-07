@@ -4,6 +4,8 @@ title: Graphmem documentation
 
 # Shared memory for coding agents
 
+![Graphmem — Shared, local memory for coding agents](docs/assets/graphmem-banner.png)
+
 Keep project decisions across sessions and tools. Graphmem stores memories
 locally, finds them by meaning, and links them through a knowledge graph.
 Optional code tools help agents navigate your repository.
