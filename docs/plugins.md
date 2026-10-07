@@ -14,6 +14,9 @@ claude plugin marketplace add sonic182/graphmem
 claude plugin install graphmem@graphmem
 ```
 
+Alternatively, inside Claude Code, open `/plugins`, go to the marketplace menu,
+and add `sonic182/graphmem`. Then select `graphmem` in the plugin list and install it.
+
 Check `/mcp` for the `gmem` server. If missing:
 
 ```sh
