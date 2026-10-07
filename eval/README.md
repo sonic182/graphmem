@@ -67,13 +67,13 @@ llama.cpp host-compatibility fix, so the benchmark can be repeated exactly.
 ```bash
 cd eval
 
-# smoke test: one task, both variants, one run
+# smoke test: one task, all three variants, one run
 uv run harness.py --repo ~/.cache/gmem-eval/openclaw-bench \
     --gmem ../target/release/gmem --task-filter symbol-001 --runs 1
 
-# full matrix: 5 tasks x 2 variants x 5 runs = 50 runs
+# latest DeepSeek matrix: 5 tasks x 3 variants x 5 runs = 75 runs
 uv run harness.py --repo ~/.cache/gmem-eval/openclaw-bench \
-    --gmem ../target/release/gmem --runs 5
+    --gmem ../target/release/gmem --runs 5 --jobs 4 --max-tokens 16384
 ```
 
 Every finished run is appended to the output file immediately, so a crash or a
@@ -85,6 +85,13 @@ strict interleaved order, or a lower value for models whose contexts grow
 large enough to pressure memory. Other flags: `--dry-run`, `--variants control,gmem`,
 `--task-filter a,b`, `--model`, `--temperature`, `--max-tokens`,
 `--skills-dir`, `--guidance`.
+
+The harness defaults to an 8192-token generation cap. The latest stored
+DeepSeek matrix uses 16384 after an earlier guided diff run stopped mid-tool-call;
+the stored Nemotron matrix still uses 8192. This is a per-generation limit,
+not a cap on total run tokens or agent cycles. Use the same explicit setting
+when comparing variants. The output file is replaced at startup, so copy any
+results you want to retain before rerunning.
 
 To re-score stored answers after changing `gold.json` or `score.py` without
 re-running the agents: `uv run rescore.py`.
@@ -114,7 +121,9 @@ One task per code tool plus one end-to-end navigation task:
 
 Scoring is deterministic against `gold.json`: exact match for `symbol-001`,
 recall over required symbols for `outline-001` and `diff-001`, F1 for
-`imports-001`, and a citation/fact rubric for `workflow-001`.
+`imports-001`, and a citation/fact rubric for `workflow-001`. Import scoring
+normalizes matching surrounding single/double quotes and backticks inside
+JSON strings; wrong or missing specifiers still reduce F1.
 
 ## Metrics
 
@@ -140,9 +149,9 @@ both variants, the way a real coding harness truncates tool output.
 
 ## Notes and limitations
 
-- The system prompt is identical for both variants and does not mention gmem.
-  The gmem variant discovers the tools from their MCP descriptions, which is
-  the conservative choice: the shipped Graphmem plugin also injects guidance.
+- `control` and neutral `gmem` share the same system prompt, which does not
+  mention gmem. `gmem-guided` additionally receives the shipped plugin guidance
+  and the skill loader.
 - Token counts are provider-reported and include reasoning tokens when the
   model reports them.
 - The corpus is a single repository; treat the numbers as a signal, not a

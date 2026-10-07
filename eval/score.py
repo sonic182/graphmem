@@ -110,9 +110,20 @@ def score_outline(answer: str, gold: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_import_specifier(item: Any) -> str:
+    value = str(item).strip()
+    while len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"', "`"}:
+        value = value[1:-1].strip()
+    return value
+
+
 def score_imports(answer: str, gold: dict[str, Any]) -> dict[str, Any]:
     parsed = extract_json(answer)
-    found = {str(item).strip() for item in parsed} if isinstance(parsed, list) else set()
+    found = (
+        {_normalize_import_specifier(item) for item in parsed}
+        if isinstance(parsed, list)
+        else set()
+    )
     expected = set(gold["specifiers"])
     hit = found & expected
     precision = len(hit) / len(found) if found else 0.0
