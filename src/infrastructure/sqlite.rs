@@ -454,12 +454,24 @@ impl Database {
         scopes: &[String],
         memory_type: Option<&str>,
     ) -> Result<Vec<Memory>> {
+        self.list_memories_in_scopes_limited(scopes, memory_type, usize::MAX)
+    }
+
+    /// List selected scopes plus global and legacy unscoped memories, newest first.
+    /// Apply the limit in SQLite before decoding memory contents.
+    pub fn list_memories_in_scopes_limited(
+        &self,
+        scopes: &[String],
+        memory_type: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
         let scopes = normalized_scopes(scopes)?;
         let placeholders = (0..scopes.len())
             .map(|index| format!("?{}", index + 1))
             .collect::<Vec<_>>()
             .join(", ");
         let type_placeholder = format!("?{}", scopes.len() + 1);
+        let limit_placeholder = format!("?{}", scopes.len() + 2);
         let sql = format!(
             "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
                     m.last_accessed_at, m.access_count
@@ -473,13 +485,17 @@ impl Database {
              ))
                AND ({type_placeholder} IS NULL
                     OR LOWER(m.memory_type) = LOWER({type_placeholder}))
-             ORDER BY m.created_at DESC, m.id DESC"
+             ORDER BY m.created_at DESC, m.id DESC
+             LIMIT {limit_placeholder}"
         );
         let mut values = scopes
             .into_iter()
             .map(rusqlite::types::Value::Text)
             .collect::<Vec<_>>();
         values.push(memory_type_value(memory_type));
+        values.push(rusqlite::types::Value::Integer(
+            i64::try_from(limit).unwrap_or(i64::MAX),
+        ));
         let mut statement = self.connection.prepare(&sql)?;
         let memories = statement
             .query_map(rusqlite::params_from_iter(values), memory_from_row)?

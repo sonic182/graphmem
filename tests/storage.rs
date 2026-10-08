@@ -25,6 +25,67 @@ fn remove_database(path: &Path) {
 }
 
 #[test]
+fn scoped_listing_limits_results_after_filtering() {
+    let (mut database, path) = test_database();
+    let local_scope = vec!["repo:/local".to_owned()];
+    let local = database
+        .remember_with_graph("local", "decision", 0.0, &local_scope, &[], &[])
+        .unwrap();
+    let global = database
+        .remember_with_graph(
+            "global",
+            "observation",
+            0.0,
+            &["global".to_owned()],
+            &[],
+            &[],
+        )
+        .unwrap();
+    let legacy = database.create_memory("legacy", "decision", 0.0).unwrap();
+    database
+        .remember_with_graph(
+            "foreign",
+            "decision",
+            0.0,
+            &["repo:/foreign".to_owned()],
+            &[],
+            &[],
+        )
+        .unwrap();
+
+    for (limit, expected) in [
+        (0, vec![]),
+        (1, vec![legacy.id]),
+        (2, vec![legacy.id, global.id]),
+        (usize::MAX, vec![legacy.id, global.id, local.id]),
+    ] {
+        let ids = database
+            .list_memories_in_scopes_limited(&local_scope, None, limit)
+            .unwrap()
+            .into_iter()
+            .map(|memory| memory.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, expected);
+    }
+    let decisions = database
+        .list_memories_in_scopes_limited(&local_scope, Some("DECISION"), 2)
+        .unwrap();
+    assert_eq!(
+        decisions.iter().map(|memory| memory.id).collect::<Vec<_>>(),
+        vec![legacy.id, local.id]
+    );
+    assert_eq!(
+        database
+            .list_memories_in_scopes(&local_scope, None)
+            .unwrap()
+            .len(),
+        3
+    );
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
 fn checked_flush_rolls_back_when_a_scope_is_rejected() {
     let (mut database, path) = test_database();
     let memory = database

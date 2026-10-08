@@ -204,10 +204,7 @@ impl MemoryService {
         let scopes = self.read_scopes(scopes)?;
         Ok(self
             .database
-            .list_memories_in_scopes(&scopes, None)?
-            .into_iter()
-            .take(limit)
-            .collect())
+            .list_memories_in_scopes_limited(&scopes, None, limit)?)
     }
 
     pub fn list_all(&self) -> Result<Vec<Memory>> {
