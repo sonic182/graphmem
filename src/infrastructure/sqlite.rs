@@ -371,13 +371,39 @@ impl Database {
     }
 
     pub fn flush(&mut self) -> Result<()> {
-        self.with_transaction(|transaction| {
-            transaction.execute("DELETE FROM memories", [])?;
-            transaction.execute("DELETE FROM scopes", [])?;
-            transaction.execute("DELETE FROM edges", [])?;
-            transaction.execute("DELETE FROM entities", [])?;
-            Ok(())
-        })
+        self.flush_with_scope_check(|_| Ok::<_, StorageError>(()))
+    }
+
+    /// Validate every attached scope and flush in the same transaction.
+    /// A concurrent insertion cannot slip between validation and deletion.
+    pub fn flush_with_scope_check<E: From<StorageError>>(
+        &mut self,
+        mut check_scope: impl FnMut(&str) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        let transaction = self.connection.transaction().map_err(StorageError::from)?;
+        {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT DISTINCT s.name FROM scopes s
+                 JOIN memory_scopes ms ON ms.scope_id = s.id ORDER BY s.name",
+                )
+                .map_err(StorageError::from)?;
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(StorageError::from)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(StorageError::from)?;
+            for name in names {
+                check_scope(&name)?;
+            }
+        }
+        for table in ["memories", "scopes", "edges", "entities"] {
+            transaction
+                .execute(&format!("DELETE FROM {table}"), [])
+                .map_err(StorageError::from)?;
+        }
+        transaction.commit().map_err(StorageError::from)?;
+        Ok(())
     }
 
     pub fn list_memories(&self, limit: usize) -> Result<Vec<Memory>> {

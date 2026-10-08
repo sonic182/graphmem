@@ -44,7 +44,7 @@ Store a new narrative memory.
 | --- | --- | --- |
 | `--type <memory_type>` | `observation` | Free-text category, e.g. `decision`, `convention`, `constraint`. |
 | `--importance <0.0-1.0>` | `0.0` | How costly it would be for a future task to miss this. |
-| `--scope <scope>` (repeatable) | the server repo scope, or `global` outside a repo | Pass multiple times to attach several scopes. |
+| `--scope <scope>` (repeatable) | the current repo scope, or `global` outside a repo | Only the current repository and `global` may be attached. Foreign scopes reject the entire call. |
 
 The CLI cannot attach entities or relations to a memory, and there is no CLI
 equivalent of the `relate` tool — both are MCP-only (the `remember` tool's
@@ -67,8 +67,11 @@ List memories, newest first, no ranking.
 
 | Flag | Default |
 | --- | --- |
-| `--scope <scope>` | all scopes |
+| `--scope <scope>` (repeatable) | current repository + `global` |
 | `--limit <n>` | `50` |
+
+Explicit scopes select those projects plus `global`, without adding the current
+repository. Checkout roots and common Git directories resolve to the same scope.
 
 Output: one line per memory, tab-separated `id`, `memory_type`, `content`.
 
@@ -77,7 +80,9 @@ Output: one line per memory, tab-separated `id`, `memory_type`, `content`.
 Print one memory's full detail (id, type, importance, timestamps, scopes,
 content). A successful `show` updates `last_accessed_at` and increments
 `access_count`; `list` does not. Exits non-zero with `memory not found` if the
-id doesn't exist.
+id doesn't exist or belongs to an unselected project. Repeat `--scope <scope>`
+to read another project's memory; global memories are always included. Without
+that flag, only the current repository plus global is selected.
 
 ## `gmem search <query>`
 
@@ -90,7 +95,7 @@ Each returned result updates `last_accessed_at` and increments `access_count`.
 
 | Flag | Default | Notes |
 | --- | --- | --- |
-| `--scope <scope>` (repeatable) | every scope in the store | Omitted scopes search the whole store, not just the current repo + global (that repo-aware default is an MCP-only behavior — see [docs/mcp.md](mcp.md)). |
+| `--scope <scope>` (repeatable) | current repository + `global` | Explicit scopes replace the project selection, but still include `global`. Reads do not change the destination of later writes. |
 | `--limit <n>` | `10` | |
 
 Output: one line per result, tab-separated `score`, `id`, `memory_type`,
@@ -114,12 +119,14 @@ line per hop per path (`depth`, `direction`, `relation`, `entity kind`,
 ## `gmem forget <id>`
 
 Permanently delete one memory. Prints `forgot: <id>`. Exits non-zero with
-`memory not found` if the id doesn't exist.
+`memory not found` if the id doesn't exist. Only memories whose scopes are all
+current-repository or `global` may be deleted. A known foreign id, including a
+memory shared with global, produces a clear read-only-scope error without changes.
 
 ## `gmem tui`
 
 Browse memories and unscoped graph nodes in an interactive terminal. The
-memory list shows all scopes, as `gmem list` does. The graph pane shows each
+memory list shows the current repository plus global, as `gmem list` does. The graph pane shows each
 node's incoming and outgoing relations, up to 100 per node. Memory details
 render common Markdown formatting with terminal colors.
 
@@ -141,8 +148,10 @@ command may include arguments and runs through a POSIX shell.
 ## `gmem flush`
 
 Delete **everything** — all memories, scopes, entities, and edges in the
-active data directory. Requires `--yes`; without it, exits non-zero with
-`refusing to flush; rerun with --yes`. There is no undo.
+active data directory, provided every memory is writable from the current
+repository. If any memory belongs to a foreign scope (including shared memories),
+the entire operation is refused without deletion. Requires `--yes`; without it,
+exits non-zero with `refusing to flush; rerun with --yes`. There is no undo.
 
 ## `gmem scopes`
 

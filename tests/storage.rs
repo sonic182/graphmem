@@ -25,6 +25,96 @@ fn remove_database(path: &Path) {
 }
 
 #[test]
+fn checked_flush_rolls_back_when_a_scope_is_rejected() {
+    let (mut database, path) = test_database();
+    let memory = database
+        .remember_with_graph(
+            "foreign memory",
+            "observation",
+            0.0,
+            &["global".to_owned(), "repo:/foreign".to_owned()],
+            &[EntityReference {
+                kind: "component".to_owned(),
+                name: "retained".to_owned(),
+            }],
+            &[],
+        )
+        .unwrap();
+    let rejected = database.flush_with_scope_check(|scope| {
+        if scope == "global" {
+            Ok(())
+        } else {
+            Err(graphmem::StorageError::Invalid {
+                field: "scope",
+                message: "read-only",
+            })
+        }
+    });
+    assert!(rejected.is_err());
+    assert_eq!(
+        database.get_memory(memory.id).unwrap().unwrap().content,
+        "foreign memory"
+    );
+    assert_eq!(database.list_memory_scopes(memory.id).unwrap().len(), 2);
+    assert_eq!(database.stats().unwrap().entities, 1);
+    database
+        .flush_with_scope_check(|_| Ok::<_, graphmem::StorageError>(()))
+        .unwrap();
+    assert_eq!(database.stats().unwrap().memories, 0);
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
+fn checked_flush_cannot_delete_a_concurrent_foreign_insertion() {
+    let (mut database, path) = test_database();
+    let local = database
+        .remember_with_graph(
+            "local",
+            "observation",
+            0.0,
+            &["global".to_owned()],
+            &[],
+            &[],
+        )
+        .unwrap();
+    let mut concurrent = Database::open(&path).unwrap();
+    let mut inserted = None;
+    let result = database.flush_with_scope_check(|scope| -> Result<(), graphmem::StorageError> {
+        assert_eq!(scope, "global");
+        inserted = Some(
+            concurrent
+                .remember_with_graph(
+                    "concurrent foreign",
+                    "observation",
+                    0.0,
+                    &["repo:/foreign".to_owned()],
+                    &[],
+                    &[],
+                )?
+                .id,
+        );
+        Ok(())
+    });
+    assert!(
+        result.is_err(),
+        "flush must not upgrade an obsolete read snapshot"
+    );
+    assert!(database.get_memory(local.id).unwrap().is_some());
+    assert_eq!(
+        database
+            .get_memory(inserted.unwrap())
+            .unwrap()
+            .unwrap()
+            .content,
+        "concurrent foreign"
+    );
+    drop(concurrent);
+    drop(database);
+    remove_database(&path);
+}
+
+#[test]
 fn reopens_and_supports_memory_scope_crud() {
     let (mut database, path) = test_database();
     let memory = database

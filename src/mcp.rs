@@ -1,9 +1,6 @@
+use std::sync::{Mutex, MutexGuard};
 #[cfg(feature = "code")]
-use std::sync::Arc;
-use std::{
-    path::Path,
-    sync::{Mutex, MutexGuard},
-};
+use std::{path::Path, sync::Arc};
 #[cfg(feature = "code")]
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -17,7 +14,6 @@ use graphmem::{
     },
     infrastructure::config::{ConfigOverrides, EmbeddingConfig},
     infrastructure::embedding::{MAX_EMBEDDING_TOKENS, embedding_details},
-    infrastructure::repository::git_repository,
 };
 use rmcp::schemars::JsonSchema;
 use rmcp::{
@@ -53,7 +49,7 @@ impl MemoryServer {
     fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
         let service = MemoryService::open_default(overrides)?;
         let embedding = service.embedding_config().clone();
-        let default_scope = current_scope();
+        let default_scope = service.default_scope().to_owned();
         #[cfg_attr(not(feature = "code"), allow(unused_mut))]
         let mut tool_router = Self::tool_router();
         #[cfg(feature = "code")]
@@ -84,14 +80,6 @@ impl MemoryServer {
             .lock()
             .map_err(|_| tool_error("memory service lock is poisoned"))
     }
-
-    fn scopes(&self, scopes: Vec<String>) -> Vec<String> {
-        if scopes.is_empty() {
-            vec![self.default_scope.clone()]
-        } else {
-            resolve_scopes(scopes)
-        }
-    }
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -104,8 +92,8 @@ struct RememberInput {
     /// Optional relative importance from 0.0 to 1.0. Defaults to 0.0.
     #[serde(default)]
     importance: Option<f64>,
-    /// Where to store the memory: global or repo:/absolute/path. Omit to use
-    /// the server's default scope.
+    /// Where to store the memory: only the server's current repository or global.
+    /// Omit or pass [] to use the server's default scope. Other scopes are read-only.
     #[serde(default)]
     scopes: Vec<String>,
     /// Optional entities connected to this memory for graph-assisted recall.
@@ -126,8 +114,9 @@ struct RecallInput {
     /// them does, ranked by BM25; an uppercase AND, OR, NOT, or NEAR switches
     /// to exact FTS5 syntax.
     query: String,
-    /// Where to search: global or repo:/absolute/path. Omit to search the
-    /// server's default scope and global memories.
+    /// Where to search: global or repo:/absolute/path. Omit or pass [] to search
+    /// the server's default scope and global memories. An explicit list searches
+    /// only those scopes plus global; it does not add the current scope.
     #[serde(default)]
     scopes: Vec<String>,
     /// Maximum memories to return. Defaults to 10.
@@ -198,10 +187,19 @@ struct GraphInput {
 struct IdInput {
     /// Memory id, as returned by recall or remember.
     id: i64,
-    /// Where to look for the memory: global or repo:/absolute/path. Omit to
-    /// use the server's default scope. Global memories are reachable from any
-    /// scope. Pass the target repository explicitly when it differs from the
-    /// one the server started in, as remember and recall accept it.
+    /// Where to read: global or repo:/absolute/path. Omit or pass [] to use the
+    /// server's default scope plus global. Another repository must be selected
+    /// explicitly; reading it does not change the server's current scope.
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct ForgetInput {
+    /// Memory id, as returned by recall or remember.
+    id: i64,
+    /// Only the current repository scope and global are writable. Omit or pass []
+    /// to use the current scope. Memories shared with foreign scopes are read-only.
     #[serde(default)]
     scopes: Vec<String>,
 }
@@ -219,12 +217,23 @@ struct UpdateInput {
     /// Replacement importance from 0.0 to 1.0. Omit to keep the stored one.
     #[serde(default)]
     importance: Option<f64>,
-    /// Where to look for the memory: global or repo:/absolute/path. Omit to
-    /// use the server's default scope. Global memories are reachable from any
-    /// scope. Pass the target repository explicitly when it differs from the
-    /// one the server started in, as remember and recall accept it.
+    /// Only the current repository scope and global are writable. Omit or pass []
+    /// to use the current scope. Memories shared with foreign scopes are read-only.
     #[serde(default)]
     scopes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ScopeRecord {
+    name: String,
+    is_current: bool,
+    writable: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ScopesOutput {
+    current_scope: String,
+    scopes: Vec<ScopeRecord>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -318,16 +327,15 @@ impl MemoryServer {
         name = "remember",
         description = "Store a narrative memory. Optional entities and directed relations connect \
              it to the graph for graph-assisted recall. Repeated relations reuse the existing \
-             edge. Omit scopes to use the server's default scope. Content longer than the \
-             embedding model's token limit is truncated before embedding; the response's warnings \
+             edge. Omit scopes to use the server's default scope. Only the current repository \
+             and global are writable; foreign scopes are rejected before writing. Content longer \
+             than the embedding model's token limit is truncated before embedding; the response's warnings \
              field reports when that happens."
     )]
     fn remember(
         &self,
         Parameters(input): Parameters<RememberInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
-        validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         let stored = service.remember(RememberRequest {
             content: input.content,
@@ -335,7 +343,7 @@ impl MemoryServer {
                 .memory_type
                 .unwrap_or_else(|| "observation".to_owned()),
             importance: input.importance.unwrap_or(0.0),
-            scopes,
+            scopes: input.scopes,
             entities: input.entities.into_iter().map(entity_reference).collect(),
             relations: input.relations.into_iter().map(relation).collect(),
         });
@@ -364,12 +372,10 @@ impl MemoryServer {
         &self,
         Parameters(input): Parameters<RecallInput>,
     ) -> Result<Json<RecallOutput>, CallToolResult> {
-        validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         let found = service.search_scopes_with_embeddings(
             &input.query,
-            &scopes,
+            &input.scopes,
             input.limit.unwrap_or(10),
             input.use_embeddings.unwrap_or(true),
             input.memory_type.as_deref(),
@@ -410,6 +416,39 @@ impl MemoryServer {
             .stats()
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(stats_output(stats)))
+    }
+
+    #[tool(
+        name = "list_scopes",
+        description = "List available narrative-memory scopes with their names, the current \
+             scope, and write permissions. Includes stored scopes plus the current scope and \
+             global, even if empty. Only the current scope and global are writable. This is \
+             read-only discovery: it does not change the current scope or select read scopes."
+    )]
+    fn list_scopes(&self) -> Result<Json<ScopesOutput>, CallToolResult> {
+        let service = self.lock()?;
+        let mut names = service
+            .scopes()
+            .map_err(|error| tool_error(error.to_string()))?
+            .into_iter()
+            .map(|scope| scope.name)
+            .collect::<Vec<_>>();
+        names.push(self.default_scope.clone());
+        names.push("global".to_owned());
+        names.sort();
+        names.dedup();
+        let scopes = names
+            .into_iter()
+            .map(|name| ScopeRecord {
+                is_current: name == self.default_scope,
+                writable: service.scope_is_writable(&name),
+                name,
+            })
+            .collect();
+        Ok(Json(ScopesOutput {
+            current_scope: self.default_scope.clone(),
+            scopes,
+        }))
     }
 
     #[tool(
@@ -457,19 +496,17 @@ impl MemoryServer {
 
     #[tool(
         name = "forget",
-        description = "Permanently delete one memory by id. The id must name a memory in the \
-             given scopes, in global, or with no scope at all; omitted scopes use the server's \
-             default scope. Pass the repository explicitly to reach a memory outside it."
+        description = "Permanently delete one memory by id. Only the current repository and \
+             global are writable; memories shared with foreign scopes are read-only. Omitted \
+             scopes use the server's default scope. A foreign scope or id is rejected clearly."
     )]
     fn forget(
         &self,
-        Parameters(input): Parameters<IdInput>,
+        Parameters(input): Parameters<ForgetInput>,
     ) -> Result<Json<ForgetOutput>, CallToolResult> {
         let id = input.id;
-        validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
         self.lock()?
-            .forget(id, Some(&scopes))
+            .forget(id, Some(&input.scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(ForgetOutput {
             id,
@@ -483,17 +520,15 @@ impl MemoryServer {
              ones; fields you omit are kept. Prefer this over storing a second memory when a \
              decision or convention has changed. Scopes, entities, and relations are left \
              untouched; changed content is re-embedded in the same transaction, so a failed \
-             embedding changes nothing. The id must name a memory in the given scopes, in \
-             global, or with no scope at all; omitted scopes use the server's default scope. \
-             Pass the repository explicitly to reach a memory outside it."
+             embedding changes nothing. Only the current repository and global are writable; \
+             memories shared with foreign scopes are read-only. Omitted scopes use the server's \
+             default scope. A foreign scope or id is rejected clearly."
     )]
     fn update(
         &self,
         Parameters(input): Parameters<UpdateInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
-        validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
         let mut service = self.lock()?;
         service
             .update(
@@ -501,7 +536,7 @@ impl MemoryServer {
                 input.content,
                 input.memory_type,
                 input.importance,
-                Some(&scopes),
+                Some(&input.scopes),
             )
             .map_err(|error| tool_error(error.to_string()))?;
         let details = service
@@ -522,11 +557,9 @@ impl MemoryServer {
         Parameters(input): Parameters<IdInput>,
     ) -> Result<Json<MemoryRecord>, CallToolResult> {
         let id = input.id;
-        validate_scopes(&input.scopes)?;
-        let scopes = self.scopes(input.scopes);
         let details = self
             .lock()?
-            .inspect(id, Some(&scopes))
+            .inspect(id, Some(&input.scopes))
             .map_err(|error| tool_error(error.to_string()))?;
         Ok(Json(record(details.memory, details.scopes, None)))
     }
@@ -547,7 +580,10 @@ impl ServerHandler for MemoryServer {
                  unscoped entity graph. Omitted scopes use the Git repository containing the \
                  server's startup working directory (shared by linked worktrees) and include \
                  global memories during recall; outside a Git repository they use global. \
-                 Default scope: {}. Pass global or repo:/absolute/path to choose a scope. {}{}",
+                 Default scope: {}. Explicit read scopes replace the current selection and \
+                 still include global. Reads never change the current scope. Writes are allowed \
+                 only in the current scope or global; memories shared with foreign scopes are \
+                 read-only. Use list_scopes to discover read scopes. {}{}",
             self.default_scope,
             embedding_note(&self.embedding),
             self.code_note()
@@ -1030,59 +1066,6 @@ fn graph_hop_output(hop: GraphHop) -> GraphHopOutput {
 
 fn tool_error(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message)])
-}
-
-fn validate_scopes(scopes: &[String]) -> Result<(), CallToolResult> {
-    if scopes.iter().all(|scope| {
-        let scope = scope.trim();
-        scope == "global"
-            || scope
-                .strip_prefix("repo:")
-                .is_some_and(|path| Path::new(path).has_root())
-    }) {
-        Ok(())
-    } else {
-        Err(tool_error("scope must be global or repo:/absolute/path"))
-    }
-}
-
-fn current_scope() -> String {
-    std::env::current_dir()
-        .ok()
-        .and_then(|path| git_repository(&path))
-        .and_then(|repo| repo.common_dir.to_str().map(|path| format!("repo:{path}")))
-        .unwrap_or_else(|| "global".to_owned())
-}
-
-fn resolve_scopes(scopes: Vec<String>) -> Vec<String> {
-    let mut resolved = Vec::new();
-    for scope in scopes {
-        let Some(path) = scope.strip_prefix("repo:") else {
-            if !resolved.contains(&scope) {
-                resolved.push(scope);
-            }
-            continue;
-        };
-        let canonical = Path::new(path).canonicalize();
-        let repository = git_repository(Path::new(path));
-        let Some(repo) = repository.filter(|repo| {
-            canonical.as_ref().is_ok_and(|path| {
-                path == &repo.common_dir || repo.checkout_root.as_ref() == Some(path)
-            })
-        }) else {
-            if !resolved.contains(&scope) {
-                resolved.push(scope);
-            }
-            continue;
-        };
-        if let Some(path) = repo.common_dir.to_str() {
-            let value = format!("repo:{path}");
-            if !resolved.contains(&value) {
-                resolved.push(value);
-            }
-        }
-    }
-    resolved
 }
 
 #[cfg(test)]

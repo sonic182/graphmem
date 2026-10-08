@@ -1,5 +1,6 @@
 #[cfg(feature = "code")]
 pub mod code;
+mod scopes;
 
 use std::{collections::HashMap, path::Path};
 
@@ -35,6 +36,10 @@ pub enum ApplicationError {
         "embeddings are disabled; set [embedding] enabled = true (or unset GRAPHMEM_EMBEDDINGS) to reembed"
     )]
     EmbeddingsDisabled,
+    #[error("scope must be global or repo:/absolute/path")]
+    InvalidScope,
+    #[error("cannot write to scope {scope}; writable scopes are {current} and global")]
+    ReadOnlyScope { scope: String, current: String },
     #[cfg(feature = "code")]
     #[error("{0}")]
     Code(String),
@@ -88,6 +93,7 @@ pub struct ReembedStats {
 
 pub struct MemoryService {
     database: Database,
+    default_scope: String,
     embedding_config: EmbeddingConfig,
     retrieval_config: RetrievalConfig,
     embedder: Option<Embedder>,
@@ -106,8 +112,37 @@ impl MemoryService {
             embedding_config: embedding_config(data_dir, &overrides)?,
             retrieval_config: retrieval_config(data_dir, &overrides)?,
             database,
+            default_scope: scopes::current_scope(),
             embedder: None,
         })
+    }
+
+    /// The repository scope fixed when this service was opened, or global outside Git.
+    pub fn default_scope(&self) -> &str {
+        &self.default_scope
+    }
+
+    /// Resolve an explicit read selection; an empty selection uses the current scope.
+    /// Storage queries also include global and legacy unscoped memories.
+    pub fn read_scopes(&self, scopes: &[String]) -> Result<Vec<String>> {
+        scopes::resolve(scopes, &self.default_scope)
+    }
+
+    fn write_scopes(&self, scopes: &[String]) -> Result<Vec<String>> {
+        let resolved = self.read_scopes(scopes)?;
+        for scope in &resolved {
+            self.ensure_writable_scope(scope)?;
+        }
+        Ok(resolved)
+    }
+
+    /// Whether a canonical scope allows writes from this service's fixed context.
+    pub fn scope_is_writable(&self, scope: &str) -> bool {
+        scopes::is_writable(scope, &self.default_scope)
+    }
+
+    fn ensure_writable_scope(&self, scope: &str) -> Result<()> {
+        scopes::ensure_writable(scope, &self.default_scope)
     }
 
     pub fn database_path(&self) -> &Path {
@@ -126,11 +161,7 @@ impl MemoryService {
     /// same transaction. The model loads on first use; if it cannot load or
     /// embed, nothing is stored and the error is returned.
     pub fn remember(&mut self, request: RememberRequest) -> Result<Memory> {
-        let scopes = if request.scopes.is_empty() {
-            vec!["global".to_owned()]
-        } else {
-            request.scopes
-        };
+        let scopes = self.write_scopes(&request.scopes)?;
         let Self {
             database,
             embedding_config,
@@ -162,18 +193,28 @@ impl MemoryService {
     }
 
     pub fn list(&self, scope: Option<&str>, limit: usize) -> Result<Vec<Memory>> {
-        match scope {
-            Some(scope) => Ok(self.database.list_memories_in_scope(scope, limit)?),
-            None => Ok(self.database.list_memories(limit)?),
-        }
+        let scopes = scope
+            .map(|scope| vec![scope.to_owned()])
+            .unwrap_or_default();
+        self.list_selected(&scopes, limit)
+    }
+
+    /// List the selected scopes plus global, newest first; default to the current scope.
+    pub fn list_selected(&self, scopes: &[String], limit: usize) -> Result<Vec<Memory>> {
+        let scopes = self.read_scopes(scopes)?;
+        Ok(self
+            .database
+            .list_memories_in_scopes(&scopes, None)?
+            .into_iter()
+            .take(limit)
+            .collect())
     }
 
     pub fn list_all(&self) -> Result<Vec<Memory>> {
         Ok(self.database.list_all_memories()?)
     }
 
-    /// `scopes` restricts the memory to one reachable from them, as recall
-    /// does; `None` reaches any memory, which is what the human CLI wants.
+    /// Read a memory from the selected scopes plus global; None defaults to the current scope.
     pub fn show(&self, id: i64, scopes: Option<&[String]>) -> Result<MemoryDetails> {
         self.ensure_in_scopes(id, scopes)?;
         let memory = self
@@ -192,16 +233,23 @@ impl MemoryService {
         Ok(details)
     }
 
-    /// The one guard every id-addressed operation routes through. A memory
-    /// outside `scopes` reports `NotFound` rather than a distinct refusal, so
-    /// a caller in another repository cannot probe for ids that exist.
+    /// Reading an unselected scope reports NotFound; mutations separately
+    /// reject foreign associations with a clear read-only error.
     fn ensure_in_scopes(&self, id: i64, scopes: Option<&[String]>) -> Result<()> {
-        match scopes {
-            Some(scopes) if !self.database.memory_in_scopes(id, scopes)? => {
-                Err(ApplicationError::NotFound("memory"))
-            }
-            _ => Ok(()),
+        let scopes = self.read_scopes(scopes.unwrap_or_default())?;
+        if !self.database.memory_in_scopes(id, &scopes)? {
+            return Err(ApplicationError::NotFound("memory"));
         }
+        Ok(())
+    }
+
+    fn ensure_writable_memory(&self, id: i64, scopes: Option<&[String]>) -> Result<()> {
+        let selection = self.write_scopes(scopes.unwrap_or_default())?;
+        // All associations must be writable, including when global makes a shared memory readable.
+        for scope in self.database.list_memory_scopes(id)? {
+            self.ensure_writable_scope(&scope.name)?;
+        }
+        self.ensure_in_scopes(id, Some(&selection))
     }
 
     pub fn scopes_for(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Scope>>> {
@@ -230,8 +278,11 @@ impl MemoryService {
         scope: Option<&str>,
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
-        let scopes = scope.map(|scope| vec![scope.to_owned()]);
-        let results = self.search_with_scopes(query, scopes.as_deref(), limit, None)?;
+        let scopes = scope
+            .map(|scope| vec![scope.to_owned()])
+            .unwrap_or_default();
+        let scopes = self.read_scopes(&scopes)?;
+        let results = self.search_with_scopes(query, Some(&scopes), limit, None)?;
         self.record_search_accesses(results)
     }
 
@@ -252,11 +303,7 @@ impl MemoryService {
         use_embeddings: bool,
         memory_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
-        let scopes = if scopes.is_empty() {
-            vec!["global".to_owned()]
-        } else {
-            scopes.to_vec()
-        };
+        let scopes = self.read_scopes(scopes)?;
         let results = if use_embeddings {
             self.search_with_scopes(query, Some(&scopes), limit, memory_type)
         } else {
@@ -315,6 +362,7 @@ impl MemoryService {
             embedding_config,
             retrieval_config,
             embedder,
+            ..
         } = self;
         let config: &EmbeddingConfig = embedding_config;
         let embedder = match ensure_embedder(config, embedder, || Embedder::load(config)) {
@@ -482,8 +530,8 @@ impl MemoryService {
     /// is re-embedded in the same transaction as the update, so a model that
     /// cannot load or embed leaves the memory untouched, exactly as `remember`
     /// stores nothing on an embedding failure. A change that leaves the content
-    /// alone never loads the model and keeps the stored vector. `scopes`
-    /// restricts which memory the id may address; see `ensure_in_scopes`.
+    /// alone never loads the model and keeps the stored vector. Only the current
+    /// scope and global are writable; every association must satisfy this rule.
     pub fn update(
         &mut self,
         id: i64,
@@ -492,7 +540,7 @@ impl MemoryService {
         importance: Option<f64>,
         scopes: Option<&[String]>,
     ) -> Result<Memory> {
-        self.ensure_in_scopes(id, scopes)?;
+        self.ensure_writable_memory(id, scopes)?;
         let current = self
             .database
             .get_memory(id)?
@@ -545,8 +593,9 @@ impl MemoryService {
             .ok_or(ApplicationError::NotFound("memory"))
     }
 
+    /// Delete a memory only when all its scopes are writable from this service.
     pub fn forget(&self, id: i64, scopes: Option<&[String]>) -> Result<()> {
-        self.ensure_in_scopes(id, scopes)?;
+        self.ensure_writable_memory(id, scopes)?;
         if self.database.delete_memory(id)? {
             Ok(())
         } else {
@@ -554,8 +603,11 @@ impl MemoryService {
         }
     }
 
+    /// Flush the store only if every memory belongs exclusively to writable scopes.
     pub fn flush(&mut self) -> Result<()> {
-        Ok(self.database.flush()?)
+        let current = &self.default_scope;
+        self.database
+            .flush_with_scope_check(|scope| scopes::ensure_writable(scope, current))
     }
 
     pub fn scopes(&self) -> Result<Vec<Scope>> {
@@ -1214,6 +1266,7 @@ mod tests {
         let mut service = MemoryService {
             database: Database::open(&root.join("memory.sqlite")).expect("database opens"),
             retrieval_config: RetrievalConfig::default(),
+            default_scope: "global".to_owned(),
             embedding_config: EmbeddingConfig {
                 // Loading this model would fail (and try to download it), so a
                 // metadata-only update reaching the embedder cannot pass here.
@@ -1454,6 +1507,7 @@ mod tests {
         let mut service = MemoryService {
             database: Database::open(&root.join("memory.sqlite")).expect("database opens"),
             retrieval_config: RetrievalConfig::default(),
+            default_scope: "global".to_owned(),
             embedding_config: EmbeddingConfig {
                 enabled: true,
                 model: "missing-model".to_owned(),

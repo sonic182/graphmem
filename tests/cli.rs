@@ -70,10 +70,20 @@ fn data_dir() -> PathBuf {
 }
 
 fn run(data_dir: &Path, args: &[&str]) -> Output {
+    run_in(data_dir, &std::env::current_dir().unwrap(), args)
+}
+
+fn run_in(data_dir: &Path, directory: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_gmem"))
         .args(args)
+        .current_dir(directory)
         .env("GRAPHMEM_HOME", data_dir)
         .env("GRAPHMEM_EMBEDDINGS", "off")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_PREFIX")
         .output()
         .expect("gmem runs")
 }
@@ -85,6 +95,163 @@ fn stdout(output: Output) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout is UTF-8")
+}
+
+#[test]
+fn cli_reads_explicit_projects_but_only_writes_current_or_global() {
+    let root = data_dir();
+    let home = root.join("home");
+    let first = root.join("first");
+    let second = root.join("second");
+    let outside = root.join("outside");
+    for directory in [&first, &second, &outside] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    for repository in [&first, &second] {
+        assert!(
+            Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(repository)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_COMMON_DIR")
+                .env_remove("GIT_INDEX_FILE")
+                .env_remove("GIT_PREFIX")
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let first_scope = format!("repo:{}", first.display());
+    let second_scope = format!("repo:{}", second.display());
+    let foreign_id = stdout(run_in(&home, &first, &["remember", "scopeprobe foreign"]));
+    let foreign_id = foreign_id.trim().strip_prefix("remembered: ").unwrap();
+    let global_id = stdout(run_in(
+        &home,
+        &first,
+        &["remember", "scopeprobe global", "--scope", "global"],
+    ));
+    let global_id = global_id.trim().strip_prefix("remembered: ").unwrap();
+    let local_id = stdout(run_in(&home, &second, &["remember", "scopeprobe local"]));
+    let local_id = local_id.trim().strip_prefix("remembered: ").unwrap();
+
+    for args in [vec!["list"], vec!["search", "scopeprobe"]] {
+        let output = stdout(run_in(&home, &second, &args));
+        assert!(output.contains("scopeprobe local"));
+        assert!(output.contains("scopeprobe global"));
+        assert!(!output.contains("scopeprobe foreign"));
+        let mut selected = args.clone();
+        selected.extend(["--scope", &first_scope]);
+        let output = stdout(run_in(&home, &second, &selected));
+        assert!(output.contains("scopeprobe foreign"));
+        assert!(output.contains("scopeprobe global"));
+        assert!(!output.contains("scopeprobe local"));
+        selected.extend(["--scope", &second_scope]);
+        let output = stdout(run_in(&home, &second, &selected));
+        assert!(output.contains("scopeprobe foreign"));
+        assert!(output.contains("scopeprobe global"));
+        assert!(output.contains("scopeprobe local"));
+    }
+    assert!(
+        !run_in(&home, &second, &["show", foreign_id])
+            .status
+            .success()
+    );
+    assert!(
+        stdout(run_in(
+            &home,
+            &second,
+            &["show", foreign_id, "--scope", &first_scope]
+        ))
+        .contains("scopeprobe foreign")
+    );
+    assert!(stdout(run_in(&home, &second, &["show", global_id])).contains("scopeprobe global"));
+
+    let database = Database::open(&home.join("memory.sqlite")).unwrap();
+    let before = database.list_all_memories().unwrap().len();
+    let rejected = run_in(
+        &home,
+        &second,
+        &[
+            "remember",
+            "must not persist",
+            "--scope",
+            "global",
+            "--scope",
+            &first_scope,
+        ],
+    );
+    assert!(!rejected.status.success());
+    let error = String::from_utf8_lossy(&rejected.stderr);
+    assert!(error.contains("cannot write to scope"));
+    assert!(error.contains(&format!(
+        "repo:{}",
+        second.join(".git").canonicalize().unwrap().display()
+    )));
+    assert!(error.contains("global"));
+    assert_eq!(database.list_all_memories().unwrap().len(), before);
+    for args in [vec!["forget", foreign_id], vec!["flush", "--yes"]] {
+        let rejected = run_in(&home, &second, &args);
+        assert!(!rejected.status.success());
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("cannot write to scope"));
+        assert_eq!(database.list_all_memories().unwrap().len(), before);
+    }
+    for args in [
+        vec!["list"],
+        vec!["search", "scopeprobe"],
+        vec!["show", global_id],
+    ] {
+        let mut invalid = args;
+        invalid.extend(["--scope", "repo:relative"]);
+        let rejected = run_in(&home, &second, &invalid);
+        assert!(!rejected.status.success());
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("scope must be"));
+    }
+    let outside_results = stdout(run_in(&home, &outside, &["search", "scopeprobe"]));
+    assert!(outside_results.contains("scopeprobe global"));
+    assert!(!outside_results.contains("scopeprobe foreign"));
+    assert!(!outside_results.contains("scopeprobe local"));
+    let outside_memory = stdout(run_in(&home, &outside, &["remember", "outside default"]));
+    let outside_id = outside_memory
+        .trim()
+        .strip_prefix("remembered: ")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        database.list_memory_scopes(outside_id).unwrap()[0].name,
+        "global"
+    );
+    let after_read = stdout(run_in(
+        &home,
+        &second,
+        &["remember", "local after foreign read"],
+    ));
+    let after_read_id = after_read
+        .trim()
+        .strip_prefix("remembered: ")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        database.list_memory_scopes(after_read_id).unwrap()[0].name,
+        format!(
+            "repo:{}",
+            second.join(".git").canonicalize().unwrap().display()
+        )
+    );
+    assert!(
+        run_in(&home, &second, &["forget", local_id])
+            .status
+            .success()
+    );
+    assert!(
+        run_in(&home, &outside, &["forget", global_id])
+            .status
+            .success()
+    );
+    drop(database);
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -110,7 +277,7 @@ fn memory_lifecycle_works_across_cli_processes() {
             "--importance",
             "0.8",
             "--scope",
-            "repo:/workspace/graphmem",
+            "global",
         ],
     ));
     let id = remembered
@@ -126,16 +293,13 @@ fn memory_lifecycle_works_across_cli_processes() {
 
     let shown = stdout(run(&data_dir, &["show", &id]));
     assert!(shown.contains("type: convention"));
-    assert!(shown.contains("repo:/workspace/graphmem"));
+    assert!(shown.contains("global"));
     assert!(shown.contains("Use cargo nextest"));
     let shown_memory = database.get_memory(memory_id).unwrap().unwrap();
     assert_eq!(shown_memory.access_count, 1);
     assert!(shown_memory.last_accessed_at.is_some());
 
-    let listed = stdout(run(
-        &data_dir,
-        &["list", "--scope", "repo:/workspace/graphmem"],
-    ));
+    let listed = stdout(run(&data_dir, &["list", "--scope", "global"]));
     assert!(listed.contains(&id));
     assert_eq!(
         database
@@ -162,7 +326,7 @@ fn memory_lifecycle_works_across_cli_processes() {
     );
 
     let scopes = stdout(run(&data_dir, &["scopes"]));
-    assert!(scopes.contains("repo:/workspace/graphmem"));
+    assert!(scopes.contains("global"));
 
     let doctor = stdout(run(&data_dir, &["doctor"]));
     assert!(doctor.contains("status: healthy"));
