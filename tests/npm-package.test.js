@@ -117,6 +117,15 @@ test("graphmem command downloads the binary on first run and keeps stdout for th
   }
 });
 
+test("server.json versions and name match package.json", async () => {
+  const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const server = JSON.parse(await readFile(path.join(root, "server.json"), "utf8"));
+  assert.equal(server.name, pkg.mcpName);
+  assert.equal(server.version, pkg.version);
+  assert.equal(server.packages[0].identifier, pkg.name);
+  assert.equal(server.packages[0].version, pkg.version);
+});
+
 test("npm installer skips release downloads when a working gmem is on PATH", { skip: process.platform === "win32" }, async () => {
   await withFakeGmem(async ({ dir }) => {
     const result = spawnSync(process.execPath, [installer], {

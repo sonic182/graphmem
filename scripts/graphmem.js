@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { installBinary, installerCommand, resolveBinary } from "./binary.js";
+import { binaryInfo, installBinary, installerCommand, resolveBinary } from "./binary.js";
 
 if (process.env.GMEM_NPM_BINARY_PROBE === "1") process.exit(1);
 
@@ -16,7 +16,7 @@ if (!command) {
     console.error(`graphmem: using ${command}`);
   } catch (error) {
     console.error(`Could not install the gmem binary: ${error.message}`);
-    console.error(`Retry explicitly: ${installerCommand()}`);
+    if (binaryInfo.target) console.error(`Retry explicitly: ${installerCommand()}`);
     process.exit(1);
   } finally {
     process.removeListener("SIGINT", cancel);

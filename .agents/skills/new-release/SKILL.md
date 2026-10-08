@@ -22,10 +22,11 @@ Release version declarations:
 - `package.json` — OpenCode and pi package
 - `plugin/.claude-plugin/plugin.json` — Claude Code plugin
 - `plugin/.codex-plugin/plugin.json` — Codex plugin
+- `server.json` — MCP Registry entry; both `version` fields (top level and `packages[0]`)
 
 ## 2. Update the release files
 
-1. Set the target version in `Cargo.toml`, `package.json`, and both plugin manifests.
+1. Set the target version in `Cargo.toml`, `package.json`, both plugin manifests, and both `version` fields in `server.json`.
 2. In `CHANGELOG.md`, retain an empty `## [Unreleased]` section and move its completed entries under `## [<version>] - <date>`.
 3. Use GitHub comparison links for changelog version references, not release-page
    links. Compare the previous released version with the target version, and move
