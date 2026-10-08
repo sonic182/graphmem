@@ -24,6 +24,10 @@ verifies the matching CPU binary, or reuses a working native `gmem` on your
 `PATH`. Package installation itself downloads no binary. After upgrading the
 package, run `gmem-install` again; separately installed binaries are not replaced.
 
+MCP clients that launch servers with `npx` can run `npx -y @sonic182/graphmem mcp`.
+The `graphmem` command downloads and verifies the binary on its first run; `gmem`
+never downloads anything on its own.
+
 Alternatively, download your platform's archive from
 [GitHub Releases](https://github.com/sonic182/graphmem/releases/latest), verify
 it against `SHA256SUMS`, and put the extracted executable on your `PATH`.

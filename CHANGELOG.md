@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `graphmem` npm command that downloads and verifies the native binary on its
+  first run, so `npx -y @sonic182/graphmem mcp` works without a prior install.
+  The `gmem` command still never downloads on its own.
+- `mcpName` in `package.json` and `server.json` for the official MCP Registry.
+
 ## [0.10.0] - 2026-10-05
 
 ### Changed

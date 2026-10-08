@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sonic182/graphmem",
+  "title": "Graphmem",
+  "description": "Shared local memory for coding agents: SQLite, semantic recall, linked entities, code navigation.",
+  "repository": {
+    "url": "https://github.com/sonic182/graphmem",
+    "source": "github"
+  },
+  "version": "0.10.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@sonic182/graphmem",
+      "version": "0.10.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

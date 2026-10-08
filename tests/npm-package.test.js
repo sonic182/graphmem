@@ -10,11 +10,13 @@ import test from "node:test";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const launcher = path.join(root, "scripts/gmem.js");
 const installer = path.join(root, "scripts/npm-install.js");
+const graphmem = path.join(root, "scripts/graphmem.js");
 
 async function copyPackage(directory) {
   await mkdir(path.join(directory, "scripts"), { recursive: true });
   await copyFile(launcher, path.join(directory, "scripts/gmem.js"));
   await copyFile(installer, path.join(directory, "scripts/npm-install.js"));
+  await copyFile(graphmem, path.join(directory, "scripts/graphmem.js"));
   await copyFile(path.join(root, "scripts/binary.js"), path.join(directory, "scripts/binary.js"));
   await writeFile(path.join(directory, "package.json"), JSON.stringify({ type: "module", version: "0.9.0" }));
 }
@@ -62,6 +64,54 @@ test("launcher ignores its own npm symlink instead of recursively invoking itsel
     });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /gmem binary is not installed/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("graphmem command reuses a working gmem from PATH without downloading", { skip: process.platform === "win32" }, async () => {
+  await withFakeGmem(async ({ dir, log }) => {
+    const result = spawnSync(process.execPath, [graphmem, "mcp", "--flag"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await readFile(log, "utf8"), "mcp --flag\n");
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
+});
+
+test("graphmem command downloads the binary on first run and keeps stdout for the server", { skip: process.platform === "win32" }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "graphmem-npm-first-run-test-"));
+  try {
+    const directory = path.join(dir, "package");
+    await copyPackage(directory);
+    const payload = path.join(dir, "payload");
+    await mkdir(payload);
+    await writeFile(path.join(payload, "gmem"), "#!/bin/sh\necho 'gmem 0.9.0'\n");
+    const archive = path.join(dir, "release.tar.gz");
+    const packed = spawnSync("tar", ["-czf", archive, "-C", payload, "gmem"], { encoding: "utf8" });
+    assert.equal(packed.status, 0, packed.stderr);
+    const digest = createHash("sha256").update(await readFile(archive)).digest("hex");
+    const archiveName = `gmem-0.9.0-${target}.tar.gz`;
+    const preload = path.join(dir, "download.cjs");
+    await writeFile(preload, `
+      const fs = require('node:fs');
+      global.fetch = async (url) => {
+        if (url.endsWith(${JSON.stringify(archiveName)})) return new Response(fs.readFileSync(${JSON.stringify(archive)}));
+        if (url.endsWith('/SHA256SUMS')) return new Response(${JSON.stringify(`${digest}  ${archiveName}\n`)});
+        throw new Error('Unexpected download: ' + url);
+      };
+    `);
+    const result = spawnSync(process.execPath, ["--require", preload, path.join(directory, "scripts/graphmem.js"), "version"], {
+      encoding: "utf8", timeout: 10000,
+      env: { ...process.env, PATH: "/usr/bin:/bin" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "gmem 0.9.0\n");
+    assert.match(result.stderr, /downloading the gmem binary/);
+    assert.deepEqual(await readdir(path.join(directory, "vendor", "0.9.0", target)), ["gmem"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
