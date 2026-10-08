@@ -425,7 +425,9 @@ fn repository_scopes_are_prioritized_and_isolated() {
     // Seed foreign scopes through storage; MCP cannot create foreign memories.
     let mut database = Database::open(&home.join("memory.sqlite")).expect("database opens");
     let mut stored_ids = Vec::new();
-    for scope in ["global", "repo:/a", "repo:/b"] {
+    let scope_a = format!("repo:{}", home.join("project-a").display());
+    let scope_b = format!("repo:{}", home.join("project-b").display());
+    for scope in ["global", scope_a.as_str(), scope_b.as_str()] {
         stored_ids.push(
             database
                 .remember_with_graph(
@@ -444,18 +446,18 @@ fn repository_scopes_are_prioritized_and_isolated() {
     let recalled = mcp.request(
         5,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"deployment","scopes":["repo:/a"]}}),
+        json!({"name":"recall","arguments":{"query":"deployment","scopes":[scope_a]}}),
     );
     let memories = recalled["result"]["structuredContent"]["memories"]
         .as_array()
         .expect("scoped memories");
     assert_eq!(memories.len(), 2);
-    assert_eq!(memories[0]["scopes"], json!(["repo:/a"]));
+    assert_eq!(memories[0]["scopes"], json!([scope_a]));
     assert_eq!(memories[1]["scopes"], json!(["global"]));
     let limited = mcp.request(
         6,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"deployment","scopes":["repo:/a"],"limit":1}}),
+        json!({"name":"recall","arguments":{"query":"deployment","scopes":[scope_a],"limit":1}}),
     );
     assert_eq!(
         limited["result"]["structuredContent"]["memories"][0]["access_count"],
@@ -826,12 +828,14 @@ fn omitted_scopes_default_to_the_server_repository() {
         assert_eq!(empty["scopes"], omitted["scopes"]);
     }
     let mut database = Database::open(&home.join("memory.sqlite")).unwrap();
+    let foreign_scope = format!("repo:{}", root.join("another-project").display());
+    let other_foreign_scope = format!("repo:{}", root.join("second-project").display());
     let foreign = database
         .remember_with_graph(
             "scope default foreign",
             "observation",
             0.0,
-            &["repo:/another-project".to_owned()],
+            std::slice::from_ref(&foreign_scope),
             &[],
             &[],
         )
@@ -841,7 +845,7 @@ fn omitted_scopes_default_to_the_server_repository() {
             "scope default other foreign",
             "observation",
             0.0,
-            &["repo:/second-project".to_owned()],
+            std::slice::from_ref(&other_foreign_scope),
             &[],
             &[],
         )
@@ -850,7 +854,7 @@ fn omitted_scopes_default_to_the_server_repository() {
     let explicit = mcp.request(
         6,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"scope default","scopes":["repo:/another-project"]}}),
+        json!({"name":"recall","arguments":{"query":"scope default","scopes":[foreign_scope]}}),
     );
     let explicit_memories = explicit["result"]["structuredContent"]["memories"]
         .as_array()
@@ -866,9 +870,13 @@ fn omitted_scopes_default_to_the_server_repository() {
             .iter()
             .any(|memory| memory["id"] == global["result"]["structuredContent"]["id"])
     );
-    let multiple = mcp.request(12, "tools/call", json!({"name":"recall","arguments":{
-        "query":"scope default", "scopes":["repo:/another-project","repo:/second-project","global","global"]
-    }}));
+    let multiple = mcp.request(
+        12,
+        "tools/call",
+        json!({"name":"recall","arguments":{
+            "query":"scope default", "scopes":[foreign_scope,other_foreign_scope,"global","global"]
+        }}),
+    );
     let multiple_memories = multiple["result"]["structuredContent"]["memories"]
         .as_array()
         .unwrap();
@@ -932,8 +940,8 @@ fn omitted_scopes_default_to_the_server_repository() {
     for name in [
         scope.as_str(),
         "global",
-        "repo:/another-project",
-        "repo:/second-project",
+        foreign_scope.as_str(),
+        other_foreign_scope.as_str(),
     ] {
         let entry = available
             .iter()
@@ -949,8 +957,8 @@ fn omitted_scopes_default_to_the_server_repository() {
     );
     let before_rejected = mcp.request(8, "tools/call", json!({"name":"stats"}));
     for (id, scopes) in [
-        (9, json!(["repo:/another-project"])),
-        (10, json!([scope, "global", "repo:/another-project"])),
+        (9, json!([foreign_scope])),
+        (10, json!([scope, "global", foreign_scope])),
     ] {
         let rejected = mcp.request(
             id,
@@ -962,7 +970,7 @@ fn omitted_scopes_default_to_the_server_repository() {
         );
         assert_eq!(rejected["result"]["isError"], true);
         let message = rejected["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(message.contains("cannot write to scope repo:/another-project"));
+        assert!(message.contains(&format!("cannot write to scope {foreign_scope}")));
         assert!(message.contains(&scope));
         assert!(message.contains("global"));
     }
