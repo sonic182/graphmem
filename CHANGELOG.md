@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-08
+
 ### Added
 
 - `graphmem` npm command that downloads and verifies the native binary on its
@@ -300,7 +302,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.10.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.10.1...HEAD
+[0.10.1]: https://github.com/sonic182/graphmem/compare/0.10.0...0.10.1
 [0.10.0]: https://github.com/sonic182/graphmem/compare/0.9.3...0.10.0
 [0.9.3]: https://github.com/sonic182/graphmem/compare/0.9.2...0.9.3
 [0.9.2]: https://github.com/sonic182/graphmem/compare/0.9.1...0.9.2

@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "graphmem"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "ast-grep-core",
  "ast-grep-language",

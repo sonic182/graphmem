@@ -1,6 +1,6 @@
 {
   "name": "@sonic182/graphmem",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "mcpName": "io.github.sonic182/graphmem",
   "description": "Shared local memory for coding agents with semantic recall, knowledge graph, and code navigation.",
   "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development", "coding-agent", "agent-memory", "semantic-search", "knowledge-graph"],
