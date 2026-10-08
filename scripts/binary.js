@@ -80,7 +80,6 @@ async function download(url, signal) {
   return response;
 }
 
-// Called only by the explicit installer or an approved harness UI action.
 export async function installBinary({ signal } = {}) {
   const existing = resolveBinary();
   if (existing) return existing;

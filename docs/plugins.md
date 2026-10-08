@@ -6,6 +6,8 @@ MCP registration.
 Claude Code and Codex need [`gmem` installed](../README.md#install) and
 Node.js on `PATH`. Pi and OpenCode can also use a package-local binary.
 Installing the npm package or loading a plugin does not download a binary.
+Only the `graphmem` command (for example `npx -y @sonic182/graphmem mcp`)
+downloads it, on its first run.
 
 ## Claude Code
 

@@ -1,15 +1,17 @@
 {
   "name": "@sonic182/graphmem",
   "version": "0.10.0",
+  "mcpName": "io.github.sonic182/graphmem",
   "description": "Shared local memory for coding agents with semantic recall, knowledge graph, and code navigation.",
   "keywords": ["pi-package", "opencode-plugin", "mcp", "memory", "knowledge", "development", "coding-agent", "agent-memory", "semantic-search", "knowledge-graph"],
   "license": "MIT",
   "publishConfig": { "access": "public" },
   "type": "module",
   "main": "./plugin/opencode/index.js",
-  "files": ["plugin/", "scripts/gmem.js", "scripts/npm-install.js", "scripts/binary.js", "docs/", "!docs/assets/", "README.md", "LICENSE"],
+  "files": ["plugin/", "scripts/gmem.js", "scripts/graphmem.js", "scripts/npm-install.js", "scripts/binary.js", "docs/", "!docs/assets/", "README.md", "LICENSE"],
   "bin": {
     "gmem": "scripts/gmem.js",
+    "graphmem": "scripts/graphmem.js",
     "gmem-install": "scripts/npm-install.js"
   },
   "scripts": {
