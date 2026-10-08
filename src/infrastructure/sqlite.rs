@@ -371,13 +371,39 @@ impl Database {
     }
 
     pub fn flush(&mut self) -> Result<()> {
-        self.with_transaction(|transaction| {
-            transaction.execute("DELETE FROM memories", [])?;
-            transaction.execute("DELETE FROM scopes", [])?;
-            transaction.execute("DELETE FROM edges", [])?;
-            transaction.execute("DELETE FROM entities", [])?;
-            Ok(())
-        })
+        self.flush_with_scope_check(|_| Ok::<_, StorageError>(()))
+    }
+
+    /// Validate every attached scope and flush in the same transaction.
+    /// A concurrent insertion cannot slip between validation and deletion.
+    pub fn flush_with_scope_check<E: From<StorageError>>(
+        &mut self,
+        mut check_scope: impl FnMut(&str) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        let transaction = self.connection.transaction().map_err(StorageError::from)?;
+        {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT DISTINCT s.name FROM scopes s
+                 JOIN memory_scopes ms ON ms.scope_id = s.id ORDER BY s.name",
+                )
+                .map_err(StorageError::from)?;
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(StorageError::from)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(StorageError::from)?;
+            for name in names {
+                check_scope(&name)?;
+            }
+        }
+        for table in ["memories", "scopes", "edges", "entities"] {
+            transaction
+                .execute(&format!("DELETE FROM {table}"), [])
+                .map_err(StorageError::from)?;
+        }
+        transaction.commit().map_err(StorageError::from)?;
+        Ok(())
     }
 
     pub fn list_memories(&self, limit: usize) -> Result<Vec<Memory>> {
@@ -428,12 +454,24 @@ impl Database {
         scopes: &[String],
         memory_type: Option<&str>,
     ) -> Result<Vec<Memory>> {
+        self.list_memories_in_scopes_limited(scopes, memory_type, usize::MAX)
+    }
+
+    /// List selected scopes plus global and legacy unscoped memories, newest first.
+    /// Apply the limit in SQLite before decoding memory contents.
+    pub fn list_memories_in_scopes_limited(
+        &self,
+        scopes: &[String],
+        memory_type: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
         let scopes = normalized_scopes(scopes)?;
         let placeholders = (0..scopes.len())
             .map(|index| format!("?{}", index + 1))
             .collect::<Vec<_>>()
             .join(", ");
         let type_placeholder = format!("?{}", scopes.len() + 1);
+        let limit_placeholder = format!("?{}", scopes.len() + 2);
         let sql = format!(
             "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
                     m.last_accessed_at, m.access_count
@@ -447,13 +485,17 @@ impl Database {
              ))
                AND ({type_placeholder} IS NULL
                     OR LOWER(m.memory_type) = LOWER({type_placeholder}))
-             ORDER BY m.created_at DESC, m.id DESC"
+             ORDER BY m.created_at DESC, m.id DESC
+             LIMIT {limit_placeholder}"
         );
         let mut values = scopes
             .into_iter()
             .map(rusqlite::types::Value::Text)
             .collect::<Vec<_>>();
         values.push(memory_type_value(memory_type));
+        values.push(rusqlite::types::Value::Integer(
+            i64::try_from(limit).unwrap_or(i64::MAX),
+        ));
         let mut statement = self.connection.prepare(&sql)?;
         let memories = statement
             .query_map(rusqlite::params_from_iter(values), memory_from_row)?

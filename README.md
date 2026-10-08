@@ -76,7 +76,10 @@ gmem mcp
 ```
 
 Memories default to the current Git repository; `git` must be on `PATH`.
-Outside a repository, the default scope is `global`.
+Outside a repository, the default scope is `global`. Reads always include global
+memories; explicitly select other projects with `--scope` (CLI) or `scopes` (MCP).
+Writes are limited to the current repository and `global`, including updates and
+deletions. The MCP `list_scopes` tool discovers scopes and their write permissions.
 Data lives in `~/.graphmem`; set `GRAPHMEM_HOME` to use another directory.
 
 [CLI reference](docs/cli.md) · [MCP tool reference](docs/mcp.md)

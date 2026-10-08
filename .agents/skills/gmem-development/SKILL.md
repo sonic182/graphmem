@@ -1,7 +1,7 @@
 ---
 name: gmem-development
 description: Guides development in the Graphmem/gmem Rust repository — its layered hexagonal architecture, the check/test/lint/fmt feedback loop, and testing conventions. Use when writing, reviewing, or debugging gmem code, or when the MCP stdio server (`gmem mcp`) needs to be smoke-tested by sending raw JSON-RPC requests over stdin/stdout.
-compatibility: Rust repository; the bundled smoke-test script requires Python 3.9+, a Unix-like OS (uses select() on pipes), and a built `gmem` binary (`cargo build`).
+compatibility: Rust repository; the bundled smoke-test script requires Python 3.9+, Git, a Unix-like OS (uses select() on pipes), and a built `gmem` binary (`cargo build`).
 ---
 
 # Developing Graphmem (gmem)
@@ -95,8 +95,8 @@ Minimal exchange (see `tests/mcp.rs` for the full reference):
 {"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"id":1,"scopes":["global"]},...}}
 ```
 
-The eight tools (`remember`, `recall`, `update`, `stats`, `relate`, `graph`,
-`inspect`, `forget`) and their exact argument/response shapes are documented in
+The nine tools (`remember`, `recall`, `update`, `stats`, `list_scopes`, `relate`,
+`graph`, `inspect`, `forget`) and their exact argument/response shapes are documented in
 `docs/mcp.md` and exercised in `tests/mcp.rs`.
 
 ### Smoke-testing it

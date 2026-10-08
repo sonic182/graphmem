@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP `list_scopes` discovers stored scopes, the current scope, and write
+  permissions without changing the read selection or write context.
+- Repeatable CLI `list` and `show` scope selections support explicit
+  cross-project reads; explicit reads include global without adding the current
+  repository.
+
+### Changed
+
+- CLI and TUI memory reads default to the current Git repository plus global,
+  matching MCP; outside Git, the default remains global.
+- Memory creation, updates, and deletion allow only current-repository and
+  global scopes. Memories shared with foreign projects are read-only.
+- Flush validates scope permissions transactionally and refuses the entire
+  operation if any memory belongs to a foreign scope.
+
+### Fixed
+
+- Scoped memory listing applies its limit in SQLite instead of loading the
+  entire selected history before truncating the results.
+
 ## [0.10.1] - 2026-10-08
 
 ### Added

@@ -122,7 +122,7 @@ fn serves_memory_lifecycle_over_stdio() {
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
-    assert_eq!(listed_tools.len(), 8);
+    assert_eq!(listed_tools.len(), 9);
     assert!(
         listed_tools
             .iter()
@@ -141,7 +141,15 @@ fn serves_memory_lifecycle_over_stdio() {
     assert_eq!(
         names,
         [
-            "forget", "graph", "inspect", "recall", "relate", "remember", "stats", "update"
+            "forget",
+            "graph",
+            "inspect",
+            "list_scopes",
+            "recall",
+            "relate",
+            "remember",
+            "stats",
+            "update"
         ]
     );
     let recall = listed_tools
@@ -174,6 +182,15 @@ fn serves_memory_lifecycle_over_stdio() {
             .contains("Counts only")
     );
 
+    let empty_scopes = mcp.request(92, "tools/call", json!({"name":"list_scopes"}));
+    assert_eq!(
+        empty_scopes["result"]["structuredContent"],
+        json!({
+            "current_scope":"global", "scopes":[{"name":"global","is_current":true,"writable":true}]
+        })
+    );
+    let empty_stats = mcp.request(93, "tools/call", json!({"name":"stats"}));
+    assert_eq!(empty_stats["result"]["structuredContent"]["scopes"], 0);
     let resources = mcp.request(90, "resources/list", json!({}));
     let listed_resources = resources["result"]["resources"]
         .as_array()
@@ -405,38 +422,42 @@ fn repository_scopes_are_prioritized_and_isolated() {
         "initialize",
         json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
     );
+    // Seed foreign scopes through storage; MCP cannot create foreign memories.
+    let mut database = Database::open(&home.join("memory.sqlite")).expect("database opens");
     let mut stored_ids = Vec::new();
-    for (id, scopes) in [
-        (2, json!([])),
-        (3, json!(["repo:/a"])),
-        (4, json!(["repo:/b"])),
-    ] {
-        let stored = mcp.request(
-            id,
-            "tools/call",
-            json!({"name":"remember","arguments":{"content":"deployment rule","scopes":scopes}}),
-        );
+    let scope_a = format!("repo:{}", home.join("project-a").display());
+    let scope_b = format!("repo:{}", home.join("project-b").display());
+    for scope in ["global", scope_a.as_str(), scope_b.as_str()] {
         stored_ids.push(
-            stored["result"]["structuredContent"]["id"]
-                .as_i64()
-                .expect("remembered ID"),
+            database
+                .remember_with_graph(
+                    "deployment rule",
+                    "observation",
+                    0.0,
+                    &[scope.to_owned()],
+                    &[],
+                    &[],
+                )
+                .unwrap()
+                .id,
         );
     }
+    drop(database);
     let recalled = mcp.request(
         5,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"deployment","scopes":["repo:/a"]}}),
+        json!({"name":"recall","arguments":{"query":"deployment","scopes":[scope_a]}}),
     );
     let memories = recalled["result"]["structuredContent"]["memories"]
         .as_array()
         .expect("scoped memories");
     assert_eq!(memories.len(), 2);
-    assert_eq!(memories[0]["scopes"], json!(["repo:/a"]));
+    assert_eq!(memories[0]["scopes"], json!([scope_a]));
     assert_eq!(memories[1]["scopes"], json!(["global"]));
     let limited = mcp.request(
         6,
         "tools/call",
-        json!({"name":"recall","arguments":{"query":"deployment","scopes":["repo:/a"],"limit":1}}),
+        json!({"name":"recall","arguments":{"query":"deployment","scopes":[scope_a],"limit":1}}),
     );
     assert_eq!(
         limited["result"]["structuredContent"]["memories"][0]["access_count"],
@@ -626,9 +647,12 @@ fn worktrees_share_scope() {
     );
     let arbitrary_scope = format!("repo:{}", nested.display());
     let custom = mcp.request(15, "tools/call", json!({"name":"remember","arguments":{"content":"custom scope", "scopes":[arbitrary_scope.clone()]}}));
-    assert_eq!(
-        custom["result"]["structuredContent"]["scopes"],
-        json!([arbitrary_scope])
+    assert_eq!(custom["result"]["isError"], true);
+    assert!(
+        custom["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(&arbitrary_scope)
     );
     drop(mcp);
 
@@ -790,6 +814,180 @@ fn omitted_scopes_default_to_the_server_repository() {
     assert_eq!(memories.len(), 2);
     assert_eq!(memories[0]["scopes"], json!([scope]));
     assert_eq!(memories[1]["scopes"], json!(["global"]));
+    let empty_scopes = mcp.request(
+        5,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"scope default","scopes":[]}}),
+    );
+    let empty_memories = empty_scopes["result"]["structuredContent"]["memories"]
+        .as_array()
+        .expect("default scoped memories");
+    assert_eq!(empty_memories.len(), memories.len());
+    for (empty, omitted) in empty_memories.iter().zip(memories) {
+        assert_eq!(empty["id"], omitted["id"]);
+        assert_eq!(empty["scopes"], omitted["scopes"]);
+    }
+    let mut database = Database::open(&home.join("memory.sqlite")).unwrap();
+    let foreign_scope = format!("repo:{}", root.join("another-project").display());
+    let other_foreign_scope = format!("repo:{}", root.join("second-project").display());
+    let foreign = database
+        .remember_with_graph(
+            "scope default foreign",
+            "observation",
+            0.0,
+            std::slice::from_ref(&foreign_scope),
+            &[],
+            &[],
+        )
+        .unwrap();
+    let other_foreign = database
+        .remember_with_graph(
+            "scope default other foreign",
+            "observation",
+            0.0,
+            std::slice::from_ref(&other_foreign_scope),
+            &[],
+            &[],
+        )
+        .unwrap();
+    drop(database);
+    let explicit = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"scope default","scopes":[foreign_scope]}}),
+    );
+    let explicit_memories = explicit["result"]["structuredContent"]["memories"]
+        .as_array()
+        .expect("explicit scoped memories");
+    assert_eq!(explicit_memories.len(), 2);
+    assert!(
+        explicit_memories
+            .iter()
+            .any(|memory| memory["id"] == json!(foreign.id))
+    );
+    assert!(
+        explicit_memories
+            .iter()
+            .any(|memory| memory["id"] == global["result"]["structuredContent"]["id"])
+    );
+    let multiple = mcp.request(
+        12,
+        "tools/call",
+        json!({"name":"recall","arguments":{
+            "query":"scope default", "scopes":[foreign_scope,other_foreign_scope,"global","global"]
+        }}),
+    );
+    let multiple_memories = multiple["result"]["structuredContent"]["memories"]
+        .as_array()
+        .unwrap();
+    assert_eq!(multiple_memories.len(), 3);
+    for id in [
+        foreign.id,
+        other_foreign.id,
+        global["result"]["structuredContent"]["id"]
+            .as_i64()
+            .unwrap(),
+    ] {
+        assert!(
+            multiple_memories
+                .iter()
+                .any(|memory| memory["id"] == json!(id))
+        );
+    }
+    let global_only = mcp.request(
+        13,
+        "tools/call",
+        json!({"name":"recall","arguments":{
+            "query":"scope default", "scopes":[" global "]
+        }}),
+    );
+    assert_eq!(
+        global_only["result"]["structuredContent"]["memories"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    for tool in ["recall", "remember"] {
+        let invalid = mcp.request(
+            14,
+            "tools/call",
+            json!({"name":tool,"arguments":{
+                "query":"scope default", "content":"invalid scope", "scopes":["repo:relative"]
+            }}),
+        );
+        assert_eq!(invalid["result"]["isError"], true);
+        assert!(
+            invalid["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("scope must be")
+        );
+    }
+    let before_listing = mcp.request(15, "tools/call", json!({"name":"stats"}));
+    let listed = mcp.request(16, "tools/call", json!({"name":"list_scopes"}));
+    let listed = &listed["result"]["structuredContent"];
+    assert_eq!(listed["current_scope"], scope);
+    let available = listed["scopes"].as_array().unwrap();
+    assert_eq!(available.len(), 4);
+    assert_eq!(
+        available
+            .iter()
+            .filter(|entry| entry["is_current"] == true)
+            .count(),
+        1
+    );
+    for name in [
+        scope.as_str(),
+        "global",
+        foreign_scope.as_str(),
+        other_foreign_scope.as_str(),
+    ] {
+        let entry = available
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .unwrap();
+        assert_eq!(entry["is_current"], json!(name == scope));
+        assert_eq!(entry["writable"], json!(name == scope || name == "global"));
+    }
+    let after_listing = mcp.request(17, "tools/call", json!({"name":"stats"}));
+    assert_eq!(
+        before_listing["result"]["structuredContent"],
+        after_listing["result"]["structuredContent"]
+    );
+    let before_rejected = mcp.request(8, "tools/call", json!({"name":"stats"}));
+    for (id, scopes) in [
+        (9, json!([foreign_scope])),
+        (10, json!([scope, "global", foreign_scope])),
+    ] {
+        let rejected = mcp.request(
+            id,
+            "tools/call",
+            json!({"name":"remember","arguments":{
+                "content":"must not persist", "scopes":scopes,
+                "entities":[{"kind":"component","name":"must not persist"}]
+            }}),
+        );
+        assert_eq!(rejected["result"]["isError"], true);
+        let message = rejected["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(message.contains(&format!("cannot write to scope {foreign_scope}")));
+        assert!(message.contains(&scope));
+        assert!(message.contains("global"));
+    }
+    let after_rejected = mcp.request(11, "tools/call", json!({"name":"stats"}));
+    assert_eq!(
+        before_rejected["result"]["structuredContent"],
+        after_rejected["result"]["structuredContent"]
+    );
+    let after_read = mcp.request(
+        7,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"local after external read"}}),
+    );
+    assert_eq!(
+        after_read["result"]["structuredContent"]["scopes"],
+        json!([scope])
+    );
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP test data is removed");
 }
@@ -1228,7 +1426,7 @@ fn recall_filters_by_memory_type() {
 }
 
 #[test]
-fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
+fn id_addressed_tools_allow_explicit_reads_but_not_foreign_writes() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is valid")
@@ -1281,6 +1479,31 @@ fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
         .expect("shared id");
     drop(mcp);
 
+    let mut database = Database::open(&home.join("memory.sqlite")).unwrap();
+    let first_canonical = format!(
+        "repo:{}",
+        first.join(".git").canonicalize().unwrap().display()
+    );
+    let second_canonical = format!(
+        "repo:{}",
+        second.join(".git").canonicalize().unwrap().display()
+    );
+    let mut shared_foreign_ids = Vec::new();
+    for allowed in ["global", second_canonical.as_str()] {
+        let memory = database
+            .remember_with_graph(
+                "shared with foreign",
+                "observation",
+                0.0,
+                &[allowed.to_owned(), first_canonical.clone()],
+                &[],
+                &[],
+            )
+            .unwrap();
+        shared_foreign_ids.push(memory.id);
+    }
+    drop(database);
+
     // A server started in the second repository shares the store, so the ids
     // are guessable; every id-addressed tool must still refuse the first
     // repository's memory.
@@ -1317,8 +1540,7 @@ fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
         "shared note"
     );
 
-    // Naming the other repository explicitly is allowed, as it is for remember
-    // and recall: the guard stops a guessed id, not a declared target.
+    // Explicit foreign scopes enable reading, not writing.
     let first_scope = format!(
         "repo:{}",
         first
@@ -1344,9 +1566,77 @@ fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
             "scopes":[first_scope]
         }}),
     );
+    assert_eq!(revised["result"]["isError"], true);
+    assert!(
+        revised["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("cannot write to scope")
+    );
+    let foreign_delete = mcp.request(
+        20,
+        "tools/call",
+        json!({"name":"forget","arguments":{"id":private_id,"scopes":[first_canonical]}}),
+    );
+    assert_eq!(foreign_delete["result"]["isError"], true);
+    for memory_id in shared_foreign_ids {
+        let readable = mcp.request(
+            21,
+            "tools/call",
+            json!({"name":"inspect","arguments":{"id":memory_id}}),
+        );
+        assert_eq!(
+            readable["result"]["structuredContent"]["content"],
+            "shared with foreign"
+        );
+        for selection in [json!([]), json!(["global"]), json!([second_canonical])] {
+            for tool in ["update", "forget"] {
+                let mut arguments = json!({"id":memory_id,"scopes":selection});
+                if tool == "update" {
+                    arguments["content"] = json!("must not persist");
+                }
+                let rejected =
+                    mcp.request(22, "tools/call", json!({"name":tool,"arguments":arguments}));
+                assert_eq!(rejected["result"]["isError"], true);
+                assert!(
+                    rejected["result"]["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains(&first_canonical)
+                );
+            }
+        }
+        let database = Database::open(&home.join("memory.sqlite")).unwrap();
+        assert_eq!(
+            database.get_memory(memory_id).unwrap().unwrap().content,
+            "shared with foreign"
+        );
+    }
+    let local_shared = mcp.request(
+        23,
+        "tools/call",
+        json!({"name":"remember","arguments":{
+            "content":"local and global", "scopes":[second_canonical,"global"]
+        }}),
+    );
+    let local_id = local_shared["result"]["structuredContent"]["id"]
+        .as_i64()
+        .unwrap();
+    let local_update = mcp.request(24, "tools/call", json!({"name":"update","arguments":{
+        "id":local_id, "content":"revised local", "scopes":[format!("repo:{}", second.display())]
+    }}));
     assert_eq!(
-        revised["result"]["structuredContent"]["content"],
-        "first repository secret, revised from elsewhere"
+        local_update["result"]["structuredContent"]["content"],
+        "revised local"
+    );
+    let local_delete = mcp.request(
+        25,
+        "tools/call",
+        json!({"name":"forget","arguments":{"id":local_id,"scopes":["global"]}}),
+    );
+    assert_eq!(
+        local_delete["result"]["structuredContent"]["forgotten"],
+        true
     );
     let invalid = mcp.request(
         11,
@@ -1369,9 +1659,8 @@ fn id_addressed_tools_guard_scope_but_accept_an_explicit_target() {
         json!({"name":"inspect","arguments":{"id":private_id}}),
     );
     assert_eq!(
-        intact["result"]["structuredContent"]["content"],
-        "first repository secret, revised from elsewhere",
-        "the unscoped calls changed nothing; only the explicitly scoped update did"
+        intact["result"]["structuredContent"]["content"], "first repository secret",
+        "neither implicit nor explicit foreign writes changed the memory"
     );
     drop(mcp);
     fs::remove_dir_all(root).expect("MCP test data is removed");
@@ -1601,6 +1890,7 @@ fn code_tools_are_listed_by_default_and_outline_the_checkout() {
     fs::remove_dir_all(root).expect("MCP code test data is removed");
 }
 
+#[cfg(feature = "code")]
 #[test]
 fn code_failures_leave_the_memory_tools_available() {
     let nonce = SystemTime::now()
@@ -1694,6 +1984,7 @@ fn code_failures_leave_the_memory_tools_available() {
     fs::remove_dir_all(root).expect("MCP code failure test data is removed");
 }
 
+#[cfg(feature = "code")]
 fn code_index_path(home: &Path) -> std::path::PathBuf {
     fs::read_dir(home)
         .expect("home is readable")

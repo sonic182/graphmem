@@ -57,9 +57,7 @@ struct Cli {
 enum Command {
     Remember(RememberArgs),
     List(ListArgs),
-    Show {
-        id: i64,
-    },
+    Show(ShowArgs),
     Search(SearchArgs),
     Graph(GraphArgs),
     Forget {
@@ -121,10 +119,17 @@ struct RememberArgs {
 
 #[derive(Args)]
 struct ListArgs {
-    #[arg(long)]
-    scope: Option<String>,
+    #[arg(long = "scope")]
+    scopes: Vec<String>,
     #[arg(long, default_value_t = 50)]
     limit: usize,
+}
+
+#[derive(Args)]
+struct ShowArgs {
+    id: i64,
+    #[arg(long = "scope")]
+    scopes: Vec<String>,
 }
 
 #[derive(Args)]
@@ -181,19 +186,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::List(args) => {
             let service = MemoryService::open_default(overrides)?;
-            print_memories(service.list(args.scope.as_deref(), args.limit)?);
+            print_memories(service.list_selected(&args.scopes, args.limit)?);
         }
-        Command::Show { id } => {
+        Command::Show(args) => {
             let mut service = MemoryService::open_default(overrides)?;
-            print_memory_details(service.inspect(id, None)?);
+            print_memory_details(service.inspect(args.id, Some(&args.scopes))?);
         }
         Command::Search(args) => {
             let mut service = MemoryService::open_default(overrides)?;
-            let results = if args.scopes.is_empty() {
-                service.search(&args.query, None, args.limit)?
-            } else {
-                service.search_scopes(&args.query, &args.scopes, args.limit)?
-            };
+            let results = service.search_scopes(&args.query, &args.scopes, args.limit)?;
             print_search_results(results);
         }
         Command::Graph(args) => {

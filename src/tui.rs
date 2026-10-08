@@ -71,7 +71,7 @@ impl App {
     }
 
     fn reload(&mut self) -> Result<(), Box<dyn Error>> {
-        self.all_memories = self.service.list_all()?;
+        self.all_memories = self.service.list_selected(&[], usize::MAX)?;
         self.apply_filter();
         self.entities = self.service.entities()?;
         self.entity_state

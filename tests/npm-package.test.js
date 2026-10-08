@@ -158,10 +158,12 @@ test("Windows recovery command preserves paths with spaces and apostrophes", asy
       // Run the printed command in both real Windows shells, without downloads.
       for (const shell of [process.env.ComSpec || "cmd.exe", "powershell.exe"]) {
         const executed = spawnSync(command, {
-          shell, encoding: "utf8", timeout: 10000,
+          // Cold PowerShell startup can exceed 10 seconds on hosted Windows runners.
+          shell, encoding: "utf8", timeout: 60000,
           env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` },
         });
-        assert.equal(executed.status, 0, `${shell}: ${executed.stderr}`);
+        assert.ifError(executed.error);
+        assert.equal(executed.status, 0, `${shell}: signal=${executed.signal}; stderr=${executed.stderr}`);
         assert.equal(executed.stdout.trim(), script);
       }
     }
