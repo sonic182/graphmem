@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agentica (`.agc`) is indexed by the code tools through `tree-sitter-agentica`:
+  functions, structs and their fields, enums and their variants, and imports,
+  which `code_imports` lists by path.
+
 ## [0.11.0] - 2026-10-09
 
 ### Added

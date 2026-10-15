@@ -106,7 +106,7 @@ fn git(directory: &Path, args: &[&str]) {
 fn outlines_every_supported_language_with_nesting_and_ranges() {
     let sandbox = Sandbox::new("languages");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("21 indexed"), "{indexed}");
+    assert!(indexed.contains("22 indexed"), "{indexed}");
 
     let expectations: &[(&str, &[&str])] = &[
         (
@@ -223,6 +223,20 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "\teex\tpartial: EEx directives only",
                 "3-3\texpression for user <- @users do",
                 "4-4\texpression link user.name",
+            ],
+        ),
+        (
+            "lib/queue.agc",
+            &[
+                "\tagentica\tcomplete",
+                "1-1\timport std/list",
+                "3-5\tstruct QueueState",
+                "4-4\t  field items",
+                "7-10\tenum Shape",
+                "8-8\t  enumMember Circle",
+                "9-9\t  enumMember Empty",
+                "12-14\tfunction push",
+                "16-18\tfunction size",
             ],
         ),
         (
@@ -489,6 +503,7 @@ fn imports_lists_declared_imports_across_supported_languages() {
         ("native/widget.h", "string"),
         ("native/widget.cpp", "widget.h"),
         ("native/build.zig", "std"),
+        ("lib/queue.agc", "std/list"),
         ("lisp/billing.rkt", "util.rkt"),
         ("app/service.py", "os"),
         ("app/service.py", "pathlib"),
@@ -667,7 +682,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     )
     .expect("untracked non-UTF-8 filename is written");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("21 indexed"), "{indexed}");
+    assert!(indexed.contains("22 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
@@ -709,7 +724,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 20 unchanged, 0 removed, 1 skipped"),
+        reindexed.contains("0 indexed, 21 unchanged, 0 removed, 1 skipped"),
         "{reindexed}"
     );
 

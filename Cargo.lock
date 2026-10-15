@@ -1844,6 +1844,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "tree-sitter-agentica",
  "tree-sitter-heex",
  "tree-sitter-racket",
  "tree-sitter-scss 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -5013,6 +5014,14 @@ dependencies = [
  "regex",
  "serde_json",
  "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-agentica"
+version = "0.1.0"
+dependencies = [
+ "cc",
  "tree-sitter-language",
 ]
 
