@@ -16,6 +16,9 @@ check-lean package="graphmem":
 fmt:
     cargo fmt --all
 
+test-scripts:
+    python3 -m unittest discover -s scripts -p "test_*.py"
+
 fmt-check:
     cargo fmt --all -- --check
 

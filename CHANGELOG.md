@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `scripts/memory_usage.py` pairs the recalls found in Claude Code transcripts
+  with the tool calls that follow them, and reports how often the agent touched
+  the files the recalled memories cite. Run its tests with `just test-scripts`.
+
 - `gmem health` reports never-accessed and idle memories per type, the recall
   log, and memories whose `**Where**` paths are missing from their checkout.
 - Searches and inspections are recorded in a local recall log (schema version
