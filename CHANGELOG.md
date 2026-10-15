@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `gmem health` reports never-accessed and idle memories per type, the recall
+  log, and memories whose `**Where**` paths are missing from their checkout.
+- Searches and inspections are recorded in a local recall log (schema version
+  2) with their source (`cli` or `mcp`), query, scopes, and the ranked results.
+  Searches that return nothing are recorded too.
+
 ## [0.11.0] - 2026-10-09
 
 ### Added

@@ -29,7 +29,9 @@ The server exposes nine memory tools:
   neither seeds nor propagates rank; it applies to both the semantic and the
   lexical path.
   Each returned memory increments `access_count` and updates `last_accessed_at`;
-  candidates outside the response are not counted.
+  candidates outside the response are not counted. Each call is also recorded in
+  the local recall log with its query, scopes, and the ranked ids and scores it
+  returned, including calls that return nothing.
 - `stats`: returns the counts of memories, scopes, entities, and edges.
 - `list_scopes`: read-only discovery of all stored scopes plus the current scope
   and `global`, including when empty. Returns `current_scope` and a sorted,
@@ -42,8 +44,8 @@ The server exposes nine memory tools:
 - `graph`: inspects incoming, outgoing, or both relationship paths for an
   entity.
 - `inspect`: returns a memory and its scopes by numeric `id`, with optional
-  `scopes`. A successful inspection increments `access_count` and updates
-  `last_accessed_at`.
+  `scopes`. A successful inspection increments `access_count`, updates
+  `last_accessed_at`, and is recorded in the recall log.
 - `update`: revises a memory by numeric `id`, with optional `scopes`.
   `content`, `memory_type`, and `importance` replace the stored values; omitted
   fields are kept. Scopes,

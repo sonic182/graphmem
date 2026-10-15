@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Memory {
     pub id: i64,
@@ -82,6 +84,150 @@ pub struct StoreStats {
     pub scopes: i64,
     pub entities: i64,
     pub edges: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessKind {
+    Search,
+    Inspect,
+}
+
+impl AccessKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Search => "search",
+            Self::Inspect => "inspect",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AccessSource {
+    #[default]
+    Cli,
+    Mcp,
+}
+
+impl AccessSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Mcp => "mcp",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecallLogRow {
+    pub source: String,
+    pub kind: String,
+    pub events: i64,
+    pub empty: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecallLogStats {
+    pub since: Option<i64>,
+    pub rows: Vec<RecallLogRow>,
+    pub memories_returned: i64,
+}
+
+const PATH_EXTENSIONS: [&str; 24] = [
+    "rs", "ex", "exs", "py", "js", "ts", "tsx", "jsx", "md", "toml", "json", "yml", "yaml", "sql",
+    "sh", "html", "heex", "eex", "css", "scss", "php", "rb", "go", "lock",
+];
+
+pub fn scope_checkout_root(scope: &str) -> Option<PathBuf> {
+    let path = Path::new(scope.strip_prefix("repo:")?);
+    if path.file_name().is_some_and(|name| name == ".git") {
+        return path.parent().map(Path::to_path_buf);
+    }
+    Some(path.to_path_buf())
+}
+
+pub fn referenced_paths(content: &str) -> Vec<String> {
+    let Some((_, after)) = content.split_once("**Where**:") else {
+        return Vec::new();
+    };
+    let section = after.split("**").next().unwrap_or_default();
+    let mut paths = Vec::new();
+    for token in section_tokens(section) {
+        for candidate in expand_braces(&token) {
+            let candidate = strip_line_suffix(candidate.trim_end_matches(['.', ':']));
+            if looks_like_path(candidate) && !paths.iter().any(|path| path == candidate) {
+                paths.push(candidate.to_owned());
+            }
+        }
+    }
+    paths
+}
+
+fn section_tokens(section: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for character in section.chars() {
+        match character {
+            '{' => {
+                depth += 1;
+                current.push(character);
+            }
+            '}' => {
+                depth = depth.saturating_sub(1);
+                current.push(character);
+            }
+            ',' if depth > 0 => current.push(character),
+            ',' | ';' | '(' | ')' | '`' | '"' | '\'' | '[' | ']' => {
+                tokens.push(std::mem::take(&mut current));
+            }
+            character if character.is_whitespace() => tokens.push(std::mem::take(&mut current)),
+            character => current.push(character),
+        }
+    }
+    tokens.push(current);
+    tokens.retain(|token| !token.is_empty());
+    tokens
+}
+
+fn expand_braces(token: &str) -> Vec<String> {
+    let Some(open) = token.find('{') else {
+        return vec![token.to_owned()];
+    };
+    let Some(close) = token[open..].find('}').map(|offset| open + offset) else {
+        return vec![token.to_owned()];
+    };
+    let (prefix, suffix) = (&token[..open], &token[close + 1..]);
+    token[open + 1..close]
+        .split(',')
+        .flat_map(|alternative| expand_braces(&format!("{prefix}{alternative}{suffix}")))
+        .collect()
+}
+
+fn strip_line_suffix(candidate: &str) -> &str {
+    match candidate.rsplit_once(':') {
+        Some((path, line))
+            if !line.is_empty() && line.chars().all(|c| c.is_ascii_digit() || c == '-') =>
+        {
+            path
+        }
+        _ => candidate,
+    }
+}
+
+fn looks_like_path(candidate: &str) -> bool {
+    if candidate.is_empty()
+        || candidate.starts_with(['~', '/'])
+        || candidate.contains(['*', '?', '{', '}', '#', '=', '<', '>'])
+        || candidate.contains("://")
+    {
+        return false;
+    }
+    if candidate.ends_with('/') {
+        return candidate.len() > 1;
+    }
+    let name = candidate.rsplit('/').next().unwrap_or_default();
+    name.rsplit_once('.')
+        .is_some_and(|(stem, extension)| !stem.is_empty() && PATH_EXTENSIONS.contains(&extension))
 }
 
 pub fn text_mentions(haystack: &str, needle: &str) -> bool {
@@ -448,7 +594,35 @@ impl<'a> SourceText<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{personalized_pagerank, text_mentions};
+    use super::{personalized_pagerank, referenced_paths, scope_checkout_root, text_mentions};
+
+    #[test]
+    fn referenced_paths_keeps_only_path_like_tokens_from_the_where_section() {
+        let content = "**What**: ignored/in/what.rs\n**Where**: `lib/a/b.ex`, \
+            lib/tools/{list,set}.ex, scripts/gmem.js:12, docs/, Foo.update/2, \
+            MCP.Tools.Update, ~/.pi/agent/settings.json, results/<name>/, release.yml.\n\
+            **Learned**: later/path.rs";
+        assert_eq!(
+            referenced_paths(content),
+            [
+                "lib/a/b.ex",
+                "lib/tools/list.ex",
+                "lib/tools/set.ex",
+                "scripts/gmem.js",
+                "docs/",
+                "release.yml"
+            ]
+        );
+        assert!(referenced_paths("**What**: no where section at src/x.rs").is_empty());
+    }
+
+    #[test]
+    fn scope_checkout_root_strips_the_git_directory() {
+        let root = |scope| scope_checkout_root(scope).map(|path| path.display().to_string());
+        assert_eq!(root("repo:/work/app/.git").as_deref(), Some("/work/app"));
+        assert_eq!(root("repo:/work/app").as_deref(), Some("/work/app"));
+        assert_eq!(root("global"), None);
+    }
 
     #[cfg(feature = "code")]
     #[test]

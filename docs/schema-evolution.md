@@ -7,7 +7,7 @@ Graphmem is in beta (`0.1.x`). The SQLite schema lives in `migrations/` and is a
 - `schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER)` records what has run.
 - `MIGRATIONS` in `migrations.rs` is an ordered list of `(version, sql)` pairs; each script is embedded from `migrations/NNNN_*.sql` with `include_str!`.
 - On open, the runner reads the current version (`MAX(version)`) and applies every migration newer than it, each in its own transaction that also inserts the version row. A failed migration rolls back atomically, and reopening resumes from the last fully applied version.
-- Current state: version 1, `migrations/0001_initial.sql`, creating `memories`, `scopes`, `memory_scopes`, `entities`, `edges`, `memory_entities`, the embedding tables, and the `memories_fts` FTS5 index.
+- Current state: version 2. `migrations/0001_initial.sql` creates `memories`, `scopes`, `memory_scopes`, `entities`, `edges`, `memory_entities`, the embedding tables, and the `memories_fts` FTS5 index. `migrations/0002_recall_log.sql` adds `recall_events` and `recall_results`, which record every search and inspection (query, scopes, source, and the ranked ids and scores returned). Both tables are emptied by `flush`, and deleting a memory removes its result rows.
 
 ## Adding a migration
 

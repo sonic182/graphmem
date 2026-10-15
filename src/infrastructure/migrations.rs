@@ -2,7 +2,10 @@ use rusqlite::Connection;
 
 use super::sqlite::{Result, now_millis};
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../../migrations/0001_initial.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../../migrations/0001_initial.sql")),
+    (2, include_str!("../../migrations/0002_recall_log.sql")),
+];
 
 pub fn run(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
