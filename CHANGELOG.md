@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-16
+
 ### Added
 
 - `gmem health` reports never-accessed and idle memories per type, the recall
@@ -334,7 +336,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.11.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.12.0...HEAD
+[0.12.0]: https://github.com/sonic182/graphmem/compare/0.11.0...0.12.0
 [0.11.0]: https://github.com/sonic182/graphmem/compare/0.10.1...0.11.0
 [0.10.1]: https://github.com/sonic182/graphmem/compare/0.10.0...0.10.1
 [0.10.0]: https://github.com/sonic182/graphmem/compare/0.9.3...0.10.0
