@@ -6,7 +6,10 @@ use std::{
 use clap::{Args, Parser, Subcommand};
 use graphmem::{
     EntityReference, GraphDirection, Memory, Scope, SearchResult,
-    application::{GraphDetails, GraphRequest, MemoryDetails, MemoryService, RememberRequest},
+    application::{
+        GraphDetails, GraphRequest, HealthOptions, HealthReport, MemoryDetails, MemoryService,
+        RememberRequest,
+    },
     infrastructure::config::{ConfigOverrides, RetrievalOverrides},
 };
 
@@ -67,6 +70,8 @@ enum Command {
     Scopes,
     Reembed,
     Doctor,
+    /// Report how much of the memory store is used and how much has gone stale.
+    Health(HealthArgs),
     Migrate,
     Version,
     Mcp,
@@ -157,6 +162,13 @@ struct GraphArgs {
 struct FlushArgs {
     #[arg(long)]
     yes: bool,
+}
+
+#[derive(Args)]
+struct HealthArgs {
+    /// Days without access before a memory counts as idle.
+    #[arg(long, default_value_t = 30)]
+    idle_days: u32,
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
@@ -272,6 +284,12 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             let service = MemoryService::open_default(overrides)?;
             println!("database: {}", service.database_path().display());
             println!("status: healthy");
+        }
+        Command::Health(args) => {
+            let service = MemoryService::open_default(overrides)?;
+            print_health(&service.health(HealthOptions {
+                idle_days: args.idle_days,
+            })?);
         }
         Command::Migrate => {
             let service = MemoryService::open_default(overrides)?;
@@ -391,6 +409,70 @@ fn print_graph_details(details: GraphDetails) {
             );
         }
         println!();
+    }
+}
+
+fn percent(part: usize, total: usize) -> String {
+    if total == 0 {
+        return "0%".to_owned();
+    }
+    format!("{:.0}%", part as f64 * 100.0 / total as f64)
+}
+
+fn print_health(report: &HealthReport) {
+    let total = report.memories;
+    println!("memories: {total}");
+    println!(
+        "never accessed: {} ({})",
+        report.never_accessed,
+        percent(report.never_accessed, total)
+    );
+    println!(
+        "idle for {}+ days: {} ({})",
+        report.idle_days,
+        report.idle,
+        percent(report.idle, total)
+    );
+
+    println!("\n{:<16}{:>7}{:>8}{:>6}", "type", "total", "never", "idle");
+    for row in &report.by_type {
+        println!(
+            "{:<16}{:>7}{:>8}{:>6}",
+            row.memory_type, row.total, row.never_accessed, row.idle
+        );
+    }
+
+    println!();
+    match report.recall_log_days {
+        None => println!("recall log: empty (events are recorded from schema version 2 on)"),
+        Some(days) => {
+            println!("recall log: since {days} day(s) ago");
+            println!("{:<8}{:<9}{:>8}{:>7}", "source", "kind", "events", "empty");
+            for row in &report.recalls.rows {
+                println!(
+                    "{:<8}{:<9}{:>8}{:>7}",
+                    row.source, row.kind, row.events, row.empty
+                );
+            }
+            println!(
+                "memories returned at least once: {} of {total}",
+                report.recalls.memories_returned
+            );
+        }
+    }
+
+    println!(
+        "\nstale paths: {} memories reference paths missing from their checkout ({} not checkable)",
+        report.stale.len(),
+        report.unchecked
+    );
+    for memory in &report.stale {
+        println!(
+            "  #{} {}\t{}",
+            memory.id,
+            memory.memory_type,
+            memory.missing.join(", ")
+        );
     }
 }
 

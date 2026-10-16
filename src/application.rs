@@ -1,21 +1,27 @@
 #[cfg(feature = "code")]
 pub mod code;
+mod health;
 mod scopes;
 
 use std::{collections::HashMap, path::Path};
 
 use thiserror::Error;
 
+pub use health::{HealthOptions, HealthReport, StaleMemory, TypeHealth};
+
 use crate::{
     Database, Edge, Entity, EntityReference, GraphDirection, GraphPath, Memory, Relation, Scope,
     SearchResult, StorageError, StoreStats,
-    domain::{edge_document, entity_document, personalized_pagerank, text_mentions},
+    domain::{
+        AccessKind, AccessSource, edge_document, entity_document, personalized_pagerank,
+        text_mentions,
+    },
     infrastructure::config::{
         ConfigError, ConfigOverrides, EmbeddingConfig, RetrievalConfig, embedding_config,
         retrieval_config,
     },
     infrastructure::embedding::{Embedder, EmbeddingError, EmbeddingModel},
-    infrastructure::sqlite::VectorSink,
+    infrastructure::sqlite::{RecallEvent, VectorSink},
 };
 
 pub type Result<T> = std::result::Result<T, ApplicationError>;
@@ -97,6 +103,7 @@ pub struct MemoryService {
     embedding_config: EmbeddingConfig,
     retrieval_config: RetrievalConfig,
     embedder: Option<Embedder>,
+    access_source: AccessSource,
 }
 
 impl MemoryService {
@@ -114,7 +121,14 @@ impl MemoryService {
             database,
             default_scope: scopes::current_scope(),
             embedder: None,
+            access_source: AccessSource::default(),
         })
+    }
+
+    #[must_use]
+    pub fn with_access_source(mut self, access_source: AccessSource) -> Self {
+        self.access_source = access_source;
+        self
     }
 
     /// The repository scope fixed when this service was opened, or global outside Git.
@@ -224,7 +238,15 @@ impl MemoryService {
 
     pub fn inspect(&mut self, id: i64, scopes: Option<&[String]>) -> Result<MemoryDetails> {
         let mut details = self.show(id, scopes)?;
-        let (last_accessed_at, access_count) = self.database.record_accesses(&[id])?[0];
+        let read_scopes = self.read_scopes(scopes.unwrap_or_default())?;
+        let (last_accessed_at, access_count) = self.database.record_recall(&RecallEvent {
+            kind: AccessKind::Inspect,
+            source: self.access_source,
+            query: None,
+            scopes: &read_scopes,
+            limit: None,
+            results: &[(id, None)],
+        })?[0];
         details.memory.last_accessed_at = Some(last_accessed_at);
         details.memory.access_count = access_count;
         Ok(details)
@@ -280,7 +302,7 @@ impl MemoryService {
             .unwrap_or_default();
         let scopes = self.read_scopes(&scopes)?;
         let results = self.search_with_scopes(query, Some(&scopes), limit, None)?;
-        self.record_search_accesses(results)
+        self.record_search_accesses(query, &scopes, limit, results)
     }
 
     pub fn search_scopes(
@@ -306,18 +328,28 @@ impl MemoryService {
         } else {
             self.lexical_search(query, Some(&scopes), limit, memory_type)
         }?;
-        self.record_search_accesses(results)
+        self.record_search_accesses(query, &scopes, limit, results)
     }
 
     fn record_search_accesses(
         &mut self,
+        query: &str,
+        scopes: &[String],
+        limit: usize,
         mut results: Vec<SearchResult>,
     ) -> Result<Vec<SearchResult>> {
-        let ids = results
+        let returned = results
             .iter()
-            .map(|result| result.memory.id)
+            .map(|result| (result.memory.id, Some(result.score)))
             .collect::<Vec<_>>();
-        let accesses = self.database.record_accesses(&ids)?;
+        let accesses = self.database.record_recall(&RecallEvent {
+            kind: AccessKind::Search,
+            source: self.access_source,
+            query: Some(query),
+            scopes,
+            limit: Some(limit),
+            results: &returned,
+        })?;
         for (result, (last_accessed_at, access_count)) in results.iter_mut().zip(accesses) {
             result.memory.last_accessed_at = Some(last_accessed_at);
             result.memory.access_count = access_count;
@@ -1055,6 +1087,7 @@ mod tests {
 
     use crate::{
         Database, EntityReference, Relation,
+        domain::AccessSource,
         infrastructure::config::{EmbeddingConfig, RetrievalConfig},
         infrastructure::embedding::{EmbeddingError, EmbeddingModel},
         infrastructure::sqlite::VectorSink,
@@ -1264,6 +1297,7 @@ mod tests {
             database: Database::open(&root.join("memory.sqlite")).expect("database opens"),
             retrieval_config: RetrievalConfig::default(),
             default_scope: "global".to_owned(),
+            access_source: AccessSource::default(),
             embedding_config: EmbeddingConfig {
                 // Loading this model would fail (and try to download it), so a
                 // metadata-only update reaching the embedder cannot pass here.
@@ -1505,6 +1539,7 @@ mod tests {
             database: Database::open(&root.join("memory.sqlite")).expect("database opens"),
             retrieval_config: RetrievalConfig::default(),
             default_scope: "global".to_owned(),
+            access_source: AccessSource::default(),
             embedding_config: EmbeddingConfig {
                 enabled: true,
                 model: "missing-model".to_owned(),

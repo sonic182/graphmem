@@ -92,6 +92,8 @@ on stderr and falls back to SQLite FTS5 lexical ranking — the same fallback
 the MCP `recall` tool uses. Unlike `recall`, the CLI has no flag to force
 lexical search.
 Each returned result updates `last_accessed_at` and increments `access_count`.
+Every search, including one that returns nothing, is also written to the recall
+log that [`gmem health`](#gmem-health) reads.
 
 | Flag | Default | Notes |
 | --- | --- | --- |
@@ -238,6 +240,35 @@ near-instant no-op, not a recompute.
 
 Not exposed as an MCP tool — this is a one-shot operator/maintenance action
 taken after a config change, not something an MCP client needs mid-session.
+
+## `gmem health`
+
+Report how much of the memory store is used and how much has gone stale. It
+reads the store only: it never loads the embedding model and writes nothing.
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--idle-days <n>` | `30` | A memory is idle when it is at least this many days old and has not been accessed within that window. |
+
+The report has three parts:
+
+- **Totals**: memories that were never accessed (`access_count` is 0) and idle
+  memories, overall and per `memory_type`.
+- **Recall log**: events recorded since schema version 2, grouped by `source`
+  (`cli` or `mcp`) and `kind` (`search` or `inspect`), with how many searches
+  returned nothing and how many distinct memories were returned at least once.
+  Events are recorded from the upgrade on, so older recalls are not counted.
+- **Stale paths**: memories whose `**Where**` section cites a file or directory
+  that is not in the memory's checkout. A path matches when the checkout
+  contains it, or when a tracked or untracked file ends with it, so shorthand
+  such as `release.yml` resolves. It is a list to review, not a verdict: the
+  file may exist only on another branch, or the memory may be attached to a
+  nested repository while its paths point at the parent. Memories without a
+  checkout on disk (global ones, or a repository that moved) are counted as not
+  checkable.
+
+`access_count` counts every returned result and every `show`, so it measures
+retrieval, not usefulness.
 
 ## `gmem doctor`
 
