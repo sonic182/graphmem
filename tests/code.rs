@@ -712,7 +712,8 @@ int *prototype_ptr(void);
 int attributed [[maybe_unused]];
 char buf[16] = {0};
 void (__stdcall *callback)(int);
-struct node { struct node *next; };
+struct node { struct node *next; int (*visit)(int); };
+typedef struct { int anonymous_x; } Point;
 int plain(void) { return 0; }
 ",
     )
@@ -731,6 +732,7 @@ public:
   int *gated_;
 #endif
 };
+int *Box::data() { return items_; }
 }
 ",
     )
@@ -746,10 +748,13 @@ public:
         "8-8\tvariable buf",
         "9-9\tvariable callback",
         "10-10\t  field next",
+        "10-10\t  field visit",
     ] {
         assert!(c.contains(line), "missing {line:?} in\n{c}");
     }
     assert!(!c.contains("prototype_ptr"), "{c}");
+    // A member is listed only under a named container it can nest in.
+    assert!(!c.contains("anonymous_x"), "{c}");
     for line in c.lines().skip(1) {
         let symbol = line.split('\t').nth(1).unwrap_or_default();
         assert!(!symbol.contains('*'), "declarator left in {line:?}");
@@ -764,6 +769,7 @@ public:
         "6-6\t    method data",
         "7-7\t    field items_",
         "9-9\t    field gated_",
+        "12-12\t  function Box::data",
     ] {
         assert!(cpp.contains(line), "missing {line:?} in\n{cpp}");
     }

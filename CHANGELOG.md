@@ -25,9 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Box &self()`), including C++ methods, are outlined and found by name
   instead of being left out. C globals and struct, union and class fields are
   named without their declarators (`global_ptr`, not `*global_ptr`; `buf`, not
-  `buf[16]`; `x`, not `x = 5`), C++ members inside `#if` blocks are listed,
-  and a C prototype that returns a pointer is no longer listed as a
-  variable (#41).
+  `buf[16]`; `x`, not `x = 5`), members inside `#if` blocks of a struct or
+  class body are listed, and a C prototype that returns a pointer is no
+  longer listed as a variable (#41).
 
 ## [0.12.0] - 2026-10-16
 

@@ -263,8 +263,9 @@ fn extractors(language: SupportLang) -> &'static CombinedExtractors<SupportLang>
                     rules.push(rule);
                 }
             }
-            // A renamed bundled rule would list its symbols twice.
-            assert_eq!(
+            // A renamed bundled rule would list its symbols twice; the C/C++
+            // outline test catches that, so release builds do not panic.
+            debug_assert_eq!(
                 replaced,
                 REPLACED_RULES.len(),
                 "every replaced bundled rule exists"
@@ -1036,22 +1037,27 @@ fn cpp_namespaces(source: &str, symbols: &mut Vec<CodeSymbol>) {
     }
 }
 
-/// Functions, C globals, and struct, union and class members, named through
-/// their declarators. A function is listed wherever it is defined; a C global
-/// only outside function bodies; a `field_declaration` only inside a member
-/// list (also under `#if` there), as a `method` when it declares a function.
-/// Prototypes are not listed. A declaration with several declarators is named
-/// by its first, as the bundled rules did.
+/// Functions, C globals, and members, named through their declarators. A
+/// function is listed wherever it is defined; a C global only outside function
+/// bodies; a member only in the body of a named container, as the bundled
+/// rules did (C structs and unions, C++ classes and structs), so it nests
+/// under that container; a member under `#if` in the body counts too. A member
+/// that declares a function is a `method`. Prototypes are not listed. A
+/// declaration with several declarators is named by its first.
 fn c_declarations(language: SupportLang, source: &str, symbols: &mut Vec<CodeSymbol>) {
     let grep = language.ast_grep(source);
     for node in grep.root().dfs() {
-        let Some(declarator) = node.field("declarator") else {
+        let kind = node.kind();
+        if !matches!(
+            kind.as_ref(),
+            "function_definition" | "declaration" | "field_declaration"
+        ) {
+            continue;
+        }
+        let Some((name, function)) = node.field("declarator").and_then(c_declared) else {
             continue;
         };
-        let Some((name, function)) = c_declared(declarator) else {
-            continue;
-        };
-        let kind = match node.kind().as_ref() {
+        let kind = match kind.as_ref() {
             "function_definition" if function => "function",
             "declaration"
                 if language == SupportLang::C
@@ -1062,12 +1068,7 @@ fn c_declarations(language: SupportLang, source: &str, symbols: &mut Vec<CodeSym
             {
                 "variable"
             }
-            "field_declaration"
-                if node
-                    .ancestors()
-                    .find(|ancestor| !ancestor.kind().starts_with("preproc_"))
-                    .is_some_and(|ancestor| ancestor.kind() == "field_declaration_list") =>
-            {
+            "field_declaration" if in_named_container(language, &node) => {
                 if function {
                     "method"
                 } else {
@@ -1121,6 +1122,26 @@ fn c_declared<'r, D: Doc>(mut node: Node<'r, D>) -> Option<(Node<'r, D>, bool)> 
     }
 }
 
+fn in_named_container<D: Doc>(language: SupportLang, member: &Node<'_, D>) -> bool {
+    let Some(body) = member
+        .ancestors()
+        .find(|ancestor| !ancestor.kind().starts_with("preproc_"))
+        .filter(|ancestor| ancestor.kind() == "field_declaration_list")
+    else {
+        return false;
+    };
+    body.parent().is_some_and(|container| {
+        let containers: &[&str] = if language == SupportLang::C {
+            &["struct_specifier", "union_specifier"]
+        } else {
+            &["class_specifier", "struct_specifier"]
+        };
+        containers.contains(&container.kind().as_ref()) && container.field("name").is_some()
+    })
+}
+
+/// The last named child: the declarator inside `&x` or `(__stdcall *x)`,
+/// where a prefix is a named child too; `target` takes the first one.
 fn last_named<'r, D: Doc>(parent: &Node<'r, D>) -> Option<Node<'r, D>> {
     parent
         .children()
