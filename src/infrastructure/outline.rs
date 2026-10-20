@@ -131,9 +131,13 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
     let errors = match language {
         CodeLanguage::Agentica => agentica(source, &mut symbols),
         CodeLanguage::Bash => bash(source, &mut symbols),
-        CodeLanguage::C => bundled(SupportLang::C, source, origin, &mut symbols),
+        CodeLanguage::C => {
+            c_declarations(SupportLang::C, source, &mut symbols);
+            bundled(SupportLang::C, source, origin, &mut symbols)
+        }
         CodeLanguage::Cpp => {
             cpp_namespaces(source, &mut symbols);
+            c_declarations(SupportLang::Cpp, source, &mut symbols);
             bundled(SupportLang::Cpp, source, origin, &mut symbols)
         }
         CodeLanguage::Css => styles(
@@ -224,6 +228,17 @@ const BUNDLED: [SupportLang; 10] = [
     SupportLang::TypeScript,
 ];
 
+/// Bundled C and C++ rules that read a declared name straight from the
+/// `declarator` field; `c_declarations` replaces them, since that field holds
+/// `*name` or `&name` for pointers and references.
+const REPLACED_RULES: [&str; 5] = [
+    "c-function",
+    "c-global-variable",
+    "cpp-function",
+    "cpp-member-method",
+    "cpp-member-field",
+];
+
 /// Only rules for compiled-in grammars are compiled: ast-grep panics when it
 /// builds a matcher for a grammar whose feature is off.
 fn extractors(language: SupportLang) -> &'static CombinedExtractors<SupportLang> {
@@ -234,6 +249,8 @@ fn extractors(language: SupportLang) -> &'static CombinedExtractors<SupportLang>
             let mut grouped = BUNDLED.map(|language| (language, Vec::new()));
             for rule in parse_outline_rules::<SupportLang>(DEFAULT_OUTLINE_RULES)
                 .expect("bundled outline rules deserialize")
+                .into_iter()
+                .filter(|rule| !REPLACED_RULES.contains(&rule.common().id.as_str()))
             {
                 if let Some((_, rules)) = grouped
                     .iter_mut()
@@ -1006,6 +1023,91 @@ fn cpp_namespaces(source: &str, symbols: &mut Vec<CodeSymbol>) {
             .field("name")
             .map_or_else(|| "(anonymous)".to_owned(), |name| name.text().into_owned());
         symbols.push(node_symbol(&node, name, "namespace", Origin::default()));
+    }
+}
+
+/// Functions, C globals, and C++ class members, named through their
+/// declarators. A function is listed wherever it is defined; a C global only
+/// outside function bodies; a C++ `field_declaration` only inside a class or
+/// struct body, as a `method` when it declares a function. Prototypes are not
+/// listed. A declaration with several declarators is named by its first, as
+/// the bundled rules did.
+fn c_declarations(language: SupportLang, source: &str, symbols: &mut Vec<CodeSymbol>) {
+    let grep = language.ast_grep(source);
+    for node in grep.root().dfs() {
+        let Some(declarator) = node.field("declarator") else {
+            continue;
+        };
+        let Some((name, function)) = c_declared(declarator) else {
+            continue;
+        };
+        let kind = match node.kind().as_ref() {
+            "function_definition" if function => "function",
+            "declaration"
+                if language == SupportLang::C
+                    && !function
+                    && !node
+                        .ancestors()
+                        .any(|ancestor| ancestor.kind() == "compound_statement") =>
+            {
+                "variable"
+            }
+            "field_declaration"
+                if language == SupportLang::Cpp
+                    && node
+                        .parent()
+                        .is_some_and(|parent| parent.kind() == "field_declaration_list") =>
+            {
+                if function {
+                    "method"
+                } else {
+                    "field"
+                }
+            }
+            _ => continue,
+        };
+        symbols.push(node_symbol(
+            &node,
+            name.text().into_owned(),
+            kind,
+            Origin::default(),
+        ));
+    }
+}
+
+/// Unwraps the declarators around a declared name: `*`, `&`, `&&`,
+/// parentheses, array suffixes and initializers, and parameter lists.
+/// Returns the name and whether it declares a function, which holds when the
+/// declarator closest to the name is a parameter list: `int (*f)(void)` is a
+/// pointer variable, while `int *f(void)` and `void (*f(int))(int)` are
+/// functions returning pointers.
+fn c_declared<'r, D: Doc>(mut node: Node<'r, D>) -> Option<(Node<'r, D>, bool)> {
+    let mut function = false;
+    loop {
+        let inner = match node.kind().as_ref() {
+            "function_declarator" => {
+                function = true;
+                node.field("declarator")
+            }
+            // Parentheses group a declarator without changing what it declares.
+            "parenthesized_declarator" => target(&node),
+            "pointer_declarator"
+            | "reference_declarator"
+            | "array_declarator"
+            | "init_declarator"
+            | "attributed_declarator" => {
+                function = false;
+                // `reference_declarator` and `attributed_declarator` have no
+                // `declarator` field; their declarator is the last named child.
+                node.field("declarator").or_else(|| {
+                    node.children()
+                        .filter(|child| child.is_named() && !child.kind().contains("comment"))
+                        .last()
+                })
+            }
+            _ => return Some((node, function)),
+        };
+        node = inner?;
     }
 }
 
