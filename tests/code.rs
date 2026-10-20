@@ -698,6 +698,89 @@ fn find_matches_import_paths_by_last_segment() {
 }
 
 #[test]
+fn c_and_cpp_definitions_are_named_through_pointer_and_reference_declarators() {
+    let sandbox = Sandbox::new("c-declarators");
+    fs::write(
+        sandbox.repo.join("native/alloc.c"),
+        "\
+int *returns_int_ptr(void) { return 0; }
+static char **returns_ptr_ptr(int n) { (void)n; return 0; }
+void (*returns_fn_ptr(int n))(int) { (void)n; return 0; }
+int *global_ptr;
+int (*handler)(int);
+int *prototype_ptr(void);
+int attributed [[maybe_unused]];
+char buf[16] = {0};
+void (__stdcall *callback)(int);
+struct node { struct node *next; int (*visit)(int); };
+typedef struct { int anonymous_x; } Point;
+int plain(void) { return 0; }
+",
+    )
+    .expect("source is written");
+    fs::write(
+        sandbox.repo.join("native/box.cpp"),
+        "\
+namespace app {
+int &get_ref(int &x) { return x; }
+class Box {
+public:
+  Box &self() { return *this; }
+  int *data();
+  int *items_;
+#ifdef DEBUG
+  int *gated_;
+#endif
+};
+int *Box::data() { return items_; }
+}
+",
+    )
+    .expect("source is written");
+    let c = sandbox.run(&["code", "outline", "native/alloc.c"]);
+    for line in [
+        "1-1\tfunction returns_int_ptr",
+        "2-2\tfunction returns_ptr_ptr",
+        "3-3\tfunction returns_fn_ptr",
+        "4-4\tvariable global_ptr",
+        "5-5\tvariable handler",
+        "7-7\tvariable attributed",
+        "8-8\tvariable buf",
+        "9-9\tvariable callback",
+        "10-10\t  field next",
+        "10-10\t  field visit",
+    ] {
+        assert!(c.contains(line), "missing {line:?} in\n{c}");
+    }
+    assert!(!c.contains("prototype_ptr"), "{c}");
+    // A member is listed only under a named container it can nest in.
+    assert!(!c.contains("anonymous_x"), "{c}");
+    for line in c.lines().skip(1) {
+        let symbol = line.split('\t').nth(1).unwrap_or_default();
+        assert!(!symbol.contains('*'), "declarator left in {line:?}");
+    }
+    // The replaced bundled rules no longer list functions a second time.
+    assert_eq!(c.matches("\tfunction plain").count(), 1, "{c}");
+    let cpp = sandbox.run(&["code", "outline", "native/box.cpp"]);
+    for line in [
+        "2-2\t  function get_ref",
+        "3-11\t  class Box",
+        "5-5\t    function self",
+        "6-6\t    method data",
+        "7-7\t    field items_",
+        "9-9\t    field gated_",
+        "12-12\t  function Box::data",
+    ] {
+        assert!(cpp.contains(line), "missing {line:?} in\n{cpp}");
+    }
+    let found = sandbox.run(&["code", "find", "returns_int_ptr"]);
+    assert!(
+        found.starts_with("native/alloc.c:1-1\tfunction returns_int_ptr"),
+        "{found}"
+    );
+}
+
+#[test]
 fn syntax_errors_and_missing_nodes_mark_the_outline_partial() {
     let sandbox = Sandbox::new("syntax-errors");
     let cases = [
