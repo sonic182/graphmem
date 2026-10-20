@@ -10,8 +10,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 
 use crate::domain::{
-    Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath, Memory, Relation, Scope,
-    SearchResult, StoreStats, edge_document, entity_document,
+    AccessKind, AccessSource, Edge, Entity, EntityReference, GraphDirection, GraphHop, GraphPath,
+    Memory, RecallLogRow, RecallLogStats, Relation, Scope, SearchResult, StoreStats, edge_document,
+    entity_document,
 };
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -51,6 +52,15 @@ pub struct VectorSink<'a, E> {
 
 /// Embeds documents in order, one vector per document.
 pub type EmbedFn<'a, E> = dyn FnMut(&[&str]) -> std::result::Result<Vec<Vec<f32>>, E> + 'a;
+
+pub struct RecallEvent<'a> {
+    pub kind: AccessKind,
+    pub source: AccessSource,
+    pub query: Option<&'a str>,
+    pub scopes: &'a [String],
+    pub limit: Option<usize>,
+    pub results: &'a [(i64, Option<f64>)],
+}
 
 impl Database {
     pub fn default_path() -> Result<PathBuf> {
@@ -258,30 +268,80 @@ impl Database {
             .map_err(StorageError::from)
     }
 
-    pub fn record_accesses(&mut self, ids: &[i64]) -> Result<Vec<(i64, i64)>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
+    pub fn record_recall(&mut self, event: &RecallEvent<'_>) -> Result<Vec<(i64, i64)>> {
         let timestamp = now_millis()?;
+        let scopes = serde_json::to_string(event.scopes).map_err(|_| StorageError::Invalid {
+            field: "scopes",
+            message: "cannot be encoded",
+        })?;
+        let limit = event.limit.map(count_value).transpose()?;
         let transaction = self.connection.transaction()?;
-        let mut accesses = Vec::with_capacity(ids.len());
+        transaction.execute(
+            "INSERT INTO recall_events (at, kind, source, query, scopes, requested_limit, returned)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                timestamp,
+                event.kind.as_str(),
+                event.source.as_str(),
+                event.query,
+                scopes,
+                limit,
+                count_value(event.results.len())?
+            ],
+        )?;
+        let event_id = transaction.last_insert_rowid();
+        let mut accesses = Vec::with_capacity(event.results.len());
         {
-            let mut statement = transaction.prepare(
+            let mut update = transaction.prepare(
                 "UPDATE memories
                  SET last_accessed_at = ?2, access_count = access_count + 1
                  WHERE id = ?1
                  RETURNING last_accessed_at, access_count",
             )?;
-            for &id in ids {
+            let mut insert = transaction.prepare(
+                "INSERT INTO recall_results (event_id, memory_id, position, score)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (position, &(id, score)) in event.results.iter().enumerate() {
                 accesses.push(
-                    statement
+                    update
                         .query_row(params![id, timestamp], |row| Ok((row.get(0)?, row.get(1)?)))?,
                 );
+                insert.execute(params![event_id, id, count_value(position)?, score])?;
             }
         }
         transaction.commit()?;
         Ok(accesses)
+    }
+
+    pub fn recall_log_stats(&self) -> Result<RecallLogStats> {
+        let since = self
+            .connection
+            .query_row("SELECT MIN(at) FROM recall_events", [], |row| row.get(0))?;
+        let memories_returned = self.connection.query_row(
+            "SELECT COUNT(DISTINCT memory_id) FROM recall_results",
+            [],
+            |row| row.get(0),
+        )?;
+        let mut statement = self.connection.prepare(
+            "SELECT source, kind, COUNT(*), SUM(returned = 0)
+             FROM recall_events GROUP BY source, kind ORDER BY source, kind",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(RecallLogRow {
+                    source: row.get(0)?,
+                    kind: row.get(1)?,
+                    events: row.get(2)?,
+                    empty: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(RecallLogStats {
+            since,
+            rows,
+            memories_returned,
+        })
     }
 
     pub fn update_memory(
@@ -397,7 +457,7 @@ impl Database {
                 check_scope(&name)?;
             }
         }
-        for table in ["memories", "scopes", "edges", "entities"] {
+        for table in ["recall_events", "memories", "scopes", "edges", "entities"] {
             transaction
                 .execute(&format!("DELETE FROM {table}"), [])
                 .map_err(StorageError::from)?;
@@ -1665,6 +1725,13 @@ fn validate_importance(value: f64) -> Result<()> {
     }
 }
 
+fn count_value(value: usize) -> Result<i64> {
+    i64::try_from(value).map_err(|_| StorageError::Invalid {
+        field: "count",
+        message: "is too large",
+    })
+}
+
 fn limit_value(value: usize) -> Result<i64> {
     if value == 0 {
         return Err(StorageError::Invalid {
@@ -1820,7 +1887,7 @@ fn is_bareword(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '_' || !character.is_ascii()
 }
 
-pub(super) fn now_millis() -> Result<i64> {
+pub(crate) fn now_millis() -> Result<i64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| StorageError::Clock)

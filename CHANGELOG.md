@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   functions, structs and their fields, enums and their variants, module
   constants, and imports, which `code_imports` lists by path.
 
+## [0.12.0] - 2026-10-16
+
+### Added
+
+- `gmem health` reports never-accessed and idle memories per type, the recall
+  log, and memories whose `**Where**` paths are missing from their checkout.
+- Searches and inspections are recorded in a local recall log (schema version
+  2) with their source (`cli` or `mcp`), query, scopes, and the ranked results.
+  Searches that return nothing are recorded too.
+
 ## [0.11.0] - 2026-10-09
 
 ### Added
@@ -332,7 +342,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.11.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.12.0...HEAD
+[0.12.0]: https://github.com/sonic182/graphmem/compare/0.11.0...0.12.0
 [0.11.0]: https://github.com/sonic182/graphmem/compare/0.10.1...0.11.0
 [0.10.1]: https://github.com/sonic182/graphmem/compare/0.10.0...0.10.1
 [0.10.0]: https://github.com/sonic182/graphmem/compare/0.9.3...0.10.0

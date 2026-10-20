@@ -22,7 +22,6 @@ pub fn git_repository(directory: &Path) -> Option<GitRepository> {
 }
 
 /// Tracked and untracked, non-ignored files, relative to `checkout_root`.
-#[cfg(feature = "code")]
 pub fn list_files(checkout_root: &Path) -> Option<Vec<PathBuf>> {
     let output = git_output(
         checkout_root,

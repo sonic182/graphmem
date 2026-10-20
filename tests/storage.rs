@@ -4,7 +4,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use graphmem::{Database, EntityReference, GraphDirection, Relation};
+use graphmem::{
+    Database, EntityReference, GraphDirection, Relation,
+    domain::{AccessKind, AccessSource},
+    infrastructure::sqlite::RecallEvent,
+};
 
 fn test_database() -> (Database, PathBuf) {
     let nonce = SystemTime::now()
@@ -389,8 +393,20 @@ fn flush_clears_memory_scopes_and_graph() {
     let edge = database
         .create_edge(source.id, "depends_on", target.id, None)
         .expect("edge is created");
+    database
+        .record_recall(&RecallEvent {
+            kind: AccessKind::Search,
+            source: AccessSource::Cli,
+            query: Some("temporary"),
+            scopes: &["global".to_owned()],
+            limit: Some(5),
+            results: &[(memory.id, Some(0.5))],
+        })
+        .expect("recall is logged");
+    assert_eq!(database.recall_log_stats().unwrap().memories_returned, 1);
 
     database.flush().expect("database is flushed");
+    assert!(database.recall_log_stats().unwrap().rows.is_empty());
 
     assert!(database.list_memories(10).unwrap().is_empty());
     assert!(database.list_scopes().unwrap().is_empty());
@@ -404,11 +420,11 @@ fn flush_clears_memory_scopes_and_graph() {
 #[test]
 fn migrations_apply_once_and_are_stable_across_reopen() {
     let (database, path) = test_database();
-    assert_eq!(database.schema_version().unwrap(), 1);
+    assert_eq!(database.schema_version().unwrap(), 2);
     drop(database);
 
     let reopened = Database::open(&path).expect("database reopens");
-    assert_eq!(reopened.schema_version().unwrap(), 1);
+    assert_eq!(reopened.schema_version().unwrap(), 2);
     drop(reopened);
     remove_database(&path);
 }

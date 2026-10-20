@@ -466,3 +466,102 @@ fn tui_requires_an_interactive_terminal() {
     assert!(!data_dir.join("memory.sqlite").exists());
     fs::remove_dir_all(data_dir).expect("test data directory is removed");
 }
+
+fn git_init(directory: &Path) {
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_COMMON_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_PREFIX")
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+fn has_row(report: &str, row: &[&str]) -> bool {
+    report
+        .lines()
+        .any(|line| line.split_whitespace().collect::<Vec<_>>() == row)
+}
+
+#[test]
+fn health_reads_back_the_recall_log_and_flags_missing_paths() {
+    let root = data_dir();
+    let home = root.join("home");
+    let repository = root.join("repo");
+    fs::create_dir_all(repository.join("src")).unwrap();
+    fs::write(repository.join("src/real.rs"), "").unwrap();
+    git_init(&repository);
+
+    let remembered = stdout(run_in(
+        &home,
+        &repository,
+        &[
+            "remember",
+            "probe **Where**: src/real.rs, src/gone.rs, scripts/missing.sh:12 **Learned**: x",
+            "--type",
+            "decision",
+        ],
+    ));
+    let id = remembered.trim().strip_prefix("remembered: ").unwrap();
+    stdout(run_in(
+        &home,
+        &repository,
+        &["remember", "unrelated note", "--scope", "global"],
+    ));
+
+    stdout(run_in(&home, &repository, &["search", "probe"]));
+    stdout(run_in(&home, &repository, &["search", "zzzqqq"]));
+    stdout(run_in(&home, &repository, &["show", id]));
+
+    let report = stdout(run_in(&home, &repository, &["health", "--idle-days", "0"]));
+    assert!(report.contains("memories: 2\n"), "{report}");
+    assert!(report.contains("never accessed: 1 (50%)"), "{report}");
+    assert!(has_row(&report, &["decision", "1", "0", "1"]), "{report}");
+    assert!(has_row(&report, &["cli", "search", "2", "1"]), "{report}");
+    assert!(has_row(&report, &["cli", "inspect", "1", "0"]), "{report}");
+    assert!(
+        report.contains("memories returned at least once: 1 of 2"),
+        "{report}"
+    );
+    assert!(
+        report.contains(
+            "stale paths: 1 memories reference paths missing from their checkout (1 not checkable)"
+        ),
+        "{report}"
+    );
+    assert!(
+        report.contains("src/gone.rs, scripts/missing.sh"),
+        "{report}"
+    );
+    assert!(!report.contains("src/real.rs"), "{report}");
+
+    fs::remove_dir_all(root).expect("test data directory is removed");
+}
+
+#[test]
+fn mcp_recalls_are_logged_with_the_mcp_source() {
+    let data_dir = data_dir();
+    let mut mcp = Mcp::start(&data_dir, &[]);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"recall","arguments":{"query":"nothing stored yet"}}),
+    );
+    drop(mcp);
+
+    let report = stdout(run(&data_dir, &["health"]));
+    assert!(has_row(&report, &["mcp", "search", "1", "1"]), "{report}");
+
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}

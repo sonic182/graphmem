@@ -12,6 +12,7 @@ use graphmem::{
     application::{
         GraphDetails, GraphRequest, MemoryService, RelateRequest, RelationDetails, RememberRequest,
     },
+    domain::AccessSource,
     infrastructure::config::{ConfigOverrides, EmbeddingConfig},
     infrastructure::embedding::{MAX_EMBEDDING_TOKENS, embedding_details},
 };
@@ -47,7 +48,7 @@ pub struct MemoryServer {
 
 impl MemoryServer {
     fn new(overrides: ConfigOverrides) -> Result<Self, graphmem::application::ApplicationError> {
-        let service = MemoryService::open_default(overrides)?;
+        let service = MemoryService::open_default(overrides)?.with_access_source(AccessSource::Mcp);
         let embedding = service.embedding_config().clone();
         let default_scope = service.default_scope().to_owned();
         #[cfg_attr(not(feature = "code"), allow(unused_mut))]
