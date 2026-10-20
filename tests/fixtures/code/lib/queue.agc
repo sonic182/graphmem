@@ -21,3 +21,14 @@ end
 def size(q: QueueState) -> Int
   return List.size(q.items)
 end
+
+def describe(shape: Shape, limit: Int = 1_000) -> String
+  label = <<~TEXT
+    shape up to #{limit}
+  TEXT
+  case shape
+    Shape.Circle(r) if r > 0.000_5 -> label
+    Shape.Empty -> "empty"
+  end
+  return label
+end

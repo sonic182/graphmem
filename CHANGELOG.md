@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Agentica (`.agc`) is indexed by the code tools through `tree-sitter-agentica`:
-  functions, structs and their fields, enums and their variants, module
+- Agentica (`.agc`) is indexed by the code tools through `tree-sitter-agentica`
+  0.3.0: functions, structs and their fields, enums and their variants, module
   constants, `type` aliases, and imports, which `code_imports` lists by path.
+  Files with case guards, default parameter values, heredocs or digit
+  separators parse completely.
 - With `kind: "import"` (`--kind import`), `find_symbol` and `gmem code find`
   rank an import whose path ends in `/query` with the `.query` suffix
   matches, in every language: `queue` finds `std/queue` and `http` finds Go's
