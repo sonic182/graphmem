@@ -687,8 +687,13 @@ fn find_matches_import_paths_by_last_segment() {
         "{found}"
     );
     // The `/query` rule covers imports only, so an Elixir arity is no match.
-    let found = sandbox.run(&["code", "find", "2"]);
-    assert!(!found.contains("run/2"), "{found}");
+    for args in [
+        &["code", "find", "2"][..],
+        &["code", "find", "--kind", "function", "2"],
+    ] {
+        let found = sandbox.run(args);
+        assert!(!found.contains("run/2"), "{found}");
+    }
 }
 
 #[test]
