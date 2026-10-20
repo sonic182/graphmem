@@ -72,7 +72,8 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       added so namespaced functions get a parent. `.h` headers are parsed as
       C++, whose grammar also accepts nearly all C.
 - [x] Agentica via `tree-sitter-agentica` (MIT), with a syntax walk: `def`,
-      `struct` and its fields, `enum` and its variants, and `import` paths.
+      `struct` and its fields, `enum` and its variants, module constants,
+      `type` aliases, and `import` paths.
 - [x] Zig via `tree-sitter-zig` 1.1.2 (MIT), with a syntax walk: functions,
       `const X = struct/enum/union/opaque/error{…}` containers, their
       fields, `@import`s, and `test "…"` blocks. Other constants are left out.

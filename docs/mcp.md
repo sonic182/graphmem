@@ -124,7 +124,8 @@ large checkout ahead of time, or to see which files could not be indexed, run
   indexed on the first call and results always cover every source file. Exact
   names come first (an Elixir `name` also matches `name/arity`), then names
   ending in `.query` (`ConsentLive` finds `MyAppWeb.ConsentLive`, and
-  `users` finds `public.users`), then prefix matches; matching ignores case.
+  `users` finds `public.users`) and imports ending in `/query` (`queue`
+  finds `std/queue`), then prefix matches; matching ignores case.
   Imports, HEEx `component`/`slot` usages, and EEx `expression`s are returned
   only when `kind` asks for them. Every match is returned, one line each, and
   none is presented as the resolved target:
@@ -188,8 +189,8 @@ large checkout ahead of time, or to see which files could not be indexed, run
 
 Supported files: Rust, Go, Zig, C, C++ (`.h` headers are parsed as C++),
 Python, JavaScript/JSX, TypeScript/TSX, Elixir (including `~H` sigils), HEEx,
-EEx (directives only), Ruby, PHP, Racket, Agentica (`.agc`), SQL, Bash, CSS, SCSS, and the `<script>` and
-`<style>` elements of HTML and HEEx. CSS rule sets are named by their selector
+EEx (directives only), Ruby, PHP, Racket, Agentica (`.agc`), SQL, Bash, CSS,
+SCSS, and the `<script>` and `<style>` elements of HTML and HEEx. CSS rule sets are named by their selector
 list. Symbols are syntactic definitions and imports; nested Elixir modules
 are named in full (`Parent.Child`), and a JavaScript/TypeScript
 `export default { ... }` object is listed with its methods. Call sites and

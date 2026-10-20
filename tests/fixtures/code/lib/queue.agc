@@ -1,9 +1,12 @@
 import List from "std/list"
+import {append, Item as Entry} from "std/items"
 
 LIMIT = 10
 
+type Items = List[String]
+
 export struct QueueState
-  items: List[String]
+  items: Items
 end
 
 enum Shape

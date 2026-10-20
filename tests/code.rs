@@ -230,14 +230,16 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             &[
                 "\tagentica\tcomplete",
                 "1-1\timport std/list",
-                "3-3\tconstant LIMIT",
-                "5-7\tstruct QueueState",
-                "6-6\t  field items",
-                "9-12\tenum Shape",
-                "10-10\t  enumMember Circle",
-                "11-11\t  enumMember Empty",
-                "14-16\tfunction push",
-                "18-20\tfunction size",
+                "2-2\timport std/items",
+                "4-4\tconstant LIMIT",
+                "6-6\ttype Items",
+                "8-10\tstruct QueueState",
+                "9-9\t  field items",
+                "12-15\tenum Shape",
+                "13-13\t  enumMember Circle",
+                "14-14\t  enumMember Empty",
+                "17-19\tfunction push",
+                "21-23\tfunction size",
             ],
         ),
         (
@@ -505,6 +507,7 @@ fn imports_lists_declared_imports_across_supported_languages() {
         ("native/widget.cpp", "widget.h"),
         ("native/build.zig", "std"),
         ("lib/queue.agc", "std/list"),
+        ("lib/queue.agc", "std/items"),
         ("lisp/billing.rkt", "util.rkt"),
         ("app/service.py", "os"),
         ("app/service.py", "pathlib"),
@@ -652,11 +655,21 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
 }
 
 #[test]
-fn find_matches_agentica_import_paths_by_last_segment() {
+fn find_matches_import_paths_by_last_segment() {
     let sandbox = Sandbox::new("import-paths");
     fs::write(
         sandbox.repo.join("app/imports.agc"),
         "import Queue from \"std/queue\"\n",
+    )
+    .expect("source is written");
+    fs::write(
+        sandbox.repo.join("app/server.go"),
+        "package app\n\nimport \"net/http\"\n",
+    )
+    .expect("source is written");
+    fs::write(
+        sandbox.repo.join("app/arity.ex"),
+        "defmodule Arity do\n  def run(a, b), do: a + b\nend\n",
     )
     .expect("source is written");
     let found = sandbox.run(&["code", "find", "--kind", "import", "queue"]);
@@ -666,6 +679,16 @@ fn find_matches_agentica_import_paths_by_last_segment() {
             .any(|line| line == "app/imports.agc:1-1\timport std/queue"),
         "{found}"
     );
+    let found = sandbox.run(&["code", "find", "--kind", "import", "http"]);
+    assert!(
+        found
+            .lines()
+            .any(|line| line == "app/server.go:3-3\timport net/http"),
+        "{found}"
+    );
+    // The `/query` rule covers imports only, so an Elixir arity is no match.
+    let found = sandbox.run(&["code", "find", "2"]);
+    assert!(!found.contains("run/2"), "{found}");
 }
 
 #[test]

@@ -311,8 +311,8 @@ delete them only when no older binary uses them.
   prints `path:start-end<TAB>kind name` for each match, followed by
   tab-separated `in <parent>` when it is nested, `stale` or `missing` when the
   file changed during the read, and the signature under the same rule as
-  `outline`: exact names first, then names ending in `.QUERY`, then
-  prefixes. Imports and template usages (`import`, `component`, `slot`,
+  `outline`: exact names first, then names ending in `.QUERY` and imports
+  ending in `/QUERY`, then prefixes. Imports and template usages (`import`, `component`, `slot`,
   `expression`) appear only with `--kind`. When more matches exist than
   `--limit`, a last line says `N of TOTAL matches; raise limit for more`.
 
