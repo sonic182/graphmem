@@ -19,6 +19,7 @@ use crate::domain::{CodeSymbol, Coverage, SourcePoint, nest_symbols};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeLanguage {
+    Agentica,
     Bash,
     C,
     Cpp,
@@ -41,7 +42,8 @@ pub enum CodeLanguage {
     Zig,
 }
 
-const LANGUAGE_NAMES: [(CodeLanguage, &str); 20] = [
+const LANGUAGE_NAMES: [(CodeLanguage, &str); 21] = [
+    (CodeLanguage::Agentica, "agentica"),
     (CodeLanguage::Bash, "bash"),
     (CodeLanguage::C, "c"),
     (CodeLanguage::Cpp, "cpp"),
@@ -75,6 +77,7 @@ impl CodeLanguage {
         }
         let (_, extension) = name.rsplit_once('.')?;
         Some(match extension {
+            "agc" => Self::Agentica,
             "sh" | "bash" => Self::Bash,
             "c" => Self::C,
             "h" | "cc" | "cpp" | "cxx" | "c++" | "hh" | "hpp" | "hxx" | "h++" | "ipp" | "tpp" => {
@@ -126,6 +129,7 @@ pub fn outline(language: CodeLanguage, source: &str) -> Outline {
     let mut symbols = Vec::new();
     let origin = Origin::default();
     let errors = match language {
+        CodeLanguage::Agentica => agentica(source, &mut symbols),
         CodeLanguage::Bash => bash(source, &mut symbols),
         CodeLanguage::C => bundled(SupportLang::C, source, origin, &mut symbols),
         CodeLanguage::Cpp => {
@@ -486,6 +490,7 @@ macro_rules! grammar {
     };
 }
 
+grammar!(Agentica, tree_sitter_agentica::LANGUAGE);
 grammar!(Heex, tree_sitter_heex::LANGUAGE);
 grammar!(Racket, tree_sitter_racket::LANGUAGE);
 grammar!(Scss, tree_sitter_scss::language());
@@ -729,6 +734,39 @@ fn sql(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
                 .parent()
                 .is_some_and(|parent| parent.kind().starts_with("create_"))
     })
+}
+
+fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
+    let grep = Agentica.ast_grep(source);
+    let root = grep.root();
+    for node in root.dfs() {
+        let symbol = match node.kind().as_ref() {
+            "function_definition" => agentica_name(&node, "name", "function"),
+            "struct_definition" => agentica_name(&node, "name", "struct"),
+            "enum_definition" => agentica_name(&node, "name", "enum"),
+            "constant_definition" => agentica_name(&node, "name", "constant"),
+            "type_alias_definition" => agentica_name(&node, "name", "type"),
+            "enum_variant" => agentica_name(&node, "name", "enumMember"),
+            "field_declaration" => agentica_name(&node, "name", "field"),
+            "import" => node
+                .field("path")
+                .map(|path| (path.text().trim_matches('"').to_owned(), "import")),
+            _ => None,
+        };
+        if let Some((name, kind)) = symbol {
+            symbols.push(node_symbol(&node, name, kind, Origin::default()));
+        }
+    }
+    has_errors(&root)
+}
+
+fn agentica_name<D: Doc>(
+    node: &Node<'_, D>,
+    field: &str,
+    kind: &'static str,
+) -> Option<(String, &'static str)> {
+    node.field(field)
+        .map(|name| (name.text().into_owned(), kind))
 }
 
 /// Zig containers are values (`const Point = struct { ... }`), so a

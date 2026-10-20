@@ -21,5 +21,6 @@ returned by `find_symbol` only when `kind: "import"` is passed.
 | SQL | the object type of each `CREATE`: `table`, `view`, `index`, `function`, `trigger`, `type`, ... | named as written, so a schema-qualified `public.users` is found by `users` |
 | Zig | `struct`, `enum`, `union`, `opaque`, `error_set`, `field`, `function`, `test`, `import` | a `const` is a symbol only when its value is a container or `@import` |
 | Racket | `module`, `struct`, `function`, `macro`, `constant`, `import` | only module-level forms (inside `module`/`module+`/`begin`) are listed, not definitions nested in function bodies; `.rkt` and `.rktl` files |
+| Agentica | `struct`, `enum`, `enumMember`, `field`, `function`, `constant`, `type`, `import` | `.agc` files; `export` is not a symbol, its declaration is; an `import List from "std/list"` (or a name list `import {a, B} from "..."`) is named by its path (`std/list`); a module constant `LIMIT = 10` is `constant`; a `type Items = ...` alias is `type` |
 | Bash | `function` | |
 | CSS/SCSS | `selector`, `media`, `supports`, `keyframes`, `mixin`, `function`, `variable`, `import` | a rule is named by its whole selector list (`.btn, .btn-primary`); `@media` by its query; variables are `--custom` properties and `$scss` variables; `@include` is not listed |

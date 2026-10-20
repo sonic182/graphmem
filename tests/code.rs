@@ -106,7 +106,7 @@ fn git(directory: &Path, args: &[&str]) {
 fn outlines_every_supported_language_with_nesting_and_ranges() {
     let sandbox = Sandbox::new("languages");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("21 indexed"), "{indexed}");
+    assert!(indexed.contains("22 indexed"), "{indexed}");
 
     let expectations: &[(&str, &[&str])] = &[
         (
@@ -223,6 +223,23 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "\teex\tpartial: EEx directives only",
                 "3-3\texpression for user <- @users do",
                 "4-4\texpression link user.name",
+            ],
+        ),
+        (
+            "lib/queue.agc",
+            &[
+                "\tagentica\tcomplete",
+                "1-1\timport std/list",
+                "2-2\timport std/items",
+                "4-4\tconstant LIMIT",
+                "6-6\ttype Items",
+                "8-10\tstruct QueueState",
+                "9-9\t  field items",
+                "12-15\tenum Shape",
+                "13-13\t  enumMember Circle",
+                "14-14\t  enumMember Empty",
+                "17-19\tfunction push",
+                "21-23\tfunction size",
             ],
         ),
         (
@@ -489,6 +506,8 @@ fn imports_lists_declared_imports_across_supported_languages() {
         ("native/widget.h", "string"),
         ("native/widget.cpp", "widget.h"),
         ("native/build.zig", "std"),
+        ("lib/queue.agc", "std/list"),
+        ("lib/queue.agc", "std/items"),
         ("lisp/billing.rkt", "util.rkt"),
         ("app/service.py", "os"),
         ("app/service.py", "pathlib"),
@@ -636,6 +655,48 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
 }
 
 #[test]
+fn find_matches_import_paths_by_last_segment() {
+    let sandbox = Sandbox::new("import-paths");
+    fs::write(
+        sandbox.repo.join("app/imports.agc"),
+        "import Queue from \"std/queue\"\n",
+    )
+    .expect("source is written");
+    fs::write(
+        sandbox.repo.join("app/server.go"),
+        "package app\n\nimport \"net/http\"\n",
+    )
+    .expect("source is written");
+    fs::write(
+        sandbox.repo.join("app/arity.ex"),
+        "defmodule Arity do\n  def run(a, b), do: a + b\nend\n",
+    )
+    .expect("source is written");
+    let found = sandbox.run(&["code", "find", "--kind", "import", "queue"]);
+    assert!(
+        found
+            .lines()
+            .any(|line| line == "app/imports.agc:1-1\timport std/queue"),
+        "{found}"
+    );
+    let found = sandbox.run(&["code", "find", "--kind", "import", "http"]);
+    assert!(
+        found
+            .lines()
+            .any(|line| line == "app/server.go:3-3\timport net/http"),
+        "{found}"
+    );
+    // The `/query` rule covers imports only, so an Elixir arity is no match.
+    for args in [
+        &["code", "find", "2"][..],
+        &["code", "find", "--kind", "function", "2"],
+    ] {
+        let found = sandbox.run(args);
+        assert!(!found.contains("run/2"), "{found}");
+    }
+}
+
+#[test]
 fn syntax_errors_and_missing_nodes_mark_the_outline_partial() {
     let sandbox = Sandbox::new("syntax-errors");
     let cases = [
@@ -667,7 +728,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     )
     .expect("untracked non-UTF-8 filename is written");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("21 indexed"), "{indexed}");
+    assert!(indexed.contains("22 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
@@ -709,7 +770,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 20 unchanged, 0 removed, 1 skipped"),
+        reindexed.contains("0 indexed, 21 unchanged, 0 removed, 1 skipped"),
         "{reindexed}"
     );
 
