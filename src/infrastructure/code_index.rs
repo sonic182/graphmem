@@ -258,7 +258,8 @@ impl CodeIndex {
     }
 
     /// Exact names first (for Elixir, `name` also matches `name/arity`), then
-    /// names ending in `.query` (`ConsentLive` finds `App.ConsentLive`), then
+    /// names ending in `.query` or `/query` (`ConsentLive` finds
+    /// `App.ConsentLive`, and `queue` finds the import `std/queue`), then
     /// prefix matches; all ignore ASCII case. Returns up to `limit` matches
     /// and the total number of matches.
     pub fn find(
@@ -280,11 +281,12 @@ impl CodeIndex {
              JOIN files f ON f.id = s.file_id
              LEFT JOIN symbols p ON p.file_id = s.file_id AND p.ordinal = s.parent_ordinal
              WHERE f.checkout_id = ?1
-               AND (s.name LIKE ?2 ESCAPE '\\' OR s.name LIKE ?7 ESCAPE '\\')
+               AND (s.name LIKE ?2 ESCAPE '\\' OR s.name LIKE ?7 ESCAPE '\\'
+                    OR s.name LIKE ?8 ESCAPE '\\')
                AND ((?5 IS NULL AND s.kind NOT IN ({USAGE_KINDS})) OR s.kind = ?5)
              ORDER BY
                CASE WHEN s.name = ?3 OR s.name LIKE ?4 ESCAPE '\\' THEN 0
-                    WHEN s.name LIKE ?7 ESCAPE '\\' THEN 1
+                    WHEN s.name LIKE ?7 ESCAPE '\\' OR s.name LIKE ?8 ESCAPE '\\' THEN 1
                     ELSE 2 END,
                length(s.name), f.path, s.start_line
              LIMIT ?6"
@@ -300,6 +302,7 @@ impl CodeIndex {
                     kind,
                     limit as i64,
                     format!("%.{escaped}"),
+                    format!("%/{escaped}"),
                 ],
                 |row| {
                     Ok((

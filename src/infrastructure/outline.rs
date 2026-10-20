@@ -744,6 +744,7 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
             "function_definition" => agentica_name(&node, "name", "function"),
             "struct_definition" => agentica_name(&node, "name", "struct"),
             "enum_definition" => agentica_name(&node, "name", "enum"),
+            "constant_definition" => agentica_name(&node, "name", "constant"),
             "enum_variant" => agentica_name(&node, "name", "enumMember"),
             "field_declaration" => agentica_name(&node, "name", "field"),
             "import" => node

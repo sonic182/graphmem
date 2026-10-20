@@ -230,13 +230,14 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             &[
                 "\tagentica\tcomplete",
                 "1-1\timport std/list",
-                "3-5\tstruct QueueState",
-                "4-4\t  field items",
-                "7-10\tenum Shape",
-                "8-8\t  enumMember Circle",
-                "9-9\t  enumMember Empty",
-                "12-14\tfunction push",
-                "16-18\tfunction size",
+                "3-3\tconstant LIMIT",
+                "5-7\tstruct QueueState",
+                "6-6\t  field items",
+                "9-12\tenum Shape",
+                "10-10\t  enumMember Circle",
+                "11-11\t  enumMember Empty",
+                "14-16\tfunction push",
+                "18-20\tfunction size",
             ],
         ),
         (
@@ -648,6 +649,23 @@ fn nested_definitions_without_bundled_members_are_outlined_and_found() {
         );
         assert_eq!(sandbox.run(&["code", "find", query]), expected);
     }
+}
+
+#[test]
+fn find_matches_agentica_import_paths_by_last_segment() {
+    let sandbox = Sandbox::new("import-paths");
+    fs::write(
+        sandbox.repo.join("app/imports.agc"),
+        "import Queue from \"std/queue\"\n",
+    )
+    .expect("source is written");
+    let found = sandbox.run(&["code", "find", "--kind", "import", "queue"]);
+    assert!(
+        found
+            .lines()
+            .any(|line| line == "app/imports.agc:1-1\timport std/queue"),
+        "{found}"
+    );
 }
 
 #[test]

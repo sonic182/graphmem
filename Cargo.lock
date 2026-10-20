@@ -5019,7 +5019,8 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-agentica"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/sonic182/tree-sitter-agentica?tag=v0.2.0#779611bae3f52bdeb080aaa0a40826b46c1d60a4"
 dependencies = [
  "cc",
  "tree-sitter-language",

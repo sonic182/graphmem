@@ -820,7 +820,8 @@ impl MemoryServer {
         description = "Find definitions by name in a Git checkout. Refreshes the checkout's code \
              index first (only changed files are re-read), so results cover every source file. \
              Exact names come first (an Elixir name also matches name/arity), then names ending \
-             in .query (ConsentLive finds MyAppWeb.ConsentLive), then prefix matches; matching \
+             in .query or /query (ConsentLive finds MyAppWeb.ConsentLive, queue finds the import \
+             std/queue), then prefix matches; matching \
              ignores case. Imports and HEEx component/slot usages are left out unless asked for \
              with kind. Returns every match and never picks one as the resolved target, as plain \
              text with one `path:start-end<TAB>kind name[<TAB>in parent][<TAB>stale|missing]\

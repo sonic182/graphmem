@@ -1,4 +1,6 @@
-import "std/list" as List
+import List from "std/list"
+
+LIMIT = 10
 
 export struct QueueState
   items: List[String]
