@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-20
+
 ### Added
 
 - Agentica (`.agc`) is indexed by the code tools through `tree-sitter-agentica`
@@ -358,7 +360,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.12.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.13.0...HEAD
+[0.13.0]: https://github.com/sonic182/graphmem/compare/0.12.0...0.13.0
 [0.12.0]: https://github.com/sonic182/graphmem/compare/0.11.0...0.12.0
 [0.11.0]: https://github.com/sonic182/graphmem/compare/0.10.1...0.11.0
 [0.10.1]: https://github.com/sonic182/graphmem/compare/0.10.0...0.10.1
