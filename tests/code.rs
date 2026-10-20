@@ -240,7 +240,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "14-14\t  enumMember Empty",
                 "17-19\tfunction push",
                 "21-23\tfunction size",
-                "25-34\tfunction describe",
+                "25-35\tfunction describe",
             ],
         ),
         (

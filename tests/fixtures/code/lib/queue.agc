@@ -27,6 +27,7 @@ def describe(shape: Shape, limit: Int = 1_000) -> String
     shape up to #{limit}
   TEXT
   case shape
+    Shape.Circle(0.5) -> "unit"
     Shape.Circle(r) if r > 0.000_5 -> label
     Shape.Empty -> "empty"
   end
