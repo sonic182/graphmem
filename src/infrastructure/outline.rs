@@ -231,9 +231,10 @@ const BUNDLED: [SupportLang; 10] = [
 /// Bundled C and C++ rules that read a declared name straight from the
 /// `declarator` field; `c_declarations` replaces them, since that field holds
 /// `*name` or `&name` for pointers and references.
-const REPLACED_RULES: [&str; 5] = [
+const REPLACED_RULES: [&str; 6] = [
     "c-function",
     "c-global-variable",
+    "c-struct-field",
     "cpp-function",
     "cpp-member-method",
     "cpp-member-field",
@@ -247,11 +248,14 @@ fn extractors(language: SupportLang) -> &'static CombinedExtractors<SupportLang>
     EXTRACTORS
         .get_or_init(|| {
             let mut grouped = BUNDLED.map(|language| (language, Vec::new()));
+            let mut replaced = 0;
             for rule in parse_outline_rules::<SupportLang>(DEFAULT_OUTLINE_RULES)
                 .expect("bundled outline rules deserialize")
-                .into_iter()
-                .filter(|rule| !REPLACED_RULES.contains(&rule.common().id.as_str()))
             {
+                if REPLACED_RULES.contains(&rule.common().id.as_str()) {
+                    replaced += 1;
+                    continue;
+                }
                 if let Some((_, rules)) = grouped
                     .iter_mut()
                     .find(|(language, _)| *language == rule.common().language)
@@ -259,6 +263,12 @@ fn extractors(language: SupportLang) -> &'static CombinedExtractors<SupportLang>
                     rules.push(rule);
                 }
             }
+            // A renamed bundled rule would list its symbols twice.
+            assert_eq!(
+                replaced,
+                REPLACED_RULES.len(),
+                "every replaced bundled rule exists"
+            );
             grouped
                 .into_iter()
                 .map(|(language, rules)| {
@@ -1026,12 +1036,12 @@ fn cpp_namespaces(source: &str, symbols: &mut Vec<CodeSymbol>) {
     }
 }
 
-/// Functions, C globals, and C++ class members, named through their
-/// declarators. A function is listed wherever it is defined; a C global only
-/// outside function bodies; a C++ `field_declaration` only inside a class or
-/// struct body, as a `method` when it declares a function. Prototypes are not
-/// listed. A declaration with several declarators is named by its first, as
-/// the bundled rules did.
+/// Functions, C globals, and struct, union and class members, named through
+/// their declarators. A function is listed wherever it is defined; a C global
+/// only outside function bodies; a `field_declaration` only inside a member
+/// list (also under `#if` there), as a `method` when it declares a function.
+/// Prototypes are not listed. A declaration with several declarators is named
+/// by its first, as the bundled rules did.
 fn c_declarations(language: SupportLang, source: &str, symbols: &mut Vec<CodeSymbol>) {
     let grep = language.ast_grep(source);
     for node in grep.root().dfs() {
@@ -1053,10 +1063,10 @@ fn c_declarations(language: SupportLang, source: &str, symbols: &mut Vec<CodeSym
                 "variable"
             }
             "field_declaration"
-                if language == SupportLang::Cpp
-                    && node
-                        .parent()
-                        .is_some_and(|parent| parent.kind() == "field_declaration_list") =>
+                if node
+                    .ancestors()
+                    .find(|ancestor| !ancestor.kind().starts_with("preproc_"))
+                    .is_some_and(|ancestor| ancestor.kind() == "field_declaration_list") =>
             {
                 if function {
                     "method"
@@ -1089,26 +1099,33 @@ fn c_declared<'r, D: Doc>(mut node: Node<'r, D>) -> Option<(Node<'r, D>, bool)> 
                 function = true;
                 node.field("declarator")
             }
-            // Parentheses group a declarator without changing what it declares.
-            "parenthesized_declarator" => target(&node),
-            "pointer_declarator"
-            | "reference_declarator"
-            | "array_declarator"
-            | "init_declarator"
-            | "attributed_declarator" => {
+            // Parentheses group a declarator without changing what it declares;
+            // an MSVC `__stdcall` before it is a named child too.
+            "parenthesized_declarator" => last_named(&node),
+            "reference_declarator" => {
                 function = false;
-                // `reference_declarator` and `attributed_declarator` have no
-                // `declarator` field; their declarator is the last named child.
-                node.field("declarator").or_else(|| {
-                    node.children()
-                        .filter(|child| child.is_named() && !child.kind().contains("comment"))
-                        .last()
-                })
+                last_named(&node)
+            }
+            // `x [[maybe_unused]]`: the attributes follow the declarator.
+            "attributed_declarator" => {
+                function = false;
+                target(&node)
+            }
+            "pointer_declarator" | "array_declarator" | "init_declarator" => {
+                function = false;
+                node.field("declarator")
             }
             _ => return Some((node, function)),
         };
         node = inner?;
     }
+}
+
+fn last_named<'r, D: Doc>(parent: &Node<'r, D>) -> Option<Node<'r, D>> {
+    parent
+        .children()
+        .filter(|child| child.is_named() && !child.kind().contains("comment"))
+        .last()
 }
 
 fn bash(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
