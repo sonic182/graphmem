@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Plugin skills `graphmem-memory-sync` (save a session's durable facts) and
+  `graphmem-memory-compact` (merge memories into fewer dense ones), used only
+  on request.
+
 ## [0.13.0] - 2026-10-20
 
 ### Added
