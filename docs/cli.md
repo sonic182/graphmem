@@ -79,8 +79,10 @@ Output: one line per memory, tab-separated `id`, `memory_type`, `content`.
 ## `gmem show <id>`
 
 Print one memory's full detail (id, type, importance, timestamps, scopes,
-entities as `kind:name`, the relations between them, content). A successful `show` updates `last_accessed_at` and increments
-`access_count`; `list` does not. Exits non-zero with `memory not found` if the
+entities as `kind:name`, the relations between them, content). Edges are not
+owned by a memory, so a relation between two of its entities may have been
+stored with another memory. A successful `show` updates `last_accessed_at` and
+increments `access_count`; `list` does not. Exits non-zero with `memory not found` if the
 id doesn't exist or belongs to an unselected project. Repeat `--scope <scope>`
 to read another project's memory; global memories are always included. Without
 that flag, only the current repository plus global is selected.

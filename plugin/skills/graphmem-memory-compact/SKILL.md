@@ -14,14 +14,15 @@ A maintenance pass. The memory shape and the tool rules are in
 1. List the memories with `list` (`limit` 100): the current repo plus
    `global`, newest first, each with its content and entities. Repeat with
    `offset` set to `next_offset` until it is null. Pass `scopes` for another
-   repo you may write to, and `inspect` for one record's relations. Without
-   the `list` tool, use the CLI: `gmem list --limit 500`, `gmem show <id>`.
+   repo you may write to, and `inspect` for one record's relations.
 2. Group by topic. Within a group, find duplicates, overlaps and stale details.
 3. Check doubtful facts against the current code or repo. Drop removed
    features and finished progress. Keep decisions that still explain the code.
 4. Write each merged memory FIRST with `remember`: the union of the
    still-valid entities and relations, the highest importance of the group, and
    one `memory_type` (decision, convention, constraint, incident, observation).
+   `inspect` shows every edge between a memory's entities, including edges
+   stored with other memories; carry over only the relations this topic states.
 5. THEN `forget` the old ids (`inspect` first if unsure). The order matters:
    `update` keeps only the target's entities, and `forget` drops the old
    links, so a new memory carrying the union keeps graph recall.

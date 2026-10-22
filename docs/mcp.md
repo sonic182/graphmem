@@ -4,7 +4,7 @@ Run `gmem mcp` as an MCP server over newline-delimited JSON-RPC. The
 database is the same SQLite database used by the CLI and is selected with
 `GRAPHMEM_HOME`.
 
-The server exposes nine memory tools:
+The server exposes ten memory tools:
 
 - `remember`: stores `content`, with optional `memory_type`, `importance`, and
   `scopes`, verified `entities`, and verified directed `relations`. Entity and
@@ -55,8 +55,10 @@ The server exposes nine memory tools:
   store; use `recall` to find memories by topic.
 - `inspect`: returns a memory and its scopes by numeric `id`, with optional
   `scopes`, plus its `entities` (`kind`, `name`) and the `relations` between
-  those entities (`source`, `relation`, `target`, optional `metadata`). A
-  successful inspection increments `access_count`, updates `last_accessed_at`,
+  those entities (`source`, `relation`, `target`, optional `metadata`). The
+  graph is unscoped and edges are not owned by a memory, so a relation between
+  two of its entities may have been stored with another memory. A successful
+  inspection increments `access_count`, updates `last_accessed_at`,
   and is recorded in the recall log.
 - `update`: revises a memory by numeric `id`, with optional `scopes`.
   `content`, `memory_type`, and `importance` replace the stored values; omitted
