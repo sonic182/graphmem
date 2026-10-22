@@ -128,6 +128,9 @@ struct ListArgs {
     scopes: Vec<String>,
     #[arg(long, default_value_t = 50)]
     limit: usize,
+    /// Memories to skip, for paging.
+    #[arg(long, default_value_t = 0)]
+    offset: usize,
 }
 
 #[derive(Args)]
@@ -198,7 +201,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::List(args) => {
             let service = MemoryService::open_default(overrides)?;
-            print_memories(service.list_selected(&args.scopes, args.limit)?);
+            print_memories(service.list_page(&args.scopes, None, args.limit, args.offset)?);
         }
         Command::Show(args) => {
             let mut service = MemoryService::open_default(overrides)?;
@@ -384,6 +387,23 @@ fn print_memory_details(details: MemoryDetails) {
     println!("created_at: {}", details.memory.created_at);
     println!("updated_at: {}", details.memory.updated_at);
     println!("scopes: {scopes}");
+    let entities = details
+        .entities
+        .iter()
+        .map(|entity| format!("{}:{}", entity.kind, entity.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("entities: {entities}");
+    for relation in &details.relations {
+        println!(
+            "relation: {}:{} -{}-> {}:{}",
+            relation.source.kind,
+            relation.source.name,
+            relation.edge.relation,
+            relation.target.kind,
+            relation.target.name
+        );
+    }
     println!("content:\n{}", details.memory.content);
 }
 

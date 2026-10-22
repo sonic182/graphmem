@@ -458,6 +458,47 @@ fn graph_command_inspects_entities_seeded_via_mcp() {
 }
 
 #[test]
+fn show_prints_entities_and_relations_and_list_pages() {
+    let data_dir = data_dir();
+    let mut mcp = Mcp::start(&data_dir, &[]);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let first = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{
+            "content":"first note",
+            "scopes":["global"],
+            "entities":[{"kind":"module","name":"auth"}],
+            "relations":[{
+                "source":{"kind":"service","name":"billing-api"},
+                "relation":"depends_on",
+                "target":{"kind":"database","name":"sqlite"}
+            }]
+        }}),
+    );
+    let id = first["result"]["structuredContent"]["id"].as_i64().unwrap();
+    mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"remember","arguments":{"content":"second note","scopes":["global"]}}),
+    );
+    drop(mcp);
+
+    let shown = stdout(run(&data_dir, &["show", &id.to_string()]));
+    assert!(shown.contains("entities: module:auth, service:billing-api, database:sqlite"));
+    assert!(shown.contains("relation: service:billing-api -depends_on-> database:sqlite"));
+
+    let page = stdout(run(&data_dir, &["list", "--limit", "1", "--offset", "1"]));
+    assert!(page.contains("first note") && !page.contains("second note"));
+
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}
+
+#[test]
 fn tui_requires_an_interactive_terminal() {
     let data_dir = data_dir();
     let output = run(&data_dir, &["tui"]);

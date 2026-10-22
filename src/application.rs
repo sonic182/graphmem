@@ -63,6 +63,9 @@ pub struct RememberRequest {
 pub struct MemoryDetails {
     pub memory: Memory,
     pub scopes: Vec<Scope>,
+    pub entities: Vec<Entity>,
+    /// Relations between the memory's own entities.
+    pub relations: Vec<RelationDetails>,
 }
 
 pub struct RelateRequest {
@@ -215,10 +218,22 @@ impl MemoryService {
 
     /// List the selected scopes plus global, newest first; default to the current scope.
     pub fn list_selected(&self, scopes: &[String], limit: usize) -> Result<Vec<Memory>> {
+        self.list_page(scopes, None, limit, 0)
+    }
+
+    /// Like [`Self::list_selected`], with a case-insensitive `memory_type` filter and
+    /// `offset` memories skipped. Listing never records an access.
+    pub fn list_page(
+        &self,
+        scopes: &[String],
+        memory_type: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Memory>> {
         let scopes = self.read_scopes(scopes)?;
         Ok(self
             .database
-            .list_memories_in_scopes_limited(&scopes, None, limit)?)
+            .list_memories_in_scopes_page(&scopes, memory_type, limit, offset)?)
     }
 
     pub fn list_all(&self) -> Result<Vec<Memory>> {
@@ -233,7 +248,29 @@ impl MemoryService {
             .get_memory(id)?
             .ok_or(ApplicationError::NotFound("memory"))?;
         let scopes = self.database.list_memory_scopes(id)?;
-        Ok(MemoryDetails { memory, scopes })
+        let entities = self.database.list_memory_entities(id)?;
+        let by_id = entities
+            .iter()
+            .map(|entity| (entity.id, entity))
+            .collect::<HashMap<_, _>>();
+        let relations = self
+            .database
+            .list_memory_edges(id)?
+            .into_iter()
+            .filter_map(|edge| {
+                Some(RelationDetails {
+                    source: (*by_id.get(&edge.source_id)?).clone(),
+                    target: (*by_id.get(&edge.target_id)?).clone(),
+                    edge,
+                })
+            })
+            .collect();
+        Ok(MemoryDetails {
+            memory,
+            scopes,
+            entities,
+            relations,
+        })
     }
 
     pub fn inspect(&mut self, id: i64, scopes: Option<&[String]>) -> Result<MemoryDetails> {
@@ -273,6 +310,10 @@ impl MemoryService {
 
     pub fn scopes_for(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Scope>>> {
         Ok(self.database.scopes_by_memory(memory_ids)?)
+    }
+
+    pub fn entities_for(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Entity>>> {
+        Ok(self.database.entities_by_memory(memory_ids)?)
     }
 
     /// The embedding configuration the service runs with, so a caller can read

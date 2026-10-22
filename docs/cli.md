@@ -69,6 +69,7 @@ List memories, newest first, no ranking.
 | --- | --- |
 | `--scope <scope>` (repeatable) | current repository + `global` |
 | `--limit <n>` | `50` |
+| `--offset <n>` | `0` |
 
 Explicit scopes select those projects plus `global`, without adding the current
 repository. Checkout roots and common Git directories resolve to the same scope.
@@ -78,7 +79,7 @@ Output: one line per memory, tab-separated `id`, `memory_type`, `content`.
 ## `gmem show <id>`
 
 Print one memory's full detail (id, type, importance, timestamps, scopes,
-content). A successful `show` updates `last_accessed_at` and increments
+entities as `kind:name`, the relations between them, content). A successful `show` updates `last_accessed_at` and increments
 `access_count`; `list` does not. Exits non-zero with `memory not found` if the
 id doesn't exist or belongs to an unselected project. Repeat `--scope <scope>`
 to read another project's memory; global memories are always included. Without

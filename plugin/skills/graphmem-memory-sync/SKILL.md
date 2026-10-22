@@ -1,6 +1,6 @@
 ---
 name: graphmem-memory-sync
-description: Saves what a session or work block taught into Graphmem (gmem) memory in one pass - decisions with their rationale, conventions, constraints, resolved failure causes and owner preferences - revising stale memories instead of duplicating them. Use only when the user asks to sync memory at the end of a session or block, for example "sync memory", "save what we learned", "sincronizar memoria", "sincroniza memoria", "guarda lo aprendido". Do not use for routine recall or remember during a task; that belongs to graphmem-mcp-for-dev.
+description: Saves what a session or work block taught into Graphmem (gmem) memory in one pass - decisions with their rationale, conventions, constraints, resolved failure causes and owner preferences - revising stale memories instead of duplicating them. Use only when the user asks to sync memory at the end of a session or block, for example "sync memory" or "save what we learned", or the equivalent in other languages. Do not use for routine recall or remember during a task; that belongs to graphmem-mcp-for-dev.
 compatibility: Requires the Graphmem (gmem) MCP server to be connected
 ---
 
@@ -14,7 +14,8 @@ tool rules are in `graphmem-mcp-for-dev`; load it first and do not restate it.
 1. List the durable facts of the session, from the conversation and the diff:
    decisions with their rationale, conventions, constraints, resolved failure
    causes, and the owner's stated preferences. Drop everything else.
-2. For each fact, `recall` its topic first (`limit` 3 to 5).
+2. For each fact, `recall` its topic first (`limit` 3 to 5). If recall is
+   thin, `list` with a `memory_type` to see what is stored.
 3. Pick one action per fact:
    - A memory covers it and is still right: do nothing.
    - A memory covers it but is stale or incomplete: `update` it with the full

@@ -43,9 +43,21 @@ The server exposes nine memory tools:
   exist without vectors, and a retry reuses them.
 - `graph`: inspects incoming, outgoing, or both relationship paths for an
   entity.
+- `list`: lists memories newest first, unranked, with `id`, `memory_type`,
+  `importance`, `scopes`, `entities` (`kind`, `name`), `created_at`,
+  `updated_at`, and full `content`. Scope selection is recall's: omitted
+  `scopes` or `[]` use the current repository plus `global`; an explicit list
+  replaces the current repository and still includes `global`. `memory_type`
+  filters the same way as in `recall`. `limit` is 1 to 100 (default 20) and
+  `offset` skips memories; `next_offset` in the response is the `offset` of the
+  next page, or `null` after the last one. Listing does not change
+  `access_count` or write to the recall log. Use it to review or compact a
+  store; use `recall` to find memories by topic.
 - `inspect`: returns a memory and its scopes by numeric `id`, with optional
-  `scopes`. A successful inspection increments `access_count`, updates
-  `last_accessed_at`, and is recorded in the recall log.
+  `scopes`, plus its `entities` (`kind`, `name`) and the `relations` between
+  those entities (`source`, `relation`, `target`, optional `metadata`). A
+  successful inspection increments `access_count`, updates `last_accessed_at`,
+  and is recorded in the recall log.
 - `update`: revises a memory by numeric `id`, with optional `scopes`.
   `content`, `memory_type`, and `importance` replace the stored values; omitted
   fields are kept. Scopes,

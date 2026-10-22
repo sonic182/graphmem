@@ -184,6 +184,30 @@ struct GraphInput {
     limit: Option<usize>,
 }
 
+/// Largest page `list` returns: it carries full content, unlike `recall`'s ranked top few.
+const MAX_LIST_LIMIT: usize = 100;
+const DEFAULT_LIST_LIMIT: usize = 20;
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct ListInput {
+    /// Where to list: global or repo:/absolute/path. Omit or pass [] to list the
+    /// server's default scope and global memories. An explicit list covers only
+    /// those scopes plus global; it does not add the current scope.
+    #[serde(default)]
+    scopes: Vec<String>,
+    /// Maximum memories to return, 1 to 100. Defaults to 20.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Memories to skip, for paging. Defaults to 0. Use the previous response's
+    /// next_offset.
+    #[serde(default)]
+    offset: Option<usize>,
+    /// Optional filter on the memory's category, ignoring case, such as decision,
+    /// convention, constraint, incident, or observation.
+    #[serde(default)]
+    memory_type: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct IdInput {
     /// Memory id, as returned by recall or remember.
@@ -253,6 +277,55 @@ struct MemoryRecord {
     /// Set when an embedding had to truncate its input to the model's token
     /// limit, so content past the limit did not affect ranking.
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(inline)]
+struct EntityRef {
+    kind: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(inline)]
+struct RelationRef {
+    source: EntityRef,
+    relation: String,
+    target: EntityRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(inline)]
+struct ListedMemory {
+    id: i64,
+    content: String,
+    memory_type: String,
+    importance: f64,
+    created_at: i64,
+    updated_at: i64,
+    scopes: Vec<String>,
+    entities: Vec<EntityRef>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ListOutput {
+    /// Newest first, unranked.
+    memories: Vec<ListedMemory>,
+    /// Pass as offset to read the next page; null when this was the last one.
+    next_offset: Option<usize>,
+}
+
+/// A `MemoryRecord` plus the graph around the memory.
+#[derive(Debug, Serialize, JsonSchema)]
+struct InspectOutput {
+    #[serde(flatten)]
+    memory: MemoryRecord,
+    /// Entities attached to the memory.
+    entities: Vec<EntityRef>,
+    /// Relations between the memory's entities.
+    relations: Vec<RelationRef>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -547,8 +620,78 @@ impl MemoryServer {
     }
 
     #[tool(
+        name = "list",
+        description = "List memories in the given scopes, newest first and unranked, each with \
+             its id, memory_type, importance, scopes, entities, timestamps, and full content. \
+             Use it to review or compact what is stored; use recall to find memories by topic. \
+             Omitted scopes use the server's default scope plus global, as recall does. An \
+             optional memory_type filter ignores case. Pages hold 20 memories by default, 100 at \
+             most; while next_offset is not null, pass it as offset for the next page. Listing \
+             does not change access counts or the recall log."
+    )]
+    fn list(
+        &self,
+        Parameters(input): Parameters<ListInput>,
+    ) -> Result<Json<ListOutput>, CallToolResult> {
+        let limit = input.limit.unwrap_or(DEFAULT_LIST_LIMIT);
+        if !(1..=MAX_LIST_LIMIT).contains(&limit) {
+            return Err(tool_error(format!(
+                "limit must be between 1 and {MAX_LIST_LIMIT}"
+            )));
+        }
+        let offset = input.offset.unwrap_or(0);
+        let service = self.lock()?;
+        // One extra row tells whether another page exists.
+        let mut found = service
+            .list_page(
+                &input.scopes,
+                input.memory_type.as_deref(),
+                limit + 1,
+                offset,
+            )
+            .map_err(|error| tool_error(error.to_string()))?;
+        let next_offset = (found.len() > limit).then(|| offset.saturating_add(limit));
+        found.truncate(limit);
+        let memory_ids = found.iter().map(|memory| memory.id).collect::<Vec<_>>();
+        let mut scopes_by_memory = service
+            .scopes_for(&memory_ids)
+            .map_err(|error| tool_error(error.to_string()))?;
+        let mut entities_by_memory = service
+            .entities_for(&memory_ids)
+            .map_err(|error| tool_error(error.to_string()))?;
+        let memories = found
+            .into_iter()
+            .map(|memory| ListedMemory {
+                scopes: scopes_by_memory
+                    .remove(&memory.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|scope| scope.name)
+                    .collect(),
+                entities: entities_by_memory
+                    .remove(&memory.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(entity_ref)
+                    .collect(),
+                id: memory.id,
+                content: memory.content,
+                memory_type: memory.memory_type,
+                importance: memory.importance,
+                created_at: memory.created_at,
+                updated_at: memory.updated_at,
+            })
+            .collect();
+        Ok(Json(ListOutput {
+            memories,
+            next_offset,
+        }))
+    }
+
+    #[tool(
         name = "inspect",
-        description = "Return one memory by id, including its content, metadata, and scopes. \
+        description = "Return one memory by id, including its content, metadata, scopes, the \
+             entities (kind, name) attached to it, and the relations between those entities. \
              The id must name a memory in the given scopes, in global, or with no scope at all; \
              omitted scopes use the server's default scope. Pass the repository explicitly to \
              reach a memory outside it."
@@ -556,13 +699,26 @@ impl MemoryServer {
     fn inspect(
         &self,
         Parameters(input): Parameters<IdInput>,
-    ) -> Result<Json<MemoryRecord>, CallToolResult> {
+    ) -> Result<Json<InspectOutput>, CallToolResult> {
         let id = input.id;
         let details = self
             .lock()?
             .inspect(id, Some(&input.scopes))
             .map_err(|error| tool_error(error.to_string()))?;
-        Ok(Json(record(details.memory, details.scopes, None)))
+        Ok(Json(InspectOutput {
+            memory: record(details.memory, details.scopes, None),
+            entities: details.entities.into_iter().map(entity_ref).collect(),
+            relations: details
+                .relations
+                .into_iter()
+                .map(|relation| RelationRef {
+                    source: entity_ref(relation.source),
+                    relation: relation.edge.relation,
+                    target: entity_ref(relation.target),
+                    metadata: relation.edge.metadata,
+                })
+                .collect(),
+        }))
     }
 }
 
@@ -956,6 +1112,13 @@ fn record(memory: Memory, scopes: Vec<Scope>, score: Option<f64>) -> MemoryRecor
         scopes: scopes.into_iter().map(|scope| scope.name).collect(),
         score,
         warnings: Vec::new(),
+    }
+}
+
+fn entity_ref(entity: Entity) -> EntityRef {
+    EntityRef {
+        kind: entity.kind,
+        name: entity.name,
     }
 }
 

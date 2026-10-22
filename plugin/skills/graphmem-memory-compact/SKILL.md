@@ -1,7 +1,7 @@
 ---
 name: graphmem-memory-compact
-description: Compacts a Graphmem (gmem) store by merging many memories on one topic into fewer dense ones, without losing facts that still hold or the graph links that make them recallable. Use only when the user asks to compact or pack memories, for example "compact memories", "pack memories", "merge duplicate memories", "compactar memorias", "empaquetar memorias". Do not use for routine recall or remember during a task; that belongs to graphmem-mcp-for-dev.
-compatibility: Requires the Graphmem (gmem) MCP server and the gmem CLI on PATH
+description: Compacts a Graphmem (gmem) store by merging many memories on one topic into fewer dense ones, without losing facts that still hold or the graph links that make them recallable. Use only when the user asks to compact or pack memories, for example "compact memories", "pack memories" or "merge duplicate memories", or the equivalent in other languages. Do not use for routine recall or remember during a task; that belongs to graphmem-mcp-for-dev.
+compatibility: Requires the Graphmem (gmem) MCP server with the list tool
 ---
 
 # Compact memories
@@ -11,11 +11,11 @@ A maintenance pass. The memory shape and the tool rules are in
 
 ## Steps
 
-1. List the memories. The MCP server has no list tool; use the CLI:
-   `gmem list --limit 500` for the current repo plus `global` (newest first;
-   `--scope repo:/abs/path` for another repo you may write to), and
-   `gmem show <id>` for one full record. For entities of a topic, use
-   `gmem graph <kind> <name>`; `inspect` and `show` do not print them.
+1. List the memories with `list` (`limit` 100): the current repo plus
+   `global`, newest first, each with its content and entities. Repeat with
+   `offset` set to `next_offset` until it is null. Pass `scopes` for another
+   repo you may write to, and `inspect` for one record's relations. Without
+   the `list` tool, use the CLI: `gmem list --limit 500`, `gmem show <id>`.
 2. Group by topic. Within a group, find duplicates, overlaps and stale details.
 3. Check doubtful facts against the current code or repo. Drop removed
    features and finished progress. Keep decisions that still explain the code.

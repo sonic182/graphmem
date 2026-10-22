@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plugin skills `graphmem-memory-sync` (save a session's durable facts) and
   `graphmem-memory-compact` (merge memories into fewer dense ones), used only
   on request.
+- MCP `list` tool: pages through memories newest first, unranked, with their
+  entities and full content, in the same scopes `recall` reads; it does not
+  change access counts. `gmem list` gains `--offset`.
+- `inspect` and `gmem show` also return the memory's entities and the
+  relations between them.
 
 ## [0.13.0] - 2026-10-20
 
