@@ -498,6 +498,149 @@ fn show_prints_entities_and_relations_and_list_pages() {
     fs::remove_dir_all(data_dir).expect("test data directory is removed");
 }
 
+/// A model cache holding only a word-level tokenizer that adds [CLS] and
+/// [SEP] and a token limit of 5, so counts are exact without a download.
+fn tiny_model_cache(root: &Path) -> PathBuf {
+    let special = |id: u32, content: &str| {
+        json!({"id":id,"content":content,"single_word":false,"lstrip":false,
+               "rstrip":false,"normalized":false,"special":true})
+    };
+    let template = json!([
+        {"SpecialToken":{"id":"[CLS]","type_id":0}},
+        {"Sequence":{"id":"A","type_id":0}},
+        {"SpecialToken":{"id":"[SEP]","type_id":0}}
+    ]);
+    let tokenizer = json!({
+        "version":"1.0", "truncation":null, "padding":null,
+        "added_tokens":[special(0,"[UNK]"), special(1,"[CLS]"), special(2,"[SEP]")],
+        "normalizer":null, "pre_tokenizer":{"type":"Whitespace"},
+        "post_processor":{
+            "type":"TemplateProcessing", "single":template, "pair":template,
+            "special_tokens":{
+                "[CLS]":{"id":"[CLS]","ids":[1],"tokens":["[CLS]"]},
+                "[SEP]":{"id":"[SEP]","ids":[2],"tokens":["[SEP]"]}
+            }
+        },
+        "decoder":null,
+        "model":{"type":"WordLevel","unk_token":"[UNK]",
+                 "vocab":{"[UNK]":0,"[CLS]":1,"[SEP]":2,"alpha":3,"beta":4}}
+    });
+    let model = root.join("models--test--tiny");
+    let snapshot = model.join("snapshots/abc123");
+    fs::create_dir_all(&snapshot).unwrap();
+    fs::create_dir_all(model.join("refs")).unwrap();
+    fs::write(model.join("refs/main"), "abc123").unwrap();
+    fs::write(
+        snapshot.join("config.json"),
+        r#"{"max_position_embeddings":5}"#,
+    )
+    .unwrap();
+    fs::write(snapshot.join("tokenizer.json"), tokenizer.to_string()).unwrap();
+    root.to_owned()
+}
+
+fn run_tokens(data_dir: &Path, cache: &Path, args: &[&str], stdin: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gmem"))
+        .arg("tokens")
+        .args(args)
+        .env("GRAPHMEM_HOME", data_dir)
+        .env("GRAPHMEM_EMBEDDINGS", "on")
+        .env("GRAPHMEM_EMBEDDING_MODEL", "test/tiny")
+        .env("GRAPHMEM_EMBEDDING_CACHE_DIR", cache)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("gmem runs");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().expect("gmem finishes")
+}
+
+#[test]
+fn tokens_counts_with_the_cached_tokenizer_including_special_tokens() {
+    let data_dir = data_dir();
+    let cache = tiny_model_cache(&data_dir.join("models"));
+    let mut database = Database::open(&data_dir.join("memory.sqlite")).expect("database opens");
+    let id = database
+        .remember_with_graph(
+            "alpha beta",
+            "observation",
+            0.0,
+            &["global".to_owned()],
+            &[],
+            &[],
+        )
+        .unwrap()
+        .id;
+    drop(database);
+
+    // Two words plus [CLS] and [SEP], against the model's limit of 5.
+    assert_eq!(
+        stdout(run_tokens(&data_dir, &cache, &["alpha beta"], "")),
+        "4\t5\n"
+    );
+    assert_eq!(
+        stdout(run_tokens(&data_dir, &cache, &[], "alpha beta alpha\n")),
+        "5\t5\n"
+    );
+    assert_eq!(
+        stdout(run_tokens(
+            &data_dir,
+            &cache,
+            &["--id", &id.to_string()],
+            ""
+        )),
+        format!("{id}\t4\t5\n")
+    );
+
+    let empty_cache = data_dir.join("empty");
+    fs::create_dir_all(&empty_cache).unwrap();
+    let uncached = run_tokens(&data_dir, &empty_cache, &["alpha"], "");
+    assert!(!uncached.status.success());
+    assert!(String::from_utf8_lossy(&uncached.stderr).contains("not cached"));
+
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}
+
+#[test]
+fn tokens_over_limit_lists_only_memories_the_embedder_truncates() {
+    let data_dir = data_dir();
+    let cache = tiny_model_cache(&data_dir.join("models"));
+    let mut database = Database::open(&data_dir.join("memory.sqlite")).expect("database opens");
+    let mut ids = Vec::new();
+    // 5, 6 and 7 tokens with the two special tokens; only the last two exceed 5.
+    for content in [
+        "alpha beta alpha",
+        "alpha beta alpha beta",
+        "alpha beta alpha beta beta",
+    ] {
+        ids.push(
+            database
+                .remember_with_graph(
+                    content,
+                    "observation",
+                    0.0,
+                    &["global".to_owned()],
+                    &[],
+                    &[],
+                )
+                .unwrap()
+                .id,
+        );
+    }
+    drop(database);
+
+    let over = stdout(run_tokens(&data_dir, &cache, &["--over-limit"], ""));
+    assert_eq!(over, format!("{}\t7\t5\n{}\t6\t5\n", ids[2], ids[1]));
+
+    fs::remove_dir_all(data_dir).expect("test data directory is removed");
+}
+
 #[test]
 fn tui_requires_an_interactive_terminal() {
     let data_dir = data_dir();

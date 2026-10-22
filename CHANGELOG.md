@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP `list` tool: pages through memories newest first, unranked, with their
   entities and full content, in the same scopes `recall` reads; it does not
   change access counts. `gmem list` gains `--offset`.
+- `gmem tokens` counts tokens with the active embedding model's tokenizer from
+  the local model cache, for text, one memory (`--id`) or every memory over
+  the model's limit (`--over-limit`).
 - `inspect` and `gmem show` also return the memory's entities and the
   relations between them.
 

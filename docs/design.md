@@ -70,7 +70,7 @@ Eight memory tools, kept small on purpose: `remember`, `recall`, `list`, `stats`
 ```sh
 gmem remember "…"   gmem list   gmem show <id>   gmem search "…"
 gmem graph <kind> <name>   gmem forget <id>   gmem flush
-gmem scopes   gmem reembed   gmem doctor   gmem mcp
+gmem tokens   gmem scopes   gmem reembed   gmem doctor   gmem mcp
 ```
 
 See [cli.md](cli.md).

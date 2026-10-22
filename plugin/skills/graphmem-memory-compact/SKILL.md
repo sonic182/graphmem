@@ -25,9 +25,11 @@ A maintenance pass. The memory shape and the tool rules are in
 5. THEN `forget` the old ids (`inspect` first if unsure). The order matters:
    `update` keeps only the target's entities, and `forget` drops the old
    links, so a new memory carrying the union keeps graph recall.
-6. Keep each memory under the embedding limit: read `gmem://embedding`
+6. Keep each memory under the embedding limit: check it with
+   `gmem tokens --id <id>` (limit in the output), or `gmem tokens --over-limit`
+   at the end, when the CLI is available. Otherwise read `gmem://embedding`
    (about 450 tokens for a 512-token model). Split a topic rather than exceed
-   it; a `warnings` field on `remember` means it was truncated.
+   it; a `warnings` field on `remember` or `update` means it was truncated.
 7. Keep a log of old id -> new id while you work, and show it at the end.
 
 ## Scope

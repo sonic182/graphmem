@@ -20,7 +20,7 @@ use crate::{
         ConfigError, ConfigOverrides, EmbeddingConfig, RetrievalConfig, embedding_config,
         retrieval_config,
     },
-    infrastructure::embedding::{Embedder, EmbeddingError, EmbeddingModel},
+    infrastructure::embedding::{Embedder, EmbeddingError, EmbeddingModel, TokenCounter},
     infrastructure::sqlite::{RecallEvent, VectorSink},
 };
 
@@ -42,6 +42,8 @@ pub enum ApplicationError {
         "embeddings are disabled; set [embedding] enabled = true (or unset GRAPHMEM_EMBEDDINGS) to reembed"
     )]
     EmbeddingsDisabled,
+    #[error("embeddings are disabled; tokens are counted with the active embedding model")]
+    TokensUnavailable,
     #[error("scope must be global or repo:/absolute/path")]
     InvalidScope,
     #[error("cannot write to scope {scope}; writable scopes are {current} and global")]
@@ -306,6 +308,31 @@ impl MemoryService {
             self.ensure_writable_scope(&scope.name)?;
         }
         self.ensure_in_scopes(id, Some(&selection))
+    }
+
+    /// The active embedding model's tokenizer, from the local model cache.
+    pub fn token_counter(&self) -> Result<TokenCounter> {
+        if !self.embedding_config.enabled {
+            return Err(ApplicationError::TokensUnavailable);
+        }
+        Ok(TokenCounter::load(&self.embedding_config)?)
+    }
+
+    /// Memories in the selected scopes whose content exceeds the model's token
+    /// limit, as (id, token count), newest first. Does not record accesses.
+    pub fn memories_over_token_limit(&self, scopes: &[String]) -> Result<Vec<(i64, usize)>> {
+        let counter = self.token_counter()?;
+        let Some(limit) = counter.limit() else {
+            return Ok(Vec::new());
+        };
+        let mut over = Vec::new();
+        for memory in self.list_page(scopes, None, usize::MAX, 0)? {
+            let tokens = counter.count(&memory.content)?;
+            if tokens > limit {
+                over.push((memory.id, tokens));
+            }
+        }
+        Ok(over)
     }
 
     pub fn scopes_for(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Scope>>> {

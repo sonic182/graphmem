@@ -71,6 +71,7 @@ For another MCP client, configure it to launch your installed binary:
 gmem remember "Use nextest for integration tests" \
   --type convention --scope repo:/absolute/path/to/project
 gmem search "integration tests"
+gmem tokens --over-limit   # memories the embedding model truncates
 gmem tui
 gmem mcp
 ```
