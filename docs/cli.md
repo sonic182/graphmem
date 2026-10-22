@@ -69,6 +69,7 @@ List memories, newest first, no ranking.
 | --- | --- |
 | `--scope <scope>` (repeatable) | current repository + `global` |
 | `--limit <n>` | `50` |
+| `--offset <n>` | `0` |
 
 Explicit scopes select those projects plus `global`, without adding the current
 repository. Checkout roots and common Git directories resolve to the same scope.
@@ -78,11 +79,32 @@ Output: one line per memory, tab-separated `id`, `memory_type`, `content`.
 ## `gmem show <id>`
 
 Print one memory's full detail (id, type, importance, timestamps, scopes,
-content). A successful `show` updates `last_accessed_at` and increments
-`access_count`; `list` does not. Exits non-zero with `memory not found` if the
+entities as `kind:name`, the relations between them, content). Edges are not
+owned by a memory, so a relation between two of its entities may have been
+stored with another memory. A successful `show` updates `last_accessed_at` and
+increments `access_count`; `list` does not. Exits non-zero with `memory not found` if the
 id doesn't exist or belongs to an unselected project. Repeat `--scope <scope>`
 to read another project's memory; global memories are always included. Without
 that flag, only the current repository plus global is selected.
+
+## `gmem tokens [TEXT]`
+
+Count tokens with the active embedding model's own tokenizer, read from the
+local model cache (`config.json` and `tokenizer.json`; no weights, no network).
+It fails with `not cached` until a first embedding call has downloaded the
+model, and when embeddings are disabled. The count includes the special tokens
+and is taken before truncation, so a count above the limit is exactly an input
+the embedder truncates and the `warnings` field reports.
+
+| Form | Output (tab-separated) |
+| --- | --- |
+| `gmem tokens TEXT` (or text on stdin) | `tokens`, `limit` |
+| `gmem tokens --id <id>` | `id`, `tokens`, `limit` |
+| `gmem tokens --over-limit` | one `id`, `tokens`, `limit` line per memory over the limit, newest first |
+
+`--id` and `--over-limit` take `--scope <scope>` (repeatable) like `gmem list`:
+without it, the current repository plus `global`. `limit` is the model's
+`max_position_embeddings`, capped at 2048, or `-` if the model states none.
 
 ## `gmem search <query>`
 

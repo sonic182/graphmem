@@ -452,6 +452,79 @@ pub fn embedding_details(config: &EmbeddingConfig) -> Result<EmbeddingDetails, E
     Ok(details)
 }
 
+/// Counts tokens with the active model's own tokenizer, read from the local
+/// model cache only, so it never loads weights or touches the network.
+pub struct TokenCounter {
+    tokenizer: Tokenizer,
+    limit: Option<usize>,
+}
+
+impl TokenCounter {
+    /// # Errors
+    ///
+    /// Fails when `config.json` or `tokenizer.json` is not in the cache; they
+    /// are downloaded by the first embedding call.
+    pub fn load(config: &EmbeddingConfig) -> Result<Self, EmbeddingError> {
+        let repository = model_repository(config)?;
+        let config_bytes = fs::read(cached_model_file(
+            &repository,
+            &config.revision,
+            "config.json",
+        )?)?;
+        let mut tokenizer = Tokenizer::from_file(cached_model_file(
+            &repository,
+            &config.revision,
+            "tokenizer.json",
+        )?)
+        .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
+        // The checkpoint's own truncation and padding settings must not change the count.
+        tokenizer
+            .with_truncation(None)
+            .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?;
+        tokenizer.with_padding(None);
+        Ok(Self {
+            tokenizer,
+            limit: token_limit(&config_bytes)?,
+        })
+    }
+
+    /// The token limit the embedder truncates to, if the model states one.
+    pub fn limit(&self) -> Option<usize> {
+        self.limit
+    }
+
+    /// Tokens the embedder sees for `text` before truncation, special tokens
+    /// included; more than [`Self::limit`] means the embedder truncates it.
+    pub fn count(&self, text: &str) -> Result<usize, EmbeddingError> {
+        Ok(self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|error| EmbeddingError::Tokenizer(error.to_string()))?
+            .len())
+    }
+}
+
+fn cached_model_file(
+    repository: &HFRepositorySync<RepoTypeModel>,
+    revision: &str,
+    filename: &str,
+) -> Result<PathBuf, EmbeddingError> {
+    match repository
+        .download_file()
+        .filename(filename)
+        .revision(revision)
+        .local_files_only(true)
+        .send()
+    {
+        Err(HFError::LocalEntryNotFound { .. }) => Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{filename} is not cached; run a search with embeddings enabled once to download the model"),
+        )
+        .into()),
+        result => Ok(result?),
+    }
+}
+
 fn cached_model_files(config: &EmbeddingConfig) -> bool {
     let repository = config
         .cache_dir

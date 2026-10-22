@@ -53,6 +53,8 @@ Make the content self-contained, and give a durable save this shape:
 
 Omit `**Why**` when it is self-evident and `**Learned**` when there is none; a single fact such as a command or a version requirement may stay one line. The content is what gets embedded, so naming the affected files and the rationale inside it is also what makes the memory findable later by a question about those files.
 
+Write the content in English by default, even when the conversation is in another language: the default embedding model is trained on English and ranks English text best (`gmem://embedding` names the active model). Keep proper names, identifiers and quoted text in their original language, and store other content in another language when the user asks for it.
+
 When the memory establishes verified retrieval context, attach its entities and directed relations in the same `remember` call; this links the memory atomically. Use a `memory_type` from `decision`, `convention`, `constraint`, `incident`, or `observation` - `recall` can filter on it, so an ad-hoc category makes the memory harder to narrow to. Reserve higher `importance` for information whose absence is likely to cause a wrong or costly change.
 
 Do not store secrets, credentials, private personal data, unverified speculation, temporary progress updates, raw debugging output, or source code that can be read directly from the repository.

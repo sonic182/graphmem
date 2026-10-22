@@ -525,6 +525,17 @@ impl Database {
         memory_type: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Memory>> {
+        self.list_memories_in_scopes_page(scopes, memory_type, limit, 0)
+    }
+
+    /// Like [`Self::list_memories_in_scopes_limited`], skipping the first `offset` memories.
+    pub fn list_memories_in_scopes_page(
+        &self,
+        scopes: &[String],
+        memory_type: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Memory>> {
         let scopes = normalized_scopes(scopes)?;
         let placeholders = (0..scopes.len())
             .map(|index| format!("?{}", index + 1))
@@ -532,6 +543,7 @@ impl Database {
             .join(", ");
         let type_placeholder = format!("?{}", scopes.len() + 1);
         let limit_placeholder = format!("?{}", scopes.len() + 2);
+        let offset_placeholder = format!("?{}", scopes.len() + 3);
         let sql = format!(
             "SELECT m.id, m.content, m.memory_type, m.importance, m.created_at, m.updated_at,
                     m.last_accessed_at, m.access_count
@@ -546,7 +558,7 @@ impl Database {
                AND ({type_placeholder} IS NULL
                     OR LOWER(m.memory_type) = LOWER({type_placeholder}))
              ORDER BY m.created_at DESC, m.id DESC
-             LIMIT {limit_placeholder}"
+             LIMIT {limit_placeholder} OFFSET {offset_placeholder}"
         );
         let mut values = scopes
             .into_iter()
@@ -555,6 +567,9 @@ impl Database {
         values.push(memory_type_value(memory_type));
         values.push(rusqlite::types::Value::Integer(
             i64::try_from(limit).unwrap_or(i64::MAX),
+        ));
+        values.push(rusqlite::types::Value::Integer(
+            i64::try_from(offset).unwrap_or(i64::MAX),
         ));
         let mut statement = self.connection.prepare(&sql)?;
         let memories = statement
@@ -801,6 +816,20 @@ impl Database {
             .query_map([memory_id], entity_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(entities)
+    }
+
+    /// Edges whose two endpoints are both entities of the memory; storing a
+    /// relation with a memory links both of its endpoints to it.
+    pub fn list_memory_edges(&self, memory_id: i64) -> Result<Vec<Edge>> {
+        self.list_edges(
+            "SELECT e.id, e.source_id, e.relation, e.target_id, e.created_at, e.metadata
+             FROM edges e
+             JOIN memory_entities source ON source.entity_id = e.source_id
+             JOIN memory_entities target ON target.entity_id = e.target_id
+             WHERE source.memory_id = ?1 AND target.memory_id = ?1
+             ORDER BY e.id",
+            memory_id,
+        )
     }
 
     pub fn entities_by_memory(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<Entity>>> {

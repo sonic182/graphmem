@@ -122,7 +122,7 @@ fn serves_memory_lifecycle_over_stdio() {
 
     let tools = mcp.request(2, "tools/list", json!({}));
     let listed_tools = tools["result"]["tools"].as_array().expect("tool list");
-    assert_eq!(listed_tools.len(), 9);
+    assert_eq!(listed_tools.len(), 10);
     assert!(
         listed_tools
             .iter()
@@ -144,6 +144,7 @@ fn serves_memory_lifecycle_over_stdio() {
             "forget",
             "graph",
             "inspect",
+            "list",
             "list_scopes",
             "recall",
             "relate",
@@ -1419,6 +1420,197 @@ fn recall_filters_by_memory_type() {
             .as_array()
             .expect("memories")
             .is_empty()
+    );
+
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn list_pages_newest_first_without_recording_accesses() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-list-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let tools = mcp.request(2, "tools/list", json!({}));
+    let list_tool = tools["result"]["tools"]
+        .as_array()
+        .and_then(|tools| tools.iter().find(|tool| tool["name"] == "list"))
+        .expect("list tool is listed");
+    assert!(!list_tool["inputSchema"].to_string().contains("\"$ref\""));
+
+    // Foreign scopes are read-only over MCP, so seed them through storage.
+    let scope_a = format!("repo:{}", home.join("project-a").display());
+    let scope_b = format!("repo:{}", home.join("project-b").display());
+    let mut database = Database::open(&home.join("memory.sqlite")).expect("database opens");
+    let mut ids = Vec::new();
+    for (content, memory_type, scope) in [
+        ("global one", "decision", "global"),
+        ("a one", "decision", scope_a.as_str()),
+        ("global two", "convention", "global"),
+        ("b one", "decision", scope_b.as_str()),
+        ("global three", "decision", "global"),
+    ] {
+        ids.push(
+            database
+                .remember_with_graph(content, memory_type, 0.5, &[scope.to_owned()], &[], &[])
+                .unwrap()
+                .id,
+        );
+    }
+    drop(database);
+
+    let call = |mcp: &mut Mcp, id: u64, arguments: Value| {
+        mcp.request(
+            id,
+            "tools/call",
+            json!({"name":"list","arguments":arguments}),
+        )
+    };
+    let contents = |response: &Value| -> Vec<String> {
+        response["result"]["structuredContent"]["memories"]
+            .as_array()
+            .expect("memories")
+            .iter()
+            .map(|memory| memory["content"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // Omitted scopes: the default scope (global here), newest first.
+    let default = call(&mut mcp, 10, json!({}));
+    assert_eq!(
+        contents(&default),
+        ["global three", "global two", "global one"]
+    );
+    let first = &default["result"]["structuredContent"]["memories"][0];
+    assert_eq!(first["id"], ids[4]);
+    assert_eq!(first["memory_type"], "decision");
+    assert_eq!(first["importance"], 0.5);
+    assert_eq!(first["scopes"], json!(["global"]));
+    assert!(first["updated_at"].is_i64());
+    assert!(default["result"]["structuredContent"]["next_offset"].is_null());
+
+    // Explicit scopes replace the selection but keep global.
+    let explicit = call(&mut mcp, 11, json!({"scopes":[scope_a]}));
+    assert_eq!(
+        contents(&explicit),
+        ["global three", "global two", "a one", "global one"]
+    );
+
+    // Paging follows next_offset until it is null.
+    let page_one = call(&mut mcp, 12, json!({"scopes":[scope_a],"limit":3}));
+    assert_eq!(contents(&page_one).len(), 3);
+    let next = page_one["result"]["structuredContent"]["next_offset"].clone();
+    assert_eq!(next, 3);
+    let page_two = call(
+        &mut mcp,
+        13,
+        json!({"scopes":[scope_a],"limit":3,"offset":next}),
+    );
+    assert_eq!(contents(&page_two), ["global one"]);
+    assert!(page_two["result"]["structuredContent"]["next_offset"].is_null());
+
+    let filtered = call(&mut mcp, 14, json!({"memory_type":"CONVENTION"}));
+    assert_eq!(contents(&filtered), ["global two"]);
+
+    for limit in [0, 101] {
+        let invalid = call(&mut mcp, 15, json!({"limit":limit}));
+        assert_eq!(invalid["result"]["isError"], true);
+    }
+
+    let database = Database::open(&home.join("memory.sqlite")).expect("database opens");
+    for id in ids {
+        let memory = database.get_memory(id).unwrap().unwrap();
+        assert_eq!(memory.access_count, 0);
+        assert_eq!(memory.last_accessed_at, None);
+    }
+    drop(database);
+    drop(mcp);
+    fs::remove_dir_all(home).expect("MCP test data is removed");
+}
+
+#[test]
+fn remembered_entities_and_relations_come_back_from_list_and_inspect() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is valid")
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!(
+        "graphmem-mcp-entities-test-{}-{nonce}",
+        std::process::id()
+    ));
+    let mut mcp = Mcp::start(&home);
+    mcp.request(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+    );
+    let stored = mcp.request(
+        2,
+        "tools/call",
+        json!({"name":"remember","arguments":{
+            "content":"billing talks to sqlite",
+            "scopes":["global"],
+            "entities":[{"kind":"module","name":"auth"}],
+            "relations":[{
+                "source":{"kind":"service","name":"billing-api"},
+                "relation":"depends_on",
+                "target":{"kind":"database","name":"sqlite"},
+                "metadata":"via rusqlite"
+            }]
+        }}),
+    );
+    let id = stored["result"]["structuredContent"]["id"].clone();
+    // A relation from another memory that touches only one of these entities
+    // must not show up here.
+    mcp.request(
+        3,
+        "tools/call",
+        json!({"name":"relate","arguments":{
+            "source":{"kind":"database","name":"sqlite"},
+            "relation":"uses",
+            "target":{"kind":"language","name":"c"}
+        }}),
+    );
+
+    let expected_entities = json!([
+        {"kind":"module","name":"auth"},
+        {"kind":"service","name":"billing-api"},
+        {"kind":"database","name":"sqlite"}
+    ]);
+    let inspected = mcp.request(
+        4,
+        "tools/call",
+        json!({"name":"inspect","arguments":{"id":id}}),
+    );
+    let inspected = &inspected["result"]["structuredContent"];
+    assert_eq!(inspected["content"], "billing talks to sqlite");
+    assert_eq!(inspected["scopes"], json!(["global"]));
+    assert_eq!(inspected["entities"], expected_entities);
+    assert_eq!(
+        inspected["relations"],
+        json!([{
+            "source":{"kind":"service","name":"billing-api"},
+            "relation":"depends_on",
+            "target":{"kind":"database","name":"sqlite"},
+            "metadata":"via rusqlite"
+        }])
+    );
+
+    let listed = mcp.request(5, "tools/call", json!({"name":"list","arguments":{}}));
+    assert_eq!(
+        listed["result"]["structuredContent"]["memories"][0]["entities"],
+        expected_entities
     );
 
     drop(mcp);

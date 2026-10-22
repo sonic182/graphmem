@@ -62,6 +62,8 @@ enum Command {
     List(ListArgs),
     Show(ShowArgs),
     Search(SearchArgs),
+    /// Count tokens with the active embedding model's tokenizer (local model files only).
+    Tokens(TokensArgs),
     Graph(GraphArgs),
     Forget {
         id: i64,
@@ -128,6 +130,25 @@ struct ListArgs {
     scopes: Vec<String>,
     #[arg(long, default_value_t = 50)]
     limit: usize,
+    /// Memories to skip, for paging.
+    #[arg(long, default_value_t = 0)]
+    offset: usize,
+}
+
+#[derive(Args)]
+struct TokensArgs {
+    /// Text to count; read from stdin when omitted.
+    #[arg(conflicts_with_all = ["id", "over_limit"])]
+    text: Option<String>,
+    /// Count a stored memory's content.
+    #[arg(long, conflicts_with = "over_limit")]
+    id: Option<i64>,
+    /// List the memories whose content exceeds the model's token limit.
+    #[arg(long)]
+    over_limit: bool,
+    /// Scopes for --id and --over-limit; global is always included.
+    #[arg(long = "scope")]
+    scopes: Vec<String>,
 }
 
 #[derive(Args)]
@@ -198,11 +219,32 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::List(args) => {
             let service = MemoryService::open_default(overrides)?;
-            print_memories(service.list_selected(&args.scopes, args.limit)?);
+            print_memories(service.list_page(&args.scopes, None, args.limit, args.offset)?);
         }
         Command::Show(args) => {
             let mut service = MemoryService::open_default(overrides)?;
             print_memory_details(service.inspect(args.id, Some(&args.scopes))?);
+        }
+        Command::Tokens(args) => {
+            let service = MemoryService::open_default(overrides)?;
+            let counter = service.token_counter()?;
+            let limit = counter
+                .limit()
+                .map_or_else(|| "-".to_owned(), |limit| limit.to_string());
+            if args.over_limit {
+                for (id, tokens) in service.memories_over_token_limit(&args.scopes)? {
+                    println!("{id}\t{tokens}\t{limit}");
+                }
+            } else if let Some(id) = args.id {
+                let details = service.show(id, Some(&args.scopes))?;
+                println!("{id}\t{}\t{limit}", counter.count(&details.memory.content)?);
+            } else {
+                let text = match args.text {
+                    Some(text) => text,
+                    None => std::io::read_to_string(std::io::stdin())?,
+                };
+                println!("{}\t{limit}", counter.count(&text)?);
+            }
         }
         Command::Search(args) => {
             let mut service = MemoryService::open_default(overrides)?;
@@ -384,6 +426,23 @@ fn print_memory_details(details: MemoryDetails) {
     println!("created_at: {}", details.memory.created_at);
     println!("updated_at: {}", details.memory.updated_at);
     println!("scopes: {scopes}");
+    let entities = details
+        .entities
+        .iter()
+        .map(|entity| format!("{}:{}", entity.kind, entity.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("entities: {entities}");
+    for relation in &details.relations {
+        println!(
+            "relation: {}:{} -{}-> {}:{}",
+            relation.source.kind,
+            relation.source.name,
+            relation.edge.relation,
+            relation.target.kind,
+            relation.target.name
+        );
+    }
     println!("content:\n{}", details.memory.content);
 }
 

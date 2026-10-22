@@ -61,7 +61,7 @@ Embeddings run locally through Candle, default `sentence-transformers/msmarco-Mi
 
 ## MCP interface
 
-Seven tools, kept small on purpose: `remember`, `recall`, `stats`, `relate`, `graph`, `inspect`, `forget`. The agent works with memory semantics, never with `create_node`/`query_sql`-style database operations. See [mcp.md](mcp.md) for the contract.
+Ten memory tools, kept small on purpose: `remember`, `recall`, `list`, `update`, `inspect`, `forget`, `stats`, `list_scopes`, `relate`, `graph`. The agent works with memory semantics, never with `create_node`/`query_sql`-style database operations. See [mcp.md](mcp.md) for the contract.
 
 ## CLI
 
@@ -70,7 +70,7 @@ Seven tools, kept small on purpose: `remember`, `recall`, `stats`, `relate`, `gr
 ```sh
 gmem remember "…"   gmem list   gmem show <id>   gmem search "…"
 gmem graph <kind> <name>   gmem forget <id>   gmem flush
-gmem scopes   gmem reembed   gmem doctor   gmem mcp
+gmem tokens   gmem scopes   gmem reembed   gmem doctor   gmem mcp
 ```
 
 See [cli.md](cli.md).
