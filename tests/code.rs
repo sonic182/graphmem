@@ -106,7 +106,7 @@ fn git(directory: &Path, args: &[&str]) {
 fn outlines_every_supported_language_with_nesting_and_ranges() {
     let sandbox = Sandbox::new("languages");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("22 indexed"), "{indexed}");
+    assert!(indexed.contains("23 indexed"), "{indexed}");
 
     let expectations: &[(&str, &[&str])] = &[
         (
@@ -241,15 +241,26 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "17-19\tfunction push",
                 "21-23\tfunction size",
                 "25-35\tfunction describe",
-                "40-40\ttype Db",
-                "41-41\ttype Trace",
-                "42-42\tfunction open_db",
-                "43-45\tstruct Header",
-                "44-44\t  field length",
-                "48-51\tstruct Page",
-                "49-49\t  field rows",
-                "50-50\t  field size",
-                "53-56\tfunction pattern",
+                "37-40\tstruct Page",
+                "38-38\t  field rows",
+                "39-39\t  field size",
+                "42-45\tfunction pattern",
+            ],
+        ),
+        (
+            "lib/native.agc",
+            &[
+                "\tagentica\tcomplete",
+                "1-1\timport std/list",
+                "3-3\treexport map",
+                "5-13\tnamespace libm",
+                "6-6\t  function cos",
+                "7-7\t  function pow",
+                "8-8\t  type Compare",
+                "9-9\t  type Handle",
+                "10-12\t  struct Timeval",
+                "11-11\t    field seconds",
+                "15-17\tfunction first",
             ],
         ),
         (
@@ -369,12 +380,13 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             .is_some_and(|symbol| symbol.ends_with(" p"))),
         "plain tags are not symbols:\n{heex}"
     );
-    let agentica = sandbox.run(&["code", "outline", "lib/queue.agc"]);
+    // Unlike an import, a re-export is found without `--kind`.
+    let reexport = sandbox.run(&["code", "find", "map"]);
     assert!(
-        !agentica
+        reexport
             .lines()
-            .any(|line| line.starts_with("37-37\t") || line.starts_with("39-")),
-        "re-exports and extern blocks define no name of their own:\n{agentica}"
+            .any(|line| line.starts_with("lib/native.agc:3-3\treexport map")),
+        "{reexport}"
     );
 }
 
@@ -525,6 +537,7 @@ fn imports_lists_declared_imports_across_supported_languages() {
         ("native/build.zig", "std"),
         ("lib/queue.agc", "std/list"),
         ("lib/queue.agc", "std/items"),
+        ("lib/native.agc", "std/list"),
         ("lisp/billing.rkt", "util.rkt"),
         ("app/service.py", "os"),
         ("app/service.py", "pathlib"),
@@ -828,7 +841,7 @@ fn non_utf8_filenames_do_not_abort_checkout_discovery() {
     )
     .expect("untracked non-UTF-8 filename is written");
     let indexed = sandbox.run(&["code", "index"]);
-    assert!(indexed.contains("22 indexed"), "{indexed}");
+    assert!(indexed.contains("23 indexed"), "{indexed}");
     assert_eq!(
         sandbox.run(&["code", "find", "load_config"]),
         "app/service.py:9-10\tfunction load_config\tdef load_config(path):\n"
@@ -870,7 +883,7 @@ fn find_refreshes_the_index_and_matches_definitions_by_last_segment() {
     assert_eq!(sandbox.run(&["code", "find", "deploy"]), "");
     let reindexed = sandbox.run(&["code", "index"]);
     assert!(
-        reindexed.contains("0 indexed, 21 unchanged, 0 removed, 1 skipped"),
+        reindexed.contains("0 indexed, 22 unchanged, 0 removed, 1 skipped"),
         "{reindexed}"
     );
 
