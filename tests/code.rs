@@ -252,7 +252,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             &[
                 "\tagentica\tcomplete",
                 "1-1\timport std/list",
-                "3-3\treexport map",
+                "3-3\treexport List.map",
                 "5-13\tnamespace libm",
                 "6-6\t  function cos",
                 "7-7\t  function pow",
@@ -381,13 +381,15 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
         "plain tags are not symbols:\n{heex}"
     );
     // Unlike an import, a re-export is found without `--kind`.
-    let reexport = sandbox.run(&["code", "find", "map"]);
-    assert!(
-        reexport
-            .lines()
-            .any(|line| line.starts_with("lib/native.agc:3-3\treexport map")),
-        "{reexport}"
-    );
+    for query in ["map", "List.map"] {
+        let reexport = sandbox.run(&["code", "find", query]);
+        assert!(
+            reexport
+                .lines()
+                .any(|line| line.starts_with("lib/native.agc:3-3\treexport List.map")),
+            "{query}: {reexport}"
+        );
+    }
 }
 
 #[test]

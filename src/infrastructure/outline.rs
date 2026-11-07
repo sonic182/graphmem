@@ -787,8 +787,13 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
                 .field("library")
                 .map(|library| (library.text().trim_matches('"').to_owned(), "namespace")),
             // `export List.map` re-exports a name of an imported file; it
-            // declares no import, so it is not an `import` symbol.
-            "reexport" => agentica_name(&node, "name", "reexport"),
+            // declares no import, so it is not an `import` symbol. The module
+            // stays in the name: `find` then ranks the definition of `map`
+            // first and `export A.map` differs from `export B.map`.
+            "reexport" => node
+                .field("module")
+                .zip(node.field("name"))
+                .map(|(module, name)| (format!("{}.{}", module.text(), name.text()), "reexport")),
             "import" => node
                 .field("path")
                 .map(|path| (path.text().trim_matches('"').to_owned(), "import")),

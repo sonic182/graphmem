@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Agentica `extern "lib"` blocks are a `namespace` named by the library, with
   their functions, `callback` and `resource` types and C structs nested under
-  it, and a re-export such as `export List.map` is listed as `reexport map`, so
-  `find_symbol` finds it. The code index is rebuilt once.
+  it, and a re-export such as `export List.map` is listed as
+  `reexport List.map`, so `find_symbol` finds it by `map` or `List.map`. The
+  code index is rebuilt once.
 
 ## [0.15.0] - 2026-11-07
 
