@@ -5019,9 +5019,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-agentica"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c1cad6af9607d4709f95183f1808347c28cb39f67d4dc23edf667fe98a6daa4"
+checksum = "089db28c12a173a1f2f27097eddd79cfc7ecb052030ce6683f6939a31b436933"
 dependencies = [
  "cc",
  "tree-sitter-language",

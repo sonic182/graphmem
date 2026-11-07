@@ -241,6 +241,15 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "17-19\tfunction push",
                 "21-23\tfunction size",
                 "25-35\tfunction describe",
+                "40-40\ttype Db",
+                "41-41\ttype Trace",
+                "42-42\tfunction open_db",
+                "43-45\tstruct Header",
+                "44-44\t  field length",
+                "48-51\tstruct Page",
+                "49-49\t  field rows",
+                "50-50\t  field size",
+                "53-56\tfunction pattern",
             ],
         ),
         (
@@ -359,6 +368,13 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             .nth(1)
             .is_some_and(|symbol| symbol.ends_with(" p"))),
         "plain tags are not symbols:\n{heex}"
+    );
+    let agentica = sandbox.run(&["code", "outline", "lib/queue.agc"]);
+    assert!(
+        !agentica
+            .lines()
+            .any(|line| line.starts_with("37-37\t") || line.starts_with("39-")),
+        "re-exports and extern blocks define no name of their own:\n{agentica}"
     );
 }
 
