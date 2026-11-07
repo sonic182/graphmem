@@ -34,17 +34,6 @@ def describe(shape: Shape, limit: Int = 1_000) -> String
   return label
 end
 
-export List.size
-
-extern "sqlite3"
-  resource Db, free: sqlite3_close
-  callback Trace(message: String) -> Int
-  export compute def open_db(path: String, out db: Db) -> Int = "sqlite3_open"
-  struct Header
-    length: Int
-  end
-end
-
 struct Page[T]
   rows: List[T]
   size: Int = 0xFF

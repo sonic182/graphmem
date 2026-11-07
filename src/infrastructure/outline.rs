@@ -769,18 +769,31 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     let root = grep.root();
     for node in root.dfs() {
         let symbol = match node.kind().as_ref() {
-            // `extern` members: a C struct is a `struct_definition`, and neither
-            // `extern_block` nor `reexport` defines a name of its own.
-            "function_definition" | "extern_function_definition" => {
-                agentica_name(&node, "name", "function")
-            }
-            "callback_definition" | "resource_definition" => agentica_name(&node, "name", "type"),
+            "function_definition" => agentica_name(&node, "name", "function"),
             "struct_definition" => agentica_name(&node, "name", "struct"),
             "enum_definition" => agentica_name(&node, "name", "enum"),
             "constant_definition" => agentica_name(&node, "name", "constant"),
             "type_alias_definition" => agentica_name(&node, "name", "type"),
             "enum_variant" => agentica_name(&node, "name", "enumMember"),
             "field_declaration" => agentica_name(&node, "name", "field"),
+            // The members of an `extern "lib"` block: C functions, and the
+            // function-pointer and pointer types they use. A C struct in the
+            // block is a plain `struct_definition`.
+            "extern_function_definition" => agentica_name(&node, "name", "function"),
+            "callback_definition" | "resource_definition" => agentica_name(&node, "name", "type"),
+            // The block is named by its library, so its members nest under it
+            // as functions nest under a C++ `namespace`.
+            "extern_block" => node
+                .field("library")
+                .map(|library| (library.text().trim_matches('"').to_owned(), "namespace")),
+            // `export List.map` re-exports a name of an imported file; it
+            // declares no import, so it is not an `import` symbol. The module
+            // stays in the name: `find` then ranks the definition of `map`
+            // first and `export A.map` differs from `export B.map`.
+            "reexport" => node
+                .field("module")
+                .zip(node.field("name"))
+                .map(|(module, name)| (format!("{}.{}", module.text(), name.text()), "reexport")),
             "import" => node
                 .field("path")
                 .map(|path| (path.text().trim_matches('"').to_owned(), "import")),
