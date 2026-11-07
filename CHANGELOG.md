@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tree-sitter-agentica` 0.4.0: `extern` blocks are indexed (C functions as
+  `function`, `callback` and `resource` as `type`, C structs as `struct`).
+  Files with type parameters, field defaults, regex literals, re-exports,
+  hex, binary or octal integers, or exponents parse completely. The code index
+  is rebuilt once.
+
 ## [0.14.0] - 2026-10-22
 
 ### Added

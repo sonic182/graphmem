@@ -769,7 +769,12 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
     let root = grep.root();
     for node in root.dfs() {
         let symbol = match node.kind().as_ref() {
-            "function_definition" => agentica_name(&node, "name", "function"),
+            // `extern` members: a C struct is a `struct_definition`, and neither
+            // `extern_block` nor `reexport` defines a name of its own.
+            "function_definition" | "extern_function_definition" => {
+                agentica_name(&node, "name", "function")
+            }
+            "callback_definition" | "resource_definition" => agentica_name(&node, "name", "type"),
             "struct_definition" => agentica_name(&node, "name", "struct"),
             "enum_definition" => agentica_name(&node, "name", "enum"),
             "constant_definition" => agentica_name(&node, "name", "constant"),
