@@ -369,6 +369,13 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
             .is_some_and(|symbol| symbol.ends_with(" p"))),
         "plain tags are not symbols:\n{heex}"
     );
+    let agentica = sandbox.run(&["code", "outline", "lib/queue.agc"]);
+    assert!(
+        !agentica
+            .lines()
+            .any(|line| line.starts_with("37-37\t") || line.starts_with("39-")),
+        "re-exports and extern blocks define no name of their own:\n{agentica}"
+    );
 }
 
 #[test]
