@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-11-08
+
 ### Changed
 
 - `tree-sitter-agentica` 0.5.0: `extern module "lib"` blocks (Agentica
@@ -403,7 +405,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.15.1...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.15.2...HEAD
+[0.15.2]: https://github.com/sonic182/graphmem/compare/0.15.1...0.15.2
 [0.15.1]: https://github.com/sonic182/graphmem/compare/0.15.0...0.15.1
 [0.15.0]: https://github.com/sonic182/graphmem/compare/0.14.0...0.15.0
 [0.14.0]: https://github.com/sonic182/graphmem/compare/0.13.0...0.14.0
