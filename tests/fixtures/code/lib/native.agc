@@ -15,3 +15,9 @@ end
 def first[T](items: List[T]) -> T
   return List.first(items)
 end
+
+extern module "sqlite"
+  export resource Db
+  def open(path: String) -> Result[Db]
+  export compute def save!(db: Db) -> Result[Void]
+end

@@ -261,6 +261,10 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "10-12\t  struct Timeval",
                 "11-11\t    field seconds",
                 "15-17\tfunction first",
+                "19-23\tnamespace sqlite",
+                "20-20\t  type Db",
+                "21-21\t  function open",
+                "22-22\t  function save!",
             ],
         ),
         (
