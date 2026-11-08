@@ -73,7 +73,8 @@ Rust, Go, Zig, C, C++, Python, JavaScript/JSX, TypeScript/TSX, Elixir/Phoenix
       C++, whose grammar also accepts nearly all C.
 - [x] Agentica via `tree-sitter-agentica` (MIT), with a syntax walk: `def`,
       `struct` and its fields, `enum` and its variants, module constants,
-      `type` aliases, and `import` paths.
+      `type` aliases, `import` paths, re-exports, and `extern "lib"` and
+      `extern module "lib"` blocks as a `namespace` named by the library.
 - [x] Zig via `tree-sitter-zig` 1.1.2 (MIT), with a syntax walk: functions,
       `const X = struct/enum/union/opaque/error{…}` containers, their
       fields, `@import`s, and `test "…"` blocks. Other constants are left out.
