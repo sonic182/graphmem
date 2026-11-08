@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tree-sitter-agentica` 0.5.0: `extern module "lib"` blocks (Agentica
+  0.26.0) are a `namespace` named by the library, with their functions and
+  `resource` types nested under it, like `extern "lib"` blocks. The code index
+  is rebuilt once.
+
 ## [0.15.1] - 2026-11-07
 
 ### Changed

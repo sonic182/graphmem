@@ -780,10 +780,13 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
             // function-pointer and pointer types they use. A C struct in the
             // block is a plain `struct_definition`.
             "extern_function_definition" => agentica_name(&node, "name", "function"),
-            "callback_definition" | "resource_definition" => agentica_name(&node, "name", "type"),
+            "callback_definition" | "resource_definition" | "module_resource_definition" => {
+                agentica_name(&node, "name", "type")
+            }
             // The block is named by its library, so its members nest under it
-            // as functions nest under a C++ `namespace`.
-            "extern_block" => node
+            // as functions nest under a C++ `namespace`. An `extern module`
+            // block holds native-module functions and resources the same way.
+            "extern_block" | "extern_module_block" => node
                 .field("library")
                 .map(|library| (library.text().trim_matches('"').to_owned(), "namespace")),
             // `export List.map` re-exports a name of an imported file; it
