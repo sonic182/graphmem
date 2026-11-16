@@ -776,6 +776,7 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
             "type_alias_definition" => agentica_name(&node, "name", "type"),
             "enum_variant" => agentica_name(&node, "name", "enumMember"),
             "field_declaration" => agentica_name(&node, "name", "field"),
+            "module_block" => agentica_name(&node, "name", "module"),
             // The members of an `extern "lib"` block: C functions, and the
             // function-pointer and pointer types they use, plus the functions
             // and `resource` types of an `extern module` block. A C struct in

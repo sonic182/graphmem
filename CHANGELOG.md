@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tree-sitter-agentica` 0.8.0: current Agentica files (`private` lines
+  instead of `export` declarations, raw `<<~EAG` heredocs) outline as
+  complete, and a `module Name ... end` block is a `module` holding its
+  members. The code index is rebuilt once.
+
 ## [0.15.2] - 2026-11-08
 
 ### Changed
