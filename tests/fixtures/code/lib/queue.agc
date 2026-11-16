@@ -48,11 +48,11 @@ end
 module Templates
   def page(title: String) -> String
     return <<~EAG + title
-      <h1>#{title}</h1>
+      <h1>#{ b: 1 } \q</h1>
     EAG
   end
 end
 
 private
 
-def limit_of() -> Int = LIMIT
+def limit_of(limit: Int = LIMIT) -> Int = limit

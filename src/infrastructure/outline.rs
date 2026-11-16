@@ -805,7 +805,13 @@ fn agentica(source: &str, symbols: &mut Vec<CodeSymbol>) -> bool {
             _ => None,
         };
         if let Some((name, kind)) = symbol {
-            symbols.push(node_symbol(&node, name, kind, Origin::default()));
+            let mut symbol = node_symbol(&node, name, kind, Origin::default());
+            // `def f(x: Int = 1) -> Int = x`: the signature stops before the body.
+            if let Some(value) = node.field("value") {
+                let head = &node.text()[..value.range().start - node.range().start];
+                symbol.signature = signature(head.trim_end().trim_end_matches('=').trim_end());
+            }
+            symbols.push(symbol);
         }
     }
     has_errors(&root)

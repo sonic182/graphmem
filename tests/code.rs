@@ -247,7 +247,8 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "42-45\tfunction pattern",
                 "48-54\tmodule Templates",
                 "49-53\t  function page",
-                "58-58\tfunction limit_of",
+                // A one-line body is not part of the signature; a default stays.
+                "58-58\tfunction limit_of\tdef limit_of(limit: Int = LIMIT) -> Int\n",
             ],
         ),
         (
