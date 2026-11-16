@@ -245,6 +245,9 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "38-38\t  field rows",
                 "39-39\t  field size",
                 "42-45\tfunction pattern",
+                "48-54\tmodule Templates",
+                "49-53\t  function page",
+                "58-58\tfunction limit_of",
             ],
         ),
         (

@@ -5,7 +5,7 @@ LIMIT = 10
 
 type Items = List[String]
 
-export struct QueueState
+struct QueueState
   items: Items
 end
 
@@ -14,7 +14,7 @@ enum Shape
   Empty
 end
 
-export def push(q: QueueState, value: String) -> QueueState
+def push(q: QueueState, value: String) -> QueueState
   return QueueState(items: List.append(q.items, value))
 end
 
@@ -43,3 +43,16 @@ def pattern[T](value: T) -> Regex
   scale = 1.5e-3
   return /queue\/[a-z]+/i
 end
+
+## Renders pages; `#{` in a raw heredoc stays text.
+module Templates
+  def page(title: String) -> String
+    return <<~EAG + title
+      <h1>#{title}</h1>
+    EAG
+  end
+end
+
+private
+
+def limit_of() -> Int = LIMIT
