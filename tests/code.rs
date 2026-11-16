@@ -231,7 +231,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "\tagentica\tcomplete",
                 "1-1\timport std/list",
                 "2-2\timport std/items",
-                "4-4\tconstant LIMIT",
+                "4-4\tconstant LIMIT\tLIMIT = 10\n",
                 "6-6\ttype Items",
                 "8-10\tstruct QueueState",
                 "9-9\t  field items",
