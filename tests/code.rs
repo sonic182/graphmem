@@ -231,7 +231,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "\tagentica\tcomplete",
                 "1-1\timport std/list",
                 "2-2\timport std/items",
-                "4-4\tconstant LIMIT",
+                "4-4\tconstant LIMIT\tLIMIT = 10\n",
                 "6-6\ttype Items",
                 "8-10\tstruct QueueState",
                 "9-9\t  field items",
@@ -247,7 +247,8 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "42-45\tfunction pattern",
                 "48-54\tmodule Templates",
                 "49-53\t  function page",
-                "58-58\tfunction limit_of",
+                // A one-line body is not part of the signature; a default stays.
+                "58-58\tfunction limit_of\tdef limit_of(limit: Int = LIMIT) -> Int\n",
             ],
         ),
         (

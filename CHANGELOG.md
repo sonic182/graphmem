@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-16
+
 ### Changed
 
 - `tree-sitter-agentica` 0.8.0: current Agentica files (`private` lines
   instead of `export` declarations, raw `<<~EAG` heredocs) outline as
   complete, and a `module Name ... end` block is a `module` holding its
-  members. The code index is rebuilt once.
+  members. The code index is rebuilt once. Files with the old `export`
+  declarations (before Agentica 0.31) now report a partial outline, though
+  their symbols are still listed.
+- The signature of a one-line Agentica `def f(x: Int = 1) -> Int = x` stops
+  before its body.
 
 ## [0.15.2] - 2026-11-08
 
@@ -412,7 +418,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.15.2...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.16.0...HEAD
+[0.16.0]: https://github.com/sonic182/graphmem/compare/0.15.2...0.16.0
 [0.15.2]: https://github.com/sonic182/graphmem/compare/0.15.1...0.15.2
 [0.15.1]: https://github.com/sonic182/graphmem/compare/0.15.0...0.15.1
 [0.15.0]: https://github.com/sonic182/graphmem/compare/0.14.0...0.15.0
