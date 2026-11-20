@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `tree-sitter-agentica` to 0.9.0. Agentica outlines now recognize
+  nested qualified type annotations, and the code index is rebuilt once.
+
 ## [0.16.0] - 2026-11-16
 
 ### Changed

@@ -249,6 +249,7 @@ fn outlines_every_supported_language_with_nesting_and_ranges() {
                 "49-53\t  function page",
                 // A one-line body is not part of the signature; a default stays.
                 "58-58\tfunction limit_of\tdef limit_of(limit: Int = LIMIT) -> Int\n",
+                "60-60\tfunction row_count\tdef row_count(rows: List[Storage.Tables.Row]) -> Int\n",
             ],
         ),
         (
