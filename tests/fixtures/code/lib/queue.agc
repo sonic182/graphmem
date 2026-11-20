@@ -56,3 +56,5 @@ end
 private
 
 def limit_of(limit: Int = LIMIT) -> Int = limit
+
+def row_count(rows: List[Storage.Tables.Row]) -> Int = List.size(rows)
