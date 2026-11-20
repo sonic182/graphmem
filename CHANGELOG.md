@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-20
+
 ### Changed
 
 - Updated `tree-sitter-agentica` to 0.9.0. Agentica outlines now recognize
@@ -423,7 +425,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions up to 0.1.1 predate this changelog; see the commit history for their
 contents.
 
-[unreleased]: https://github.com/sonic182/graphmem/compare/0.16.0...HEAD
+[unreleased]: https://github.com/sonic182/graphmem/compare/0.17.0...HEAD
+[0.17.0]: https://github.com/sonic182/graphmem/compare/0.16.0...0.17.0
 [0.16.0]: https://github.com/sonic182/graphmem/compare/0.15.2...0.16.0
 [0.15.2]: https://github.com/sonic182/graphmem/compare/0.15.1...0.15.2
 [0.15.1]: https://github.com/sonic182/graphmem/compare/0.15.0...0.15.1
